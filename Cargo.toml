@@ -1,0 +1,21 @@
+[package]
+name = "JujuTransfer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+inquire = "0.7.5"
+libsodium-sys-stable = "1.22.1"
+chrono = "0.4.38"
+num-bigint = "0.4.6"
+num-traits = "0.2.19"
+argon2 = "0.5.3"
+opaque-ke = { version = "3.0.0", features = ["ristretto255", "argon2"] }
+rand = "0.8.5"
+generic-array = "0.14.7"
+
+axum = "0.8.4"
+http = "1.3.1"
+serde = { version = "1.0.215", features = ["derive"] }
+tracing-subscriber = "0.3.20"
+tokio = { version = "1.47.1", features = ["full"] }
