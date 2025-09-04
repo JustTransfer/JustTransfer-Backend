@@ -156,9 +156,6 @@ impl Database {
             nonce_message,
             signature,
         });
-        
-        println!("User {} sent a message to {}", sender, receiver.username);
-        println!("Receiver now has {} messages", receiver.receive_messages.len());
 
         Ok(())
     }

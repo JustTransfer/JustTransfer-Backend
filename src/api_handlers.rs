@@ -1,5 +1,5 @@
 use crate::server::{DefaultCipherSuite, Server};
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::{State, Multipart}, http::StatusCode, Json};
 use opaque_ke::ClientRegistrationStartResult;
 use serde::{Deserialize, Serialize};
 
@@ -325,8 +325,6 @@ pub(crate) async fn message_send(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<SendMessage>,
 ) -> (StatusCode) {
-
-    println!("API Handler: Sending message from {} to {}", payload.sender, payload.receiver);
 
     let mut srv = srv.lock().unwrap();
     let send_result = srv.send_message(

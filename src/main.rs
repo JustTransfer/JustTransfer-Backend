@@ -11,9 +11,13 @@ use std::sync::{Arc, Mutex};
 use axum::{
     routing::{get, post},
     http::StatusCode,
-    Json, Router,
+    Json,
+    Router,
+    extract::{DefaultBodyLimit},
 };
 use serde::{Deserialize, Serialize};
+
+use consts::*;
 
 #[tokio::main]
 async fn main() {
@@ -41,6 +45,7 @@ async fn main() {
         .route("/pubkey/sign", get(api_handlers::get_pub_key_sign))
         .route("/message", get(api_handlers::message_get))
         .route("/message", post(api_handlers::message_send))
+        .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
         .with_state(srv.clone());
 
 

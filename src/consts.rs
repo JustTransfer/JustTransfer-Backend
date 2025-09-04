@@ -1,5 +1,9 @@
 use libsodium_sys::*;
 
+/// Const for Server
+pub(crate) const URL: &str = "http://localhost:3000";
+pub(crate) const MAX_BODY_SIZE: usize = 4294967296;
+
 
 /// Const for mac
 pub(crate) const MAC_LEN: usize = crypto_auth_BYTES as usize;
