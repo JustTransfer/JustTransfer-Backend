@@ -9,22 +9,22 @@ use std::sync::{Arc, Mutex};
 use crate::database::Message;
 
 // basic handler that responds with a static string
-pub(crate) async fn root() -> &'static str {
+pub async fn root() -> &'static str {
     "Welcome to the JujuTransfer!"
 }
 
 #[derive(Deserialize)]
-pub(crate) struct RegisterUserStart {
+pub struct RegisterUserStart {
     username: String,
     client_registration_start: RegistrationRequest<DefaultCipherSuite>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct RegisterUserStartResult {
+pub struct RegisterUserStartResult {
     result: RegistrationResponse<DefaultCipherSuite>,
 }
 
-pub(crate) async fn register_user_start(
+pub async fn register_user_start(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<RegisterUserStart>,
 ) -> (StatusCode, Json<RegisterUserStartResult>) {
@@ -44,7 +44,7 @@ pub(crate) async fn register_user_start(
 
 
 #[derive(Deserialize)]
-pub(crate) struct RegisterUserEnd {
+pub struct RegisterUserEnd {
     username: String,
     client_registration_finish: RegistrationUpload<DefaultCipherSuite>,
     cpriv_enc: Vec<u8>,                   // TODO const
@@ -55,7 +55,7 @@ pub(crate) struct RegisterUserEnd {
     pub_sign: [u8; 32],                   // TODO const
 }
 
-pub(crate) async fn register_user_end(
+pub async fn register_user_end(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<RegisterUserEnd>,
 ) -> (StatusCode) {
@@ -79,7 +79,7 @@ pub(crate) async fn register_user_end(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct RegisterUserEndUpdate {
+pub struct RegisterUserEndUpdate {
     username: String,
     mac: [u8; MAC_LEN],
     client_registration_finish: RegistrationUpload<DefaultCipherSuite>,
@@ -91,7 +91,7 @@ pub(crate) struct RegisterUserEndUpdate {
     pub_sign: [u8; 32],                   // TODO const
 }
 
-pub(crate) async fn register_user_end_update(
+pub async fn register_user_end_update(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> (StatusCode) {
@@ -116,18 +116,18 @@ pub(crate) async fn register_user_end_update(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct LoginStart {
+pub struct LoginStart {
     username: String,
     client_registration_start: CredentialRequest<DefaultCipherSuite>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct LoginStartResult {
+pub struct LoginStartResult {
     result: CredentialResponse<DefaultCipherSuite>,
     server_login: ServerLogin<DefaultCipherSuite>,
 }
 
-pub(crate) async fn login_user_start(
+pub async fn login_user_start(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<LoginStart>,
 ) -> (StatusCode, Json<LoginStartResult>) {
@@ -148,14 +148,14 @@ pub(crate) async fn login_user_start(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct LoginEnd {
+pub struct LoginEnd {
     username: String,
     server_login_start_result: ServerLogin<DefaultCipherSuite>,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
 }
 
 #[derive(Serialize)]
-pub(crate) struct LoginEndResult {
+pub struct LoginEndResult {
     pub_enc: [u8; ENC_KEY_LEN_PUB],
     cpriv_enc: Vec<u8>,
     nonce_priv_enc: [u8; SYM_LEN_NONCE],
@@ -164,7 +164,7 @@ pub(crate) struct LoginEndResult {
     nonce_priv_sign: [u8; SYM_LEN_NONCE]
 }
 
-pub(crate) async fn login_user_end(
+pub async fn login_user_end(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<LoginEnd>,
 ) -> (StatusCode, Json<LoginEndResult>) {
@@ -203,12 +203,12 @@ pub(crate) async fn login_user_end(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct Logout {
+pub struct Logout {
     username: String,
     mac: [u8; MAC_LEN],
 }
 
-pub(crate) async fn logout(State(srv): State<Arc<Mutex<Server>>>, Json(payload): Json<Logout>) -> (StatusCode) {
+pub async fn logout(State(srv): State<Arc<Mutex<Server>>>, Json(payload): Json<Logout>) -> (StatusCode) {
 
     let mut srv = srv.lock().unwrap();
 
@@ -221,18 +221,18 @@ pub(crate) async fn logout(State(srv): State<Arc<Mutex<Server>>>, Json(payload):
 }
 
 #[derive(Deserialize)]
-pub(crate) struct GetPubKeyEnc {
+pub struct GetPubKeyEnc {
     username: String,
     mac: [u8; MAC_LEN],
     user_pub_key: String,
 }
 
 #[derive(Serialize)]
-pub(crate) struct GetPubKeyEncResult {
+pub struct GetPubKeyEncResult {
     pub_enc: [u8; ENC_KEY_LEN_PUB],
 }
 
-pub(crate) async fn get_pub_key_enc(
+pub async fn get_pub_key_enc(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<GetPubKeyEnc>,
 ) -> (StatusCode, Json<GetPubKeyEncResult>) {
@@ -251,18 +251,18 @@ pub(crate) async fn get_pub_key_enc(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct GetPubKeySign {
+pub struct GetPubKeySign {
     username: String,
     mac: [u8; MAC_LEN],
     user_pub_key: String,
 }
 
 #[derive(Serialize)]
-pub(crate) struct GetPubKeySignResult {
+pub struct GetPubKeySignResult {
     pub_sign: [u8; SIGN_KEY_LEN_PUB],
 }
 
-pub(crate) async fn get_pub_key_sign(
+pub async fn get_pub_key_sign(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<GetPubKeySign>,
 ) -> (StatusCode, Json<GetPubKeySignResult>) {
@@ -281,17 +281,17 @@ pub(crate) async fn get_pub_key_sign(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct GetMessage {
+pub struct GetMessage {
     username: String,
     mac: [u8; MAC_LEN],
 }
 
 #[derive(Serialize)]
-pub(crate) struct GetMessageResult {
+pub struct GetMessageResult {
     messages: Vec<Message>,
 }
 
-pub(crate) async fn message_get(
+pub async fn message_get(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<GetMessage>,
 ) -> (StatusCode, Json<GetMessageResult>) {
@@ -310,7 +310,7 @@ pub(crate) async fn message_get(
 }
 
 #[derive(Deserialize)]
-pub(crate) struct SendMessage {
+pub struct SendMessage {
     mac: [u8; MAC_LEN],
     sender: String,
     receiver: String,
@@ -321,7 +321,7 @@ pub(crate) struct SendMessage {
     signature: Vec<u8>,
 }
 
-pub(crate) async fn message_send(
+pub async fn message_send(
     State(srv): State<Arc<Mutex<Server>>>,
     Json(payload): Json<SendMessage>,
 ) -> (StatusCode) {

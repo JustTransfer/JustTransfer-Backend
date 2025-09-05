@@ -1,9 +1,3 @@
-mod consts;
-mod database;
-mod server;
-mod api_handlers;
-
-use crate::server::Server;
 use inquire::{Select};
 use libsodium_sys::*;
 use std::sync::{Arc, Mutex};
@@ -15,9 +9,11 @@ use axum::{
     Router,
     extract::{DefaultBodyLimit},
 };
-use serde::{Deserialize, Serialize};
 
-use consts::*;
+use dotenvy::dotenv;
+use std::env;
+
+use JujuTransfer::*;
 
 #[tokio::main]
 async fn main() {
@@ -45,11 +41,11 @@ async fn main() {
         .route("/pubkey/sign", get(api_handlers::get_pub_key_sign))
         .route("/message", get(api_handlers::message_get))
         .route("/message", post(api_handlers::message_send))
-        .layer(DefaultBodyLimit::max(MAX_BODY_SIZE))
+        .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .with_state(srv.clone());
 
 
     // run our app with hyper, listening globally on port 3000
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind(consts::URL).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

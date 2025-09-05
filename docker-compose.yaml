@@ -1,0 +1,23 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: medusa_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: juju_transfer
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data_juju_transfer:/var/lib/postgresql/data
+    networks:
+      - network
+
+volumes:
+  postgres_data_juju_transfer:
+
+networks:
+  network:
+    driver: bridge
