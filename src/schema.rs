@@ -1,0 +1,33 @@
+// @generated automatically by Diesel CLI.
+
+diesel::table! {
+    messages (id) {
+        id -> Int4,
+        sender_id -> Int4,
+        receiver_id -> Int4,
+        filename -> Bytea,
+        nonce_filename -> Bytea,
+        message -> Bytea,
+        nonce_message -> Bytea,
+        signature -> Bytea,
+    }
+}
+
+diesel::table! {
+    users (id) {
+        id -> Int4,
+        username -> Text,
+        password_file -> Bytea,
+        public_key_enc -> Bytea,
+        nonce_enc -> Bytea,
+        cipher_private_key_enc -> Bytea,
+        public_key_sign -> Bytea,
+        nonce_sign -> Bytea,
+        cipher_private_key_sign -> Bytea,
+    }
+}
+
+diesel::allow_tables_to_appear_in_same_query!(
+    messages,
+    users,
+);

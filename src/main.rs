@@ -12,8 +12,13 @@ use axum::{
 
 use dotenvy::dotenv;
 use std::env;
+use diesel::PgConnection;
+use diesel::r2d2::{self, ConnectionManager};
+type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
+
 
 use JujuTransfer::*;
+use JujuTransfer::server::Server;
 
 #[tokio::main]
 async fn main() {
@@ -22,8 +27,20 @@ async fn main() {
         panic!("libsodium init failed");
     }
 
+    // initialize .env
+    dotenv().ok();
+    
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let manager = ConnectionManager::<PgConnection>::new(database_url);
+    let pool = r2d2::Pool::builder().build(manager).expect("Failed to create pool");
+
     //let mut srv = server::Server::new();
     let srv = Arc::new(Mutex::new(server::Server::new()));
+
+    let state = api_handlers::AppState {
+        srv: srv.clone(),
+        pool: pool.clone(),
+    };
 
     // initialize tracing
     tracing_subscriber::fmt::init();
@@ -42,7 +59,7 @@ async fn main() {
         .route("/message", get(api_handlers::message_get))
         .route("/message", post(api_handlers::message_send))
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
-        .with_state(srv.clone());
+        .with_state(state.clone());
 
 
     // run our app with hyper, listening globally on port 3000

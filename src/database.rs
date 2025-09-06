@@ -39,7 +39,6 @@ pub struct User {
     pub(crate) password_file: GenericArray<u8, ServerRegistrationLen<DefaultCipherSuite>>,
     pub(crate) asysm_key_encryption: AsysmKeyEnc,
     pub(crate) asysm_key_signing: AsysmKeySign,
-
     pub(crate) receive_messages: Vec<Message>,
 }
 

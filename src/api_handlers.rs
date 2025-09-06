@@ -2,11 +2,20 @@ use crate::server::{DefaultCipherSuite, Server};
 use axum::{extract::{State, Multipart}, http::StatusCode, Json};
 use opaque_ke::ClientRegistrationStartResult;
 use serde::{Deserialize, Serialize};
+use diesel::PgConnection;
+use diesel::r2d2::{self, ConnectionManager};
+type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 use crate::consts::{ENC_KEY_LEN_PUB, ENC_LEN_NONCE, MAC_LEN, SIGN_KEY_LEN_PUB, SYM_LEN_NONCE};
 use opaque_ke::*;
 use std::sync::{Arc, Mutex};
 use crate::database::Message;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub srv: Arc<Mutex<Server>>,
+    pub pool: DbPool,
+}
 
 // basic handler that responds with a static string
 pub async fn root() -> &'static str {
@@ -25,10 +34,10 @@ pub struct RegisterUserStartResult {
 }
 
 pub async fn register_user_start(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<RegisterUserStart>,
 ) -> (StatusCode, Json<RegisterUserStartResult>) {
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
 
     let server_registration_start_result = srv
         .server_registration_start(&*payload.username, payload.client_registration_start)
@@ -56,10 +65,10 @@ pub struct RegisterUserEnd {
 }
 
 pub async fn register_user_end(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<RegisterUserEnd>,
 ) -> (StatusCode) {
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
 
     let server_registration_finish = srv.server_registration_finish(
         payload.client_registration_finish,
@@ -70,6 +79,7 @@ pub async fn register_user_end(
         payload.cpriv_sign,
         payload.nonce_priv_sign,
         payload.pub_sign,
+        &state.pool
     );
 
     match server_registration_finish {
@@ -92,10 +102,10 @@ pub struct RegisterUserEndUpdate {
 }
 
 pub async fn register_user_end_update(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> (StatusCode) {
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
 
     let server_registration_finish = srv.server_registration_finish_update(
         payload.client_registration_finish,
@@ -128,10 +138,10 @@ pub struct LoginStartResult {
 }
 
 pub async fn login_user_start(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<LoginStart>,
 ) -> (StatusCode, Json<LoginStartResult>) {
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
 
     let server_login_start = srv.server_login_start(
         &*payload.username,
@@ -165,11 +175,11 @@ pub struct LoginEndResult {
 }
 
 pub async fn login_user_end(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<LoginEnd>,
 ) -> (StatusCode, Json<LoginEndResult>) {
 
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
 
     let server_login_finish = srv.server_login_finish(
         &*payload.username,
@@ -208,9 +218,9 @@ pub struct Logout {
     mac: [u8; MAC_LEN],
 }
 
-pub async fn logout(State(srv): State<Arc<Mutex<Server>>>, Json(payload): Json<Logout>) -> (StatusCode) {
+pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> (StatusCode) {
 
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
 
     let logout_result = srv.logout(&*payload.username, payload.mac);
 
@@ -233,11 +243,11 @@ pub struct GetPubKeyEncResult {
 }
 
 pub async fn get_pub_key_enc(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<GetPubKeyEnc>,
 ) -> (StatusCode, Json<GetPubKeyEncResult>) {
 
-    let srv = srv.lock().unwrap();
+    let srv = state.srv.lock().unwrap();
     let pub_enc = srv.get_pub_key_enc(&*payload.username, payload.mac, &*payload.user_pub_key);
 
     match pub_enc {
@@ -263,11 +273,11 @@ pub struct GetPubKeySignResult {
 }
 
 pub async fn get_pub_key_sign(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<GetPubKeySign>,
 ) -> (StatusCode, Json<GetPubKeySignResult>) {
 
-    let srv = srv.lock().unwrap();
+    let srv = state.srv.lock().unwrap();
     let pub_sign = srv.get_pub_key_sign(&*payload.username, payload.mac, &*payload.user_pub_key);
 
     match pub_sign {
@@ -292,11 +302,11 @@ pub struct GetMessageResult {
 }
 
 pub async fn message_get(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
 ) -> (StatusCode, Json<GetMessageResult>) {
 
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
     let messages = srv.get_messages(payload.mac, &*payload.username);
 
     match messages {
@@ -322,11 +332,11 @@ pub struct SendMessage {
 }
 
 pub async fn message_send(
-    State(srv): State<Arc<Mutex<Server>>>,
+    State(state): State<AppState>,
     Json(payload): Json<SendMessage>,
 ) -> (StatusCode) {
 
-    let mut srv = srv.lock().unwrap();
+    let mut srv = state.srv.lock().unwrap();
     let send_result = srv.send_message(
         payload.mac,
         &*payload.sender,
