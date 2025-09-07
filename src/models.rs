@@ -8,10 +8,12 @@ use crate::server::DefaultCipherSuite;
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::users)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(belongs_to(User, foreign_key = role))]
 pub struct User {
     pub id: i32,
     pub username: String,
     pub password_file: Vec<u8>,
+    pub role: String,
 
     pub public_key_enc: Vec<u8>,
     pub nonce_enc: Vec<u8>,
@@ -27,6 +29,7 @@ pub struct User {
 pub struct NewUser<'a> {
     pub username: &'a String,
     pub password_file: &'a Vec<u8>,
+    pub role: &'a String,
 
     pub public_key_enc: &'a Vec<u8>,
     pub nonce_enc: &'a Vec<u8>,
@@ -37,7 +40,7 @@ pub struct NewUser<'a> {
     pub cipher_private_key_sign: &'a Vec<u8>,
 }
 
-#[derive(Queryable, Selectable, Identifiable, Serialize)]
+#[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::messages)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(belongs_to(User, foreign_key = sender_id))]
@@ -50,7 +53,11 @@ pub struct Message {
     pub nonce_filename: Vec<u8>,
     pub message: Vec<u8>,
     pub nonce_message: Vec<u8>,
+    pub max_downloads: i32,
+    pub lifetime: i32,
+    pub creation_time: chrono::NaiveDateTime,
     pub signature: Vec<u8>,
+    pub number_downloads: i32,
 }
 
 #[derive(Insertable)]
@@ -74,4 +81,11 @@ pub struct MessageWithUsernames {
     pub message: Vec<u8>,
     pub nonce_message: Vec<u8>,
     pub signature: Vec<u8>,
+}
+
+#[derive(Queryable, Selectable)]
+#[diesel(table_name = crate::schema::roles)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct Role {
+    pub role: String,
 }

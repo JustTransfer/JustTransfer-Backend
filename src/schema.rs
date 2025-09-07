@@ -9,7 +9,17 @@ diesel::table! {
         nonce_filename -> Bytea,
         message -> Bytea,
         nonce_message -> Bytea,
+        max_downloads -> Int4,
+        lifetime -> Int4,
+        creation_time -> Timestamptz,
         signature -> Bytea,
+        number_downloads -> Int4,
+    }
+}
+
+diesel::table! {
+    roles (role) {
+        role -> Text,
     }
 }
 
@@ -18,6 +28,7 @@ diesel::table! {
         id -> Int4,
         username -> Text,
         password_file -> Bytea,
+        role -> Text,
         public_key_enc -> Bytea,
         nonce_enc -> Bytea,
         cipher_private_key_enc -> Bytea,
@@ -27,7 +38,10 @@ diesel::table! {
     }
 }
 
+diesel::joinable!(users -> roles (role));
+
 diesel::allow_tables_to_appear_in_same_query!(
     messages,
+    roles,
     users,
 );

@@ -23,6 +23,8 @@
 - Anonymous mode
 - Add a counter to max number of anonymous transfers
 - Add a counter to max number of transfers
+- OPAQUE save server state
+- Messages disappearing in the DB ??
 
 ## Big TODO
 - Make an HTTP REST API

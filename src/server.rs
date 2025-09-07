@@ -134,6 +134,7 @@ impl Server {
             let new_user = NewUser {
                 username: &username_param.to_string(),
                 password_file: &password_file_param.serialize().to_vec(),
+                role: &"user".to_string(),
                 public_key_enc: &pub_enc.to_vec(),
                 nonce_enc: &nonce_priv_enc.to_vec(),
                 cipher_private_key_enc: &cpriv_enc,

@@ -1,9 +1,16 @@
+-- Table roles
+CREATE TABLE roles
+(
+    role TEXT PRIMARY KEY
+);
+
 -- Table users
 CREATE TABLE users
 (
     id                      SERIAL PRIMARY KEY,
     username                TEXT  NOT NULL UNIQUE,
     password_file           BYTEA NOT NULL,
+    role                    TEXT  NOT NULL REFERENCES roles (role) ON DELETE RESTRICT,
 
     public_key_enc          BYTEA NOT NULL,
     nonce_enc               BYTEA NOT NULL,
@@ -25,5 +32,9 @@ CREATE TABLE messages
     nonce_filename BYTEA NOT NULL,
     message        BYTEA NOT NULL,
     nonce_message  BYTEA NOT NULL,
-    signature      BYTEA NOT NULL
+    max_downloads   INT  NOT NULL,
+    lifetime        INT  NOT NULL,
+    creation_time   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+    signature      BYTEA NOT NULL,
+    number_downloads  INT  DEFAULT 0 NOT NULL
 );
