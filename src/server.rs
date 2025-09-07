@@ -3,13 +3,12 @@ use num_bigint::BigUint;
 use std::time::{Instant, SystemTime};
 
 use crate::consts::*;
-use crate::database::{Database/*, Message*/};
 use argon2::Argon2;
 use opaque_ke::*;
 use rand::rngs::OsRng;
 use std::default::Default;
 use std::{io, result};
-
+use std::collections::HashMap;
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
@@ -19,6 +18,8 @@ use crate::schema::messages::dsl::*;
 use crate::schema::users::dsl::*;
 use crate::*;
 use diesel::prelude::*;
+use generic_array::GenericArray;
+use generic_array::typenum::U64;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -31,8 +32,8 @@ impl CipherSuite for DefaultCipherSuite {
 
 #[derive(Clone)]
 pub struct Server {
-    pub(crate) db: Database,
     server_opaque: ServerSetup<DefaultCipherSuite>,
+    connected_users: HashMap<String, GenericArray<u8, U64>>,
 }
 
 impl Server {
@@ -41,9 +42,48 @@ impl Server {
         let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
 
         Server {
-            db: Database::new(),
             server_opaque: server_setup,
+            connected_users: HashMap::new(),
         }
+    }
+
+    fn connect_user(&mut self, username_param: String, key_communication: GenericArray<u8, U64>) -> Result<(), Box<dyn std::error::Error>> {
+        self.connected_users.insert(username_param, key_communication);
+        Ok(())
+    }
+
+    fn get_connected_user(&self, username_param: &str) -> GenericArray<u8, U64> {
+        self.connected_users.get(username_param).cloned().unwrap_or(GenericArray::default())
+    }
+
+    fn disconnect_user(&mut self, username_param: &str) -> Result<(), Box<dyn std::error::Error>> {
+        self.connected_users.remove(username_param);
+
+        Ok(())
+    }
+
+    fn check_mac(
+        &self,
+        username_param: &str,
+        mac: [u8; MAC_LEN],
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let result = unsafe {
+            crypto_auth_verify(
+                mac.as_ptr(),
+                username_param.as_bytes().as_ptr(),
+                username_param.as_bytes().len() as u64,
+                self.get_connected_user(username_param).as_ptr(),
+            )
+        };
+
+        if result != 0 {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "MAC invalid",
+            )));
+        }
+
+        Ok(())
     }
 
     pub fn server_registration_start(
@@ -78,24 +118,6 @@ impl Server {
 
         let password_file_param =
             ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
-
-        // let password_file_bytes = password_file.serialize();
-
-        /*if self.db.get_user(&username).is_some() {
-            // Error if the user already exists
-            return Err(Box::new(io::Error::new(io::ErrorKind::Other, "User already exists")));
-        } else {
-            self.db.create_user(
-                username.parse().unwrap(),
-                password_file_bytes,
-                cpriv_enc,
-                nonce_priv_enc,
-                pub_enc,
-                cpriv_sign,
-                nonce_priv_sign,
-                pub_sign,
-            )?;
-        }*/
 
         let user: Option<User> = users::table
             .filter(users::username.eq(username_param))
@@ -154,12 +176,6 @@ impl Server {
         // Check if the user is connected using mac
         self.check_mac(&*username_param, mac).ok();
 
-        /*if self.db.get_user(&username_param).is_some() {
-            self.db.modify_user(
-                username_param.parse().unwrap(), password_file_bytes, cpriv1, nonce1, pub1, cpriv2, nonce2, pub2,
-            )?;
-        }*/
-
         let user_id = users::table
             .filter(users::username.eq(username_param))
             .select(users::id)
@@ -196,13 +212,6 @@ impl Server {
         ),
         Box<dyn std::error::Error>,
     > {
-        /*let password_file_bytes = self
-            .db
-            .get_user(&username_param)
-            .ok_or("User not found")?
-            .password_file
-            .clone();
-         */
 
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -270,19 +279,7 @@ impl Server {
             )));
         }
 
-        self.db
-            .connect_user(username_param.to_string(), key_communication)?;
-
-        /*let user = self.db.get_user(&*username_param).unwrap();
-
-        Ok((
-            user.asysm_key_encryption.public_key.clone(),
-            user.asysm_key_encryption.cipher_private_key.clone(),
-            user.asysm_key_encryption.nonce.clone(),
-            user.asysm_key_signing.public_key.clone(),
-            user.asysm_key_signing.cipher_private_key.clone(),
-            user.asysm_key_signing.nonce.clone(),
-        ))*/
+        self.connect_user(username_param.to_string(), key_communication)?;
 
         let user = users::table
             .filter(users::username.eq(username_param))
@@ -300,30 +297,6 @@ impl Server {
         ))
     }
 
-    fn check_mac(
-        &self,
-        username_param: &str,
-        mac: [u8; MAC_LEN],
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let result = unsafe {
-            crypto_auth_verify(
-                mac.as_ptr(),
-                username_param.as_bytes().as_ptr(),
-                username_param.as_bytes().len() as u64,
-                self.db.get_connected_user(username_param).as_ptr(),
-            )
-        };
-
-        if result != 0 {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::Other,
-                "MAC invalid",
-            )));
-        }
-
-        Ok(())
-    }
-
     pub fn logout(
         &mut self,
         username_param: &str,
@@ -332,7 +305,7 @@ impl Server {
         // Check if the user is connected using mac
         self.check_mac(username_param, mac)?;
 
-        self.db.disconnect_user(username_param)?;
+        self.disconnect_user(username_param)?;
 
         Ok(())
     }
@@ -350,11 +323,6 @@ impl Server {
 
         // Check if the user is connected using mac
         self.check_mac(username_param, mac).ok()?;
-
-        /*self.db
-            .get_user(username_pub_key)
-            .map(|u| u.asysm_key_encryption.public_key.clone())
-         */
 
         let user = crate::schema::users::table
             .filter(crate::schema::users::username.eq(username_pub_key))
@@ -378,11 +346,6 @@ impl Server {
 
         // Check if the user is connected using mac
         self.check_mac(username_param, mac).ok()?;
-
-        /*self.db
-            .get_user(username_pub_key)
-            .map(|u| u.asysm_key_signing.public_key.clone())
-         */
 
         let user = crate::schema::users::table
             .filter(crate::schema::users::username.eq(username_pub_key))
@@ -412,16 +375,6 @@ impl Server {
 
         // Check if the user is connected using mac
         self.check_mac(sender, mac)?;
-
-        /*self.db.send_message(
-            sender,
-            receiver,
-            filename_param,
-            nonce_filename_param,
-            message_param,
-            nonce_message_param,
-            signature_param,
-        )?;*/
 
         let sender = users::table
             .filter(users::username.eq(sender))
@@ -468,19 +421,11 @@ impl Server {
         // Check if the user is connected
         self.check_mac(username_param, mac)?;
 
-        /*let messages_get = self.db.get_messages(username_param)?;
-
-        // Make a copy of the messages
-        let copied_messages: Vec<Message> = messages_get.iter().cloned().collect();
-         */
-
         let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
 
         let messages_get = messages::table
-            //.inner_join(users.on(messages::receiver_id.eq(users::id)))
             .inner_join(sender.on(messages::sender_id.eq(sender.field(users::id))))
             .inner_join(receiver.on(messages::receiver_id.eq(receiver.field(users::id))))
-            //.filter(users::username.eq(username_param))
             .filter(receiver.field(users::username).eq(username_param))
             .select((
                 sender.field(users::username),

@@ -3,7 +3,6 @@ use generic_array::GenericArray;
 use opaque_ke::ServerRegistrationLen;
 use serde::Serialize;
 use crate::consts::*;
-use crate::database::{AsysmKeyEnc, AsysmKeySign};
 use crate::server::DefaultCipherSuite;
 
 #[derive(Queryable, Selectable, Identifiable)]
