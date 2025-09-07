@@ -9,7 +9,9 @@ type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 use crate::consts::{ENC_KEY_LEN_PUB, ENC_LEN_NONCE, MAC_LEN, SIGN_KEY_LEN_PUB, SYM_LEN_NONCE};
 use opaque_ke::*;
 use std::sync::{Arc, Mutex};
-use crate::database::Message;
+// use crate::database::Message;
+
+use crate::models::*;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -117,6 +119,7 @@ pub async fn register_user_end_update(
         payload.cpriv_sign,
         payload.nonce_priv_sign,
         payload.pub_sign,
+        &state.pool,
     );
 
     match server_registration_finish {
@@ -146,6 +149,7 @@ pub async fn login_user_start(
     let server_login_start = srv.server_login_start(
         &*payload.username,
         payload.client_registration_start,
+        &state.pool
     ).expect("Failed to start login");
 
     (
@@ -185,6 +189,7 @@ pub async fn login_user_end(
         &*payload.username,
         payload.server_login_start_result,
         payload.client_login_finish_result,
+        &state.pool
     );
 
     match server_login_finish {
@@ -248,7 +253,7 @@ pub async fn get_pub_key_enc(
 ) -> (StatusCode, Json<GetPubKeyEncResult>) {
 
     let srv = state.srv.lock().unwrap();
-    let pub_enc = srv.get_pub_key_enc(&*payload.username, payload.mac, &*payload.user_pub_key);
+    let pub_enc = srv.get_pub_key_enc(&*payload.username, payload.mac, &*payload.user_pub_key, &state.pool);
 
     match pub_enc {
         Some(pub_enc) => {
@@ -278,7 +283,7 @@ pub async fn get_pub_key_sign(
 ) -> (StatusCode, Json<GetPubKeySignResult>) {
 
     let srv = state.srv.lock().unwrap();
-    let pub_sign = srv.get_pub_key_sign(&*payload.username, payload.mac, &*payload.user_pub_key);
+    let pub_sign = srv.get_pub_key_sign(&*payload.username, payload.mac, &*payload.user_pub_key, &state.pool);
 
     match pub_sign {
         Some(pub_sign) => {
@@ -298,7 +303,7 @@ pub struct GetMessage {
 
 #[derive(Serialize)]
 pub struct GetMessageResult {
-    messages: Vec<Message>,
+    messages: Vec<MessageWithUsernames>,
 }
 
 pub async fn message_get(
@@ -307,7 +312,7 @@ pub async fn message_get(
 ) -> (StatusCode, Json<GetMessageResult>) {
 
     let mut srv = state.srv.lock().unwrap();
-    let messages = srv.get_messages(payload.mac, &*payload.username);
+    let messages = srv.get_messages(payload.mac, &*payload.username, &state.pool);
 
     match messages {
         Ok(messages) => {
@@ -346,6 +351,7 @@ pub async fn message_send(
         payload.message,
         payload.nonce_message,
         payload.signature,
+        &state.pool
     );
 
     match send_result {

@@ -22,7 +22,7 @@ pub struct AsysmKeySign {
     pub(crate) cipher_private_key: Vec<u8>,
 }
 
-#[derive(Clone)]
+/*#[derive(Clone)]
 #[derive(serde::Serialize)]
 pub struct Message {
     pub(crate) sender: String,
@@ -40,7 +40,7 @@ pub struct User {
     pub(crate) asysm_key_encryption: AsysmKeyEnc,
     pub(crate) asysm_key_signing: AsysmKeySign,
     pub(crate) receive_messages: Vec<Message>,
-}
+}*/
 
 pub struct ConnectedUser{
     pub(crate) username: String,
@@ -49,14 +49,14 @@ pub struct ConnectedUser{
 
 #[derive(Clone)]
 pub struct Database {
-    users: Vec<User>,
+    // users: Vec<User>,
     connected_users: HashMap<String, GenericArray<u8, U64>>,
 }
 
 impl Database {
     pub fn new() -> Self {
         Database {
-            users: Vec::new(),
+            // users: Vec::new(),
             connected_users: HashMap::new(),
         }
     }
@@ -77,7 +77,7 @@ impl Database {
         Ok(())
     }
 
-    pub fn create_user(
+    /*pub fn create_user(
         &mut self,
         username: String,
         password_file: GenericArray<u8, ServerRegistrationLen<DefaultCipherSuite>>,
@@ -162,5 +162,5 @@ impl Database {
     pub fn get_messages(&self, username: &str) -> Result<&Vec<Message>, Box<dyn std::error::Error>> {
         let user = self.get_user(username).ok_or("User not found")?;
         Ok(&user.receive_messages)
-    }
+    }*/
 }
