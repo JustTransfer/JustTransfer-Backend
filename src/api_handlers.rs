@@ -9,6 +9,8 @@ type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 use crate::consts::{ENC_KEY_LEN_PUB, ENC_LEN_NONCE, MAC_LEN, SIGN_KEY_LEN_PUB, SYM_LEN_NONCE};
 use opaque_ke::*;
 use std::sync::{Arc, Mutex};
+use generic_array::GenericArray;
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 
 use crate::models::*;
 
@@ -26,12 +28,12 @@ pub async fn root() -> &'static str {
 #[derive(Deserialize)]
 pub struct RegisterUserStart {
     username: String,
-    client_registration_start: RegistrationRequest<DefaultCipherSuite>,
+    client_registration_start: String,
 }
 
 #[derive(Serialize)]
 pub struct RegisterUserStartResult {
-    result: RegistrationResponse<DefaultCipherSuite>,
+    result: String,
 }
 
 pub async fn register_user_start(
@@ -40,14 +42,18 @@ pub async fn register_user_start(
 ) -> (StatusCode, Json<RegisterUserStartResult>) {
     let mut srv = state.srv.lock().unwrap();
 
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
+    let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
     let server_registration_start_result = srv
-        .server_registration_start(&*payload.username, payload.client_registration_start)
+        .server_registration_start(&*payload.username, req)
         .expect("Failed to start registration");
 
     (
         StatusCode::OK,
         Json(RegisterUserStartResult {
-            result: server_registration_start_result,
+            // result: base64::encode(server_registration_start_result.serialize()),
+            result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
         }),
     )
 }
@@ -56,7 +62,7 @@ pub async fn register_user_start(
 #[derive(Deserialize)]
 pub struct RegisterUserEnd {
     username: String,
-    client_registration_finish: RegistrationUpload<DefaultCipherSuite>,
+    client_registration_finish: String,
     cpriv_enc: Vec<u8>,                   // TODO const
     nonce_priv_enc: [u8; SYM_LEN_NONCE],  // TODO const
     pub_enc: [u8; 32],                    // TODO const
@@ -71,8 +77,11 @@ pub async fn register_user_end(
 ) -> (StatusCode) {
     let mut srv = state.srv.lock().unwrap();
 
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
+    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
     let server_registration_finish = srv.server_registration_finish(
-        payload.client_registration_finish,
+        req,
         &*payload.username,
         payload.cpriv_enc,
         payload.nonce_priv_enc,

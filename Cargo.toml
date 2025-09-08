@@ -23,3 +23,5 @@ serde_json = "1.0.143"
 
 dotenvy = "0.15"
 diesel = { version = "2.2.0", features = ["postgres", "r2d2", "chrono"] }
+tower-http = { version = "0.6.6", features = ["cors", "trace"] }
+base64 = "0.22.1"

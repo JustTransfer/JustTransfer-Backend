@@ -45,6 +45,9 @@ async fn main() {
     // initialize tracing
     tracing_subscriber::fmt::init();
 
+    use tower_http::cors::{CorsLayer, Any};
+    let cors = CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any);
+
     // build our application with a route
     let app = Router::new()
         .route("/", get(api_handlers::root))
@@ -58,8 +61,9 @@ async fn main() {
         .route("/pubkey/sign", get(api_handlers::get_pub_key_sign))
         .route("/message", get(api_handlers::message_get))
         .route("/message", post(api_handlers::message_send))
+        .with_state(state.clone())
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
-        .with_state(state.clone());
+        .layer(cors);
 
 
     // run our app with hyper, listening globally on port 3000

@@ -17,12 +17,12 @@
 - Support large files (not in memory)
 - Files in a bucket S3
 - Validate password strength
-- Validate username (email format and code transmitted by email)
+- Validate email (email format and code transmitted by email)
+- Add a username which is unique in the app (in addition to email)
 - Anonymous mode
-- Add a counter to max number of anonymous transfers
-- Add a counter to max number of transfers
+- Add a counter to max number of anonymous transfers (avoid server overload)
+- Add a counter to max number of transfers (avoid server overload)
 - OPAQUE save server state
-- Messages disappearing in the DB -> normal if user is deleted
 - Use TLD for the signatures (not just concatenate)
 - Add a key rotation option
 - Put public key of signature in the message
