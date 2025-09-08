@@ -6,7 +6,7 @@ edition = "2021"
 [dependencies]
 inquire = "0.7.5"
 libsodium-sys-stable = "1.22.3"
-chrono = "0.4.41"
+chrono = { version = "0.4.41", features = ["serde"] }
 num-bigint = "0.4.6"
 num-traits = "0.2.19"
 argon2 = "0.5.3"

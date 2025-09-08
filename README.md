@@ -14,23 +14,20 @@
 - Premium, no size limit, no time limit, etc.
 
 ## TODO
-- Figure out how to time should be used (expiration date, etc)
-- Max downloads number ? -> Yes
-- Problem with public keys discovery if sender is anonymous
-- Support large files
+- Support large files (not in memory)
+- Files in a bucket S3
 - Validate password strength
-- Validate username (email format ?)
+- Validate username (email format and code transmitted by email)
 - Anonymous mode
 - Add a counter to max number of anonymous transfers
 - Add a counter to max number of transfers
 - OPAQUE save server state
-- Messages disappearing in the DB ??
-
-## Big TODO
-- Make an HTTP REST API
-- Use a DB to store the data
-- Use a DB to store the files
-- Make a web interface
+- Messages disappearing in the DB -> normal if user is deleted
+- Use TLD for the signatures (not just concatenate)
+- Add a key rotation option
+- Put public key of signature in the message
+- Validate public key retrieved from the server (Authenticated Data in AEAD)
+- Add a delete account option
 
 ## Install Diesel
 ```bash

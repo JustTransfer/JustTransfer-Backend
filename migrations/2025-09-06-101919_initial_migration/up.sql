@@ -4,6 +4,12 @@ CREATE TABLE roles
     role TEXT PRIMARY KEY
 );
 
+-- Fill the roles table with initial data
+INSERT INTO roles (role)
+VALUES ('user'),
+       ('premium_user'),
+       ('admin');
+
 -- Table users
 CREATE TABLE users
 (
@@ -24,17 +30,17 @@ CREATE TABLE users
 -- Table messages
 CREATE TABLE messages
 (
-    id             SERIAL PRIMARY KEY,
-    sender_id      INT   NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    receiver_id    INT   NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    id               SERIAL PRIMARY KEY,
+    sender_id        INT           NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    receiver_id      INT           NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
-    filename       BYTEA NOT NULL,
-    nonce_filename BYTEA NOT NULL,
-    message        BYTEA NOT NULL,
-    nonce_message  BYTEA NOT NULL,
-    max_downloads   INT  NOT NULL,
-    lifetime        INT  NOT NULL,
-    creation_time   TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
-    signature      BYTEA NOT NULL,
-    number_downloads  INT  DEFAULT 0 NOT NULL
+    filename         BYTEA         NOT NULL,
+    nonce_filename   BYTEA         NOT NULL,
+    message          BYTEA         NOT NULL,
+    nonce_message    BYTEA         NOT NULL,
+    max_downloads    INT           NOT NULL,
+    lifetime         INT           NOT NULL,
+    creation_time    TIMESTAMPTZ   NOT NULL,
+    signature        BYTEA         NOT NULL,
+    number_downloads INT DEFAULT 0 NOT NULL
 );

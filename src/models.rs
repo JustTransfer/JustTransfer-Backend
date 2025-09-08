@@ -1,3 +1,4 @@
+use chrono::Utc;
 use diesel::prelude::*;
 use generic_array::GenericArray;
 use opaque_ke::ServerRegistrationLen;
@@ -55,7 +56,7 @@ pub struct Message {
     pub nonce_message: Vec<u8>,
     pub max_downloads: i32,
     pub lifetime: i32,
-    pub creation_time: chrono::NaiveDateTime,
+    pub creation_time: chrono::DateTime<Utc>,
     pub signature: Vec<u8>,
     pub number_downloads: i32,
 }
@@ -69,7 +70,11 @@ pub struct NewMessage<'a> {
     pub nonce_filename: &'a Vec<u8>,
     pub message: &'a Vec<u8>,
     pub nonce_message: &'a Vec<u8>,
+    pub max_downloads: &'a i32,
+    pub lifetime: &'a i32,
+    pub creation_time: &'a chrono::DateTime<Utc>,
     pub signature: &'a Vec<u8>,
+    pub number_downloads: &'a i32,
 }
 
 #[derive(Queryable, Serialize)]
@@ -80,6 +85,9 @@ pub struct MessageWithUsernames {
     pub nonce_filename: Vec<u8>,
     pub message: Vec<u8>,
     pub nonce_message: Vec<u8>,
+    pub max_downloads: i32,
+    pub lifetime: i32,
+    pub creation_time: chrono::DateTime<Utc>,
     pub signature: Vec<u8>,
 }
 

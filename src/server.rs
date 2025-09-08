@@ -9,8 +9,10 @@ use rand::rngs::OsRng;
 use std::default::Default;
 use std::{io, result};
 use std::collections::HashMap;
+use chrono::{Duration, Utc};
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
+use diesel::dsl::{sql, now as sql_now};
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 use crate::models::*;
@@ -18,6 +20,7 @@ use crate::schema::messages::dsl::*;
 use crate::schema::users::dsl::*;
 use crate::*;
 use diesel::prelude::*;
+use diesel::sql_types::Timestamptz;
 use generic_array::GenericArray;
 use generic_array::typenum::U64;
 
@@ -366,6 +369,9 @@ impl Server {
         nonce_filename_param: [u8; ENC_LEN_NONCE],
         message_param: Vec<u8>,
         nonce_message_param: [u8; ENC_LEN_NONCE],
+        max_downloads_param: i32,
+        lifetime_param: i32,
+        creation_time_param: chrono::DateTime<Utc>,
         signature_param: Vec<u8>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -376,6 +382,23 @@ impl Server {
 
         // Check if the user is connected using mac
         self.check_mac(sender, mac)?;
+
+        // Check if the creation time is correct
+        let now = Utc::now();
+        if creation_time_param > now + Duration::minutes(MAX_TIME_MARGIN) || creation_time_param < now - Duration::minutes(MAX_TIME_MARGIN) {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "Creation time is not correct",
+            )));
+        }
+
+        // Check if the lifetime is correct
+        if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_TRANSFER {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "Lifetime is not correct",
+            )));
+        }
 
         let sender = users::table
             .filter(users::username.eq(sender))
@@ -396,7 +419,11 @@ impl Server {
             nonce_filename: &nonce_filename_param.to_vec(),
             message: &message_param,
             nonce_message: &nonce_message_param.to_vec(),
+            max_downloads: &max_downloads_param,
+            lifetime: &lifetime_param,
+            creation_time: &creation_time_param,
             signature: &signature_param,
+            number_downloads: &0,
         };
 
         diesel::insert_into(messages::table)
@@ -422,6 +449,23 @@ impl Server {
         // Check if the user is connected
         self.check_mac(username_param, mac)?;
 
+        // Delete the messages that have reached max downloads
+        let num_deleted_max_downloads = diesel::delete(messages.filter(number_downloads.ge(max_downloads)))
+            .execute(&mut conn)
+            .expect("Error deleting posts");
+
+        // Delete the messages that have expired
+        let expiry = sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')");
+        let num_deleted_lifetime = diesel::delete(messages.filter(expiry.le(sql_now)))
+            .execute(&mut conn)
+            .expect("Error deleting posts");
+
+        // Increment the number of downloads
+        let num_updated = diesel::update(messages)
+            .set(number_downloads.eq(number_downloads + 1))
+            .execute(&mut conn)
+            .expect("Error updating posts");
+
         let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
 
         let messages_get = messages::table
@@ -435,6 +479,9 @@ impl Server {
                 messages::nonce_filename,
                 messages::message,
                 messages::nonce_message,
+                messages::max_downloads,
+                messages::lifetime,
+                messages::creation_time,
                 messages::signature,
             ))
             .load::<MessageWithUsernames>(&mut conn)

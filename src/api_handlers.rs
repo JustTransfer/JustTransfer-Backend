@@ -9,7 +9,6 @@ type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 use crate::consts::{ENC_KEY_LEN_PUB, ENC_LEN_NONCE, MAC_LEN, SIGN_KEY_LEN_PUB, SYM_LEN_NONCE};
 use opaque_ke::*;
 use std::sync::{Arc, Mutex};
-// use crate::database::Message;
 
 use crate::models::*;
 
@@ -333,6 +332,9 @@ pub struct SendMessage {
     nonce_filename: [u8; ENC_LEN_NONCE],
     message: Vec<u8>,
     nonce_message: [u8; ENC_LEN_NONCE],
+    max_downloads: i32,
+    lifetime: i32,
+    creation_time: chrono::DateTime<chrono::Utc>,
     signature: Vec<u8>,
 }
 
@@ -350,6 +352,9 @@ pub async fn message_send(
         payload.nonce_filename,
         payload.message,
         payload.nonce_message,
+        payload.max_downloads,
+        payload.lifetime,
+        payload.creation_time,
         payload.signature,
         &state.pool
     );
