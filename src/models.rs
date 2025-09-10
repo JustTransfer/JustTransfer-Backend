@@ -90,6 +90,23 @@ pub struct MessageWithUsernames {
     pub lifetime: i32,
     pub creation_time: chrono::DateTime<Utc>,
     pub signature: Vec<u8>,
+    pub number_downloads: i32,
+}
+
+#[derive(Queryable, Serialize)]
+pub struct MessageWithUsernamesEncoded {
+    pub id: i32,
+    pub sender: String,
+    pub receiver: String,
+    pub filename: String,
+    pub nonce_filename: String,
+    pub message: String,
+    pub nonce_message: String,
+    pub max_downloads: i32,
+    pub lifetime: i32,
+    pub creation_time: chrono::DateTime<Utc>,
+    pub signature: String,
+    pub number_downloads: i32,
 }
 
 #[derive(Queryable, Selectable)]

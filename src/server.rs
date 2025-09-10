@@ -485,6 +485,7 @@ impl Server {
                 messages::lifetime,
                 messages::creation_time,
                 messages::signature,
+                messages::number_downloads,
             ))
             .load::<MessageWithUsernames>(&mut conn)
             .optional()?

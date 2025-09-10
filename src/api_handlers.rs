@@ -342,7 +342,7 @@ pub struct GetMessage {
 
 #[derive(Serialize)]
 pub struct GetMessageResult {
-    messages: Vec<MessageWithUsernames>,
+    messages: Vec<MessageWithUsernamesEncoded>,
 }
 
 pub async fn message_get(
@@ -355,9 +355,33 @@ pub async fn message_get(
 
     let messages = srv.get_messages(mac_bytes, &*payload.username, &state.pool);
 
-    match messages {
-        Ok(messages) => {
-            (StatusCode::OK, Json(GetMessageResult { messages }))
+    // Convert the fields of each messages to base64
+    let messages_encoded = match messages {
+        Ok(msgs) => {
+            let msgs_encoded: Vec<MessageWithUsernamesEncoded> = msgs.into_iter().map(|m| {
+                MessageWithUsernamesEncoded {
+                    id: m.id,
+                    sender: m.sender,
+                    receiver: m.receiver,
+                    filename: URL_SAFE_NO_PAD.encode(m.filename),
+                    nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
+                    message: URL_SAFE_NO_PAD.encode(m.message),
+                    nonce_message: URL_SAFE_NO_PAD.encode(m.nonce_message),
+                    max_downloads: m.max_downloads,
+                    lifetime: m.lifetime,
+                    creation_time: m.creation_time,
+                    signature: URL_SAFE_NO_PAD.encode(m.signature),
+                    number_downloads: m.number_downloads,
+                }
+            }).collect();
+            Ok(msgs_encoded)
+        }
+        Err(e) => Err(e),
+    };
+
+    match messages_encoded {
+        Ok(messages_encoded) => {
+            (StatusCode::OK, Json(GetMessageResult { messages: messages_encoded }))
         }
         Err(_) => {
             (StatusCode::NO_CONTENT, Json(GetMessageResult { messages: vec![] }))
@@ -389,9 +413,9 @@ pub async fn message_send(
 
     let mac = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
     let filename = URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed");
-    let nonce_filename_bytes = URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed");
+    let nonce_filename = URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed");
     let message = URL_SAFE_NO_PAD.decode(&payload.message).expect("Base64 decode failed");
-    let nonce_message_bytes = URL_SAFE_NO_PAD.decode(&payload.nonce_message).expect("Base64 decode failed");
+    let nonce_message = URL_SAFE_NO_PAD.decode(&payload.nonce_message).expect("Base64 decode failed");
     let signature = URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed");
 
     let send_result = srv.send_message(
@@ -399,9 +423,9 @@ pub async fn message_send(
         &*payload.sender,
         &*payload.receiver,
         filename,
-        nonce_filename_bytes,
+        nonce_filename,
         message,
-        nonce_message_bytes,
+        nonce_message,
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,
