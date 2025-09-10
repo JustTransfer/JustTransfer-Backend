@@ -79,6 +79,7 @@ pub struct NewMessage<'a> {
 
 #[derive(Queryable, Serialize)]
 pub struct MessageWithUsernames {
+    pub id: i32,
     pub sender: String,
     pub receiver: String,
     pub filename: Vec<u8>,

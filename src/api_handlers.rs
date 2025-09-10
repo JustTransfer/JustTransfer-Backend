@@ -63,12 +63,12 @@ pub async fn register_user_start(
 pub struct RegisterUserEnd {
     username: String,
     client_registration_finish: String,
-    cpriv_enc: Vec<u8>,                   // TODO const
-    nonce_priv_enc: [u8; SYM_LEN_NONCE],  // TODO const
-    pub_enc: [u8; 32],                    // TODO const
-    cpriv_sign: Vec<u8>,                  // TODO const
-    nonce_priv_sign: [u8; SYM_LEN_NONCE], // TODO const
-    pub_sign: [u8; 32],                   // TODO const
+    cpriv_enc: String,
+    nonce_priv_enc: String,
+    pub_enc: String,
+    cpriv_sign: String,
+    nonce_priv_sign: String,
+    pub_sign: String,
 }
 
 pub async fn register_user_end(
@@ -80,15 +80,25 @@ pub async fn register_user_end(
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
     let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
 
+    // Decode the base64 encoded keys
+    let cpriv_enc = URL_SAFE_NO_PAD.decode(&payload.cpriv_enc).expect("Base64 decode failed");
+    let nonce_priv_enc = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_enc).expect("Base64 decode failed");
+    let pub_enc = URL_SAFE_NO_PAD.decode(&payload.pub_enc).expect("Base64 decode failed");
+
+    let cpriv_sign = URL_SAFE_NO_PAD.decode(&payload.cpriv_sign).expect("Base64 decode failed");
+    let nonce_priv_sign = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_sign).expect("Base64 decode failed");
+    let pub_sign = URL_SAFE_NO_PAD.decode(&payload.pub_sign).expect("Base64 decode failed");
+
+
     let server_registration_finish = srv.server_registration_finish(
         req,
         &*payload.username,
-        payload.cpriv_enc,
-        payload.nonce_priv_enc,
-        payload.pub_enc,
-        payload.cpriv_sign,
-        payload.nonce_priv_sign,
-        payload.pub_sign,
+        cpriv_enc,
+        nonce_priv_enc,
+        pub_enc,
+        cpriv_sign,
+        nonce_priv_sign,
+        pub_sign,
         &state.pool
     );
 
@@ -139,13 +149,14 @@ pub async fn register_user_end_update(
 #[derive(Deserialize)]
 pub struct LoginStart {
     username: String,
-    client_registration_start: CredentialRequest<DefaultCipherSuite>,
+    // client_registration_start: CredentialRequest<DefaultCipherSuite>,
+    client_registration_start: String
 }
 
 #[derive(Serialize)]
 pub struct LoginStartResult {
-    result: CredentialResponse<DefaultCipherSuite>,
-    server_login: ServerLogin<DefaultCipherSuite>,
+    // result: CredentialResponse<DefaultCipherSuite>,
+    result: String,
 }
 
 pub async fn login_user_start(
@@ -154,17 +165,19 @@ pub async fn login_user_start(
 ) -> (StatusCode, Json<LoginStartResult>) {
     let mut srv = state.srv.lock().unwrap();
 
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
+    let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
     let server_login_start = srv.server_login_start(
         &*payload.username,
-        payload.client_registration_start,
+        req,
         &state.pool
     ).expect("Failed to start login");
 
     (
         StatusCode::OK,
         Json(LoginStartResult {
-            result: server_login_start.0,
-            server_login: server_login_start.1,
+            result: URL_SAFE_NO_PAD.encode(server_login_start.serialize()),
         }),
     )
 }
@@ -172,18 +185,18 @@ pub async fn login_user_start(
 #[derive(Deserialize)]
 pub struct LoginEnd {
     username: String,
-    server_login_start_result: ServerLogin<DefaultCipherSuite>,
-    client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
+    // client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
+    client_login_finish_result: String
 }
 
 #[derive(Serialize)]
 pub struct LoginEndResult {
-    pub_enc: [u8; ENC_KEY_LEN_PUB],
-    cpriv_enc: Vec<u8>,
-    nonce_priv_enc: [u8; SYM_LEN_NONCE],
-    pub_sign: [u8; SIGN_KEY_LEN_PUB],
-    cpriv_sign: Vec<u8>,
-    nonce_priv_sign: [u8; SYM_LEN_NONCE]
+    pub_enc: String,
+    cpriv_enc: String,
+    nonce_priv_enc: String,
+    pub_sign: String,
+    cpriv_sign: String,
+    nonce_priv_sign: String,
 }
 
 pub async fn login_user_end(
@@ -193,15 +206,26 @@ pub async fn login_user_end(
 
     let mut srv = state.srv.lock().unwrap();
 
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
+    let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
     let server_login_finish = srv.server_login_finish(
         &*payload.username,
-        payload.server_login_start_result,
-        payload.client_login_finish_result,
+        req,
         &state.pool
     );
 
     match server_login_finish {
         Ok((pub_enc, cpriv_enc, nonce_priv_enc, pub_sign, cpriv_sign, nonce_priv_sign)) => {
+
+            // Encode the keys to base64
+            let pub_enc = URL_SAFE_NO_PAD.encode(pub_enc);
+            let cpriv_enc = URL_SAFE_NO_PAD.encode(cpriv_enc);
+            let nonce_priv_enc = URL_SAFE_NO_PAD.encode(nonce_priv_enc);
+            let pub_sign = URL_SAFE_NO_PAD.encode(pub_sign);
+            let cpriv_sign = URL_SAFE_NO_PAD.encode(cpriv_sign);
+            let nonce_priv_sign = URL_SAFE_NO_PAD.encode(nonce_priv_sign);
+
             (StatusCode::OK, Json(LoginEndResult {
                 pub_enc,
                 cpriv_enc,
@@ -214,12 +238,12 @@ pub async fn login_user_end(
         Err(_) => (
             StatusCode::BAD_REQUEST,
             Json(LoginEndResult {
-                pub_enc: [0u8; ENC_KEY_LEN_PUB],
-                cpriv_enc: vec![],
-                nonce_priv_enc: [0u8; SYM_LEN_NONCE],
-                pub_sign: [0u8; SIGN_KEY_LEN_PUB],
-                cpriv_sign: vec![],
-                nonce_priv_sign: [0u8; SYM_LEN_NONCE],
+                pub_enc: "".to_string(),
+                cpriv_enc: "".to_string(),
+                nonce_priv_enc: "".to_string(),
+                pub_sign: "".to_string(),
+                cpriv_sign: "".to_string(),
+                nonce_priv_sign: "".to_string(),
             }),
         ),
     }
@@ -228,14 +252,17 @@ pub async fn login_user_end(
 #[derive(Deserialize)]
 pub struct Logout {
     username: String,
-    mac: [u8; MAC_LEN],
+    // mac: [u8; MAC_LEN],
+    mac: String,
 }
 
 pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> (StatusCode) {
 
     let mut srv = state.srv.lock().unwrap();
 
-    let logout_result = srv.logout(&*payload.username, payload.mac);
+    let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+
+    let logout_result = srv.logout(&*payload.username, mac_bytes);
 
     match logout_result {
         Ok(_) => (StatusCode::OK),
@@ -246,13 +273,13 @@ pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) 
 #[derive(Deserialize)]
 pub struct GetPubKeyEnc {
     username: String,
-    mac: [u8; MAC_LEN],
+    mac: String,
     user_pub_key: String,
 }
 
 #[derive(Serialize)]
 pub struct GetPubKeyEncResult {
-    pub_enc: [u8; ENC_KEY_LEN_PUB],
+    pub_enc: String,
 }
 
 pub async fn get_pub_key_enc(
@@ -261,14 +288,16 @@ pub async fn get_pub_key_enc(
 ) -> (StatusCode, Json<GetPubKeyEncResult>) {
 
     let srv = state.srv.lock().unwrap();
-    let pub_enc = srv.get_pub_key_enc(&*payload.username, payload.mac, &*payload.user_pub_key, &state.pool);
+
+    let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+    let pub_enc = srv.get_pub_key_enc(&*payload.username, mac_bytes, &*payload.user_pub_key, &state.pool);
 
     match pub_enc {
         Some(pub_enc) => {
-            (StatusCode::OK, Json(GetPubKeyEncResult { pub_enc }))
+            (StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) }))
         }
         None => {
-            (StatusCode::NO_CONTENT, Json(GetPubKeyEncResult { pub_enc: [0u8; ENC_KEY_LEN_PUB] }))
+            (StatusCode::NO_CONTENT, Json(GetPubKeyEncResult { pub_enc: "".to_string() }))
         }
     }
 }
@@ -276,13 +305,13 @@ pub async fn get_pub_key_enc(
 #[derive(Deserialize)]
 pub struct GetPubKeySign {
     username: String,
-    mac: [u8; MAC_LEN],
+    mac: String,
     user_pub_key: String,
 }
 
 #[derive(Serialize)]
 pub struct GetPubKeySignResult {
-    pub_sign: [u8; SIGN_KEY_LEN_PUB],
+    pub_sign: String,
 }
 
 pub async fn get_pub_key_sign(
@@ -291,14 +320,16 @@ pub async fn get_pub_key_sign(
 ) -> (StatusCode, Json<GetPubKeySignResult>) {
 
     let srv = state.srv.lock().unwrap();
-    let pub_sign = srv.get_pub_key_sign(&*payload.username, payload.mac, &*payload.user_pub_key, &state.pool);
+
+    let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+    let pub_sign = srv.get_pub_key_sign(&*payload.username, mac_bytes, &*payload.user_pub_key, &state.pool);
 
     match pub_sign {
         Some(pub_sign) => {
-            (StatusCode::OK, Json(GetPubKeySignResult { pub_sign }))
+            (StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) }))
         }
         None => {
-            (StatusCode::NO_CONTENT, Json(GetPubKeySignResult { pub_sign: [0u8; SIGN_KEY_LEN_PUB] }))
+            (StatusCode::NO_CONTENT, Json(GetPubKeySignResult { pub_sign: "".to_string() }))
         }
     }
 }
@@ -306,7 +337,7 @@ pub async fn get_pub_key_sign(
 #[derive(Deserialize)]
 pub struct GetMessage {
     username: String,
-    mac: [u8; MAC_LEN],
+    mac: String,
 }
 
 #[derive(Serialize)]
@@ -320,7 +351,9 @@ pub async fn message_get(
 ) -> (StatusCode, Json<GetMessageResult>) {
 
     let mut srv = state.srv.lock().unwrap();
-    let messages = srv.get_messages(payload.mac, &*payload.username, &state.pool);
+    let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+
+    let messages = srv.get_messages(mac_bytes, &*payload.username, &state.pool);
 
     match messages {
         Ok(messages) => {
@@ -334,17 +367,17 @@ pub async fn message_get(
 
 #[derive(Deserialize)]
 pub struct SendMessage {
-    mac: [u8; MAC_LEN],
+    mac: String,
     sender: String,
     receiver: String,
-    filename: Vec<u8>,
-    nonce_filename: [u8; ENC_LEN_NONCE],
-    message: Vec<u8>,
-    nonce_message: [u8; ENC_LEN_NONCE],
+    filename: String,
+    nonce_filename: String,
+    message: String,
+    nonce_message: String,
     max_downloads: i32,
     lifetime: i32,
     creation_time: chrono::DateTime<chrono::Utc>,
-    signature: Vec<u8>,
+    signature: String,
 }
 
 pub async fn message_send(
@@ -353,18 +386,26 @@ pub async fn message_send(
 ) -> (StatusCode) {
 
     let mut srv = state.srv.lock().unwrap();
+
+    let mac = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+    let filename = URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed");
+    let nonce_filename_bytes = URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed");
+    let message = URL_SAFE_NO_PAD.decode(&payload.message).expect("Base64 decode failed");
+    let nonce_message_bytes = URL_SAFE_NO_PAD.decode(&payload.nonce_message).expect("Base64 decode failed");
+    let signature = URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed");
+
     let send_result = srv.send_message(
-        payload.mac,
+        mac,
         &*payload.sender,
         &*payload.receiver,
-        payload.filename,
-        payload.nonce_filename,
-        payload.message,
-        payload.nonce_message,
+        filename,
+        nonce_filename_bytes,
+        message,
+        nonce_message_bytes,
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,
-        payload.signature,
+        signature,
         &state.pool
     );
 

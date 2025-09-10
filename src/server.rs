@@ -36,6 +36,7 @@ impl CipherSuite for DefaultCipherSuite {
 #[derive(Clone)]
 pub struct Server {
     server_opaque: ServerSetup<DefaultCipherSuite>,
+    user_in_connection: HashMap<String, ServerLogin<DefaultCipherSuite>>,
     connected_users: HashMap<String, GenericArray<u8, U64>>,
 }
 
@@ -46,6 +47,7 @@ impl Server {
 
         Server {
             server_opaque: server_setup,
+            user_in_connection: HashMap::new(),
             connected_users: HashMap::new(),
         }
     }
@@ -68,7 +70,7 @@ impl Server {
     fn check_mac(
         &self,
         username_param: &str,
-        mac: [u8; MAC_LEN],
+        mac: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let result = unsafe {
             crypto_auth_verify(
@@ -109,11 +111,11 @@ impl Server {
         client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
         username_param: &str,
         cpriv_enc: Vec<u8>,
-        nonce_priv_enc: [u8; SYM_LEN_NONCE],
-        pub_enc: [u8; ENC_KEY_LEN_PUB],
+        nonce_priv_enc: Vec<u8>,
+        pub_enc: Vec<u8>,
         cpriv_sign: Vec<u8>,
-        nonce_priv_sign: [u8; SYM_LEN_NONCE],
-        pub_sign: [u8; SIGN_KEY_LEN_PUB],
+        nonce_priv_sign: Vec<u8>,
+        pub_sign: Vec<u8>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use crate::schema::users;
@@ -178,7 +180,7 @@ impl Server {
         let password_file_bytes = password_file_param.serialize();
 
         // Check if the user is connected using mac
-        self.check_mac(&*username_param, mac).ok();
+        self.check_mac(&*username_param, mac.to_vec()).ok();
 
         let user_id = users::table
             .filter(users::username.eq(username_param))
@@ -209,11 +211,7 @@ impl Server {
         username_param: &str,
         client_login_start_result: CredentialRequest<DefaultCipherSuite>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<
-        (
-            CredentialResponse<DefaultCipherSuite>,
-            ServerLogin<DefaultCipherSuite>,
-        ),
+    ) -> Result<CredentialResponse<DefaultCipherSuite>,
         Box<dyn std::error::Error>,
     > {
 
@@ -243,16 +241,15 @@ impl Server {
         )
         .map_err(|e| e.to_string())?;
 
-        Ok((
-            server_login_start_result.message,
-            server_login_start_result.state,
-        ))
+        self.user_in_connection
+            .insert(username_param.to_string(), server_login_start_result.state.clone());
+
+        Ok(server_login_start_result.message)
     }
 
     pub fn server_login_finish(
         &mut self,
         username_param: &str,
-        server_login_start_result: ServerLogin<DefaultCipherSuite>,
         client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<
@@ -268,6 +265,10 @@ impl Server {
     > {
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
+
+        let server_login_start_result = self.user_in_connection
+            .remove(username_param)
+            .ok_or("No login in progress for this user")?;
 
         let server_login_finish_result = server_login_start_result
             .finish(client_login_finish_result)
@@ -304,7 +305,7 @@ impl Server {
     pub fn logout(
         &mut self,
         username_param: &str,
-        mac: [u8; MAC_LEN],
+        mac: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Check if the user is connected using mac
         self.check_mac(username_param, mac)?;
@@ -317,7 +318,7 @@ impl Server {
     pub fn get_pub_key_enc(
         &self,
         username_param: &str,
-        mac: [u8; MAC_LEN],
+        mac: Vec<u8>,
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; ENC_KEY_LEN_PUB]> {
@@ -340,7 +341,7 @@ impl Server {
     pub fn get_pub_key_sign(
         &self,
         username_param: &str,
-        mac: [u8; MAC_LEN],
+        mac: Vec<u8>,
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; SIGN_KEY_LEN_PUB]> {
@@ -362,13 +363,13 @@ impl Server {
 
     pub fn send_message(
         &mut self,
-        mac: [u8; MAC_LEN],
+        mac: Vec<u8>,
         sender: &str,
         receiver: &str,
         filename_param: Vec<u8>,
-        nonce_filename_param: [u8; ENC_LEN_NONCE],
+        nonce_filename_param: Vec<u8>,
         message_param: Vec<u8>,
-        nonce_message_param: [u8; ENC_LEN_NONCE],
+        nonce_message_param: Vec<u8>,
         max_downloads_param: i32,
         lifetime_param: i32,
         creation_time_param: chrono::DateTime<Utc>,
@@ -416,9 +417,9 @@ impl Server {
             sender_id: &sender.id,
             receiver_id: &receiver.id,
             filename: &filename_param,
-            nonce_filename: &nonce_filename_param.to_vec(),
+            nonce_filename: &nonce_filename_param,
             message: &message_param,
-            nonce_message: &nonce_message_param.to_vec(),
+            nonce_message: &nonce_message_param,
             max_downloads: &max_downloads_param,
             lifetime: &lifetime_param,
             creation_time: &creation_time_param,
@@ -437,7 +438,7 @@ impl Server {
 
     pub fn get_messages(
         &mut self,
-        mac: [u8; MAC_LEN],
+        mac: Vec<u8>,
         username_param: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<Vec<MessageWithUsernames>, Box<dyn std::error::Error>> {
@@ -473,6 +474,7 @@ impl Server {
             .inner_join(receiver.on(messages::receiver_id.eq(receiver.field(users::id))))
             .filter(receiver.field(users::username).eq(username_param))
             .select((
+                messages::id,
                 sender.field(users::username),
                 receiver.field(users::username),
                 messages::filename,
