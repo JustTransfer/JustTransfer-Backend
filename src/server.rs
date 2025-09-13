@@ -438,6 +438,25 @@ impl Server {
         Ok(())
     }
 
+    // TODO process only message belonging to the user, not all messages
+    fn delete_invalid_messages(&mut self, pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::schema::messages;
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Delete the messages that have reached max downloads
+        let num_deleted_max_downloads = diesel::delete(messages.filter(number_downloads.ge(max_downloads)))
+            .execute(&mut conn)
+            .expect("Error deleting posts");
+
+        // Delete the messages that have expired
+        let expiry = sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')");
+        let num_deleted_lifetime = diesel::delete(messages.filter(expiry.le(sql_now)))
+            .execute(&mut conn)
+            .expect("Error deleting posts");
+
+        Ok(())
+    }
+
     pub fn get_messages(
         &mut self,
         mac: Vec<u8>,
@@ -452,22 +471,8 @@ impl Server {
         // Check if the user is connected
         self.check_mac(username_param, mac)?;
 
-        // Delete the messages that have reached max downloads
-        let num_deleted_max_downloads = diesel::delete(messages.filter(number_downloads.ge(max_downloads)))
-            .execute(&mut conn)
-            .expect("Error deleting posts");
-
-        // Delete the messages that have expired
-        let expiry = sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')");
-        let num_deleted_lifetime = diesel::delete(messages.filter(expiry.le(sql_now)))
-            .execute(&mut conn)
-            .expect("Error deleting posts");
-
-        // Increment the number of downloads
-        let num_updated = diesel::update(messages)
-            .set(number_downloads.eq(number_downloads + 1))
-            .execute(&mut conn)
-            .expect("Error updating posts");
+        // Delete invalid messages
+        self.delete_invalid_messages(pool)?;
 
         let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
 
@@ -511,12 +516,34 @@ impl Server {
         // Check if the user is connected
         self.check_mac(username_param, mac)?;
 
-        // Check if the message belongs to the user
-        let message = messages
+        // Delete invalid messages
+        self.delete_invalid_messages(pool)?;
+
+        // Get the message
+        let mut message = messages
             .filter(message_id.eq(message_id_param))
             .first::<Message>(&mut conn)
             .optional()?
             .ok_or("Message not found")?;
+
+        // Check if the message belongs to the user
+        if message.receiver_id != users
+            .filter(users::username.eq(username_param))
+            .select(users::id)
+            .first::<i32>(&mut conn)
+            .optional()?
+            .ok_or("User not found")? {
+                return Err(Box::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    "Message does not belong to the user",
+                )));
+            }
+
+        // Increment the message download count
+        let updated_rows = diesel::update(messages.filter(messages::id.eq(message.id)))
+            .set(number_downloads.eq(number_downloads + 1))
+            .execute(&mut conn)
+            .expect("Error updating message");
 
         Ok(message)
     }

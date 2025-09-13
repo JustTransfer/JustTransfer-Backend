@@ -1,6 +1,7 @@
 use futures_util::StreamExt;
 use futures_util::TryStreamExt;
 use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
+use std::fs::metadata;
 use crate::server::{DefaultCipherSuite, Server};
 use axum::{extract::{State, Multipart, Path}, http::StatusCode, response::IntoResponse, Json};
 use http_body_util::StreamBody;
@@ -9,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use diesel::PgConnection;
 use diesel::r2d2::{self, ConnectionManager};
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
-use tokio::fs::File as TokioFile;
+use tokio::fs::{File as TokioFile};
 use tokio_util::io::{ReaderStream};
 use bytes::Bytes;
 
@@ -416,6 +417,12 @@ pub async fn message_get_one(
     let mut file_path = PathBuf::from(FILE_STORAGE_PATH);
     file_path.push(&id.to_string());
 
+    let meta = match metadata(&file_path) {
+        Ok(m) => m,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let file_size = meta.len();
+
     let file = match File::open(&file_path) {
         Ok(f) => f,
         Err(_) => return StatusCode::NOT_FOUND.into_response(),
@@ -432,6 +439,7 @@ pub async fn message_get_one(
     let response = Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_LENGTH, file_size.to_string())
         .header(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"{}\"", filename),
