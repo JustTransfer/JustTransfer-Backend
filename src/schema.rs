@@ -7,7 +7,7 @@ diesel::table! {
         receiver_id -> Int4,
         filename -> Bytea,
         nonce_filename -> Bytea,
-        message -> Bytea,
+        message_id -> Uuid,
         nonce_message -> Bytea,
         max_downloads -> Int4,
         lifetime -> Int4,

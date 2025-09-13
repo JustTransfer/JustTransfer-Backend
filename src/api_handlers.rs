@@ -1,16 +1,28 @@
+use futures_util::StreamExt;
+use futures_util::TryStreamExt;
+use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
 use crate::server::{DefaultCipherSuite, Server};
-use axum::{extract::{State, Multipart}, http::StatusCode, Json};
+use axum::{extract::{State, Multipart, Path}, http::StatusCode, response::IntoResponse, Json};
+use http_body_util::StreamBody;
 use opaque_ke::ClientRegistrationStartResult;
 use serde::{Deserialize, Serialize};
 use diesel::PgConnection;
 use diesel::r2d2::{self, ConnectionManager};
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
+use tokio::fs::File as TokioFile;
+use tokio_util::io::{ReaderStream};
+use bytes::Bytes;
 
-use crate::consts::{ENC_KEY_LEN_PUB, ENC_LEN_NONCE, MAC_LEN, SIGN_KEY_LEN_PUB, SYM_LEN_NONCE};
+use crate::consts::{ENC_KEY_LEN_PUB, ENC_LEN_NONCE, FILE_STORAGE_PATH, MAC_LEN, SIGN_KEY_LEN_PUB, SYM_LEN_NONCE};
 use opaque_ke::*;
 use std::sync::{Arc, Mutex};
+use axum::body::Body;
+use axum::response::Response;
 use generic_array::GenericArray;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::{DateTime, Utc};
+use http::{header, HeaderMap, HeaderValue};
+use uuid::Uuid;
 
 use crate::models::*;
 
@@ -365,7 +377,7 @@ pub async fn message_get(
                     receiver: m.receiver,
                     filename: URL_SAFE_NO_PAD.encode(m.filename),
                     nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
-                    message: URL_SAFE_NO_PAD.encode(m.message),
+                    message_id: m.message_id,
                     nonce_message: URL_SAFE_NO_PAD.encode(m.nonce_message),
                     max_downloads: m.max_downloads,
                     lifetime: m.lifetime,
@@ -389,6 +401,47 @@ pub async fn message_get(
     }
 }
 
+pub async fn message_get_one(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(payload): Json<GetMessage>,
+) -> impl IntoResponse {
+
+    let mut srv = state.srv.lock().unwrap();
+    let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+
+    let message = srv.get_message(mac_bytes, &*payload.username, id, &state.pool);
+    let filename = "encrypted_file"; // Default filename
+
+    let mut file_path = PathBuf::from(FILE_STORAGE_PATH);
+    file_path.push(&id.to_string());
+
+    let file = match File::open(&file_path) {
+        Ok(f) => f,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let stream = ReaderStream::new(TokioFile::from_std(file))
+        .map_ok(Bytes::from)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+
+    // Convert stream into axum::body::Body
+    let body = StreamBody::new(stream);
+
+    // Wrap StreamBody into axum::body::Body
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", filename),
+        )
+        .body(Body::from_stream(body))
+        .unwrap();
+
+    response
+}
+
 #[derive(Deserialize)]
 pub struct SendMessage {
     mac: String,
@@ -406,31 +459,94 @@ pub struct SendMessage {
 
 pub async fn message_send(
     State(state): State<AppState>,
-    Json(payload): Json<SendMessage>,
+    // Json(payload): Json<SendMessage>,
+    mut multipart: Multipart,
 ) -> (StatusCode) {
 
+    let mut fields: HashMap<String, String> = HashMap::new();
+    let mut message_file_id: Option<Uuid> = None;
+
+    while let Some(mut field) = match multipart.next_field().await {
+        Ok(f) => f,
+        Err(_) => return StatusCode::BAD_REQUEST,
+    } {
+        let name = field.name().unwrap_or("").to_string();
+
+        if name == "message" {
+            // Create a unique file on disk
+            let id = Uuid::new_v4();
+            let file_id = id.to_string();
+            let mut path = PathBuf::from(FILE_STORAGE_PATH);
+            std::fs::create_dir_all(&path).ok(); // ensure directory exists
+            path.push(&file_id);
+
+            match File::create(&path) {
+                Ok(mut file) => {
+                    // Stream chunks to disk
+                    while let Some(chunk) = match field.chunk().await {
+                        Ok(c) => c,
+                        Err(_) => return StatusCode::BAD_REQUEST,
+                    } {
+                        if let Err(_) = file.write_all(&chunk) {
+                            return StatusCode::INTERNAL_SERVER_ERROR;
+                        }
+                    }
+                    // Store the file id (or path) instead of the raw bytes
+                    message_file_id = Some(id);
+                    fields.insert("message".to_string(), file_id);
+                }
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else {
+            let text = match field.text().await {
+                Ok(t) => t,
+                Err(_) => return StatusCode::BAD_REQUEST,
+            };
+            fields.insert(name, text);
+        }
+    }
+
+    // Extract and decode required fields
+    let mac = URL_SAFE_NO_PAD
+        .decode(fields.get("mac").ok_or(()).unwrap())
+        .expect("Base64 decode failed");
+    let filename = URL_SAFE_NO_PAD
+        .decode(fields.get("filename").ok_or(()).unwrap())
+        .expect("Base64 decode failed");
+    let nonce_filename = URL_SAFE_NO_PAD
+        .decode(fields.get("nonce_filename").ok_or(()).unwrap())
+        .expect("Base64 decode failed");
+    let nonce_message = URL_SAFE_NO_PAD
+        .decode(fields.get("nonce_message").ok_or(()).unwrap())
+        .expect("Base64 decode failed");
+    let signature = URL_SAFE_NO_PAD
+        .decode(fields.get("signature").ok_or(()).unwrap())
+        .expect("Base64 decode failed");
+
+    let max_downloads: i32 = fields
+        .get("max_downloads")
+        .ok_or(())
+        .unwrap()
+        .parse()
+        .unwrap();
+    let lifetime: i32 = fields.get("lifetime").ok_or(()).unwrap().parse().unwrap();
+
+    let creation_time: DateTime<Utc> = fields.get("creation_time").ok_or(()).unwrap().parse().unwrap();
+
     let mut srv = state.srv.lock().unwrap();
-
-    let mac = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
-    let filename = URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed");
-    let nonce_filename = URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed");
-    let message = URL_SAFE_NO_PAD.decode(&payload.message).expect("Base64 decode failed");
-    let nonce_message = URL_SAFE_NO_PAD.decode(&payload.nonce_message).expect("Base64 decode failed");
-    let signature = URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed");
-
     let send_result = srv.send_message(
         mac,
-        &*payload.sender,
-        &*payload.receiver,
+        fields.get("sender").unwrap(),
+        fields.get("receiver").unwrap(),
         filename,
         nonce_filename,
-        message,
+        message_file_id.unwrap(),
         nonce_message,
-        payload.max_downloads,
-        payload.lifetime,
-        payload.creation_time,
+        max_downloads,
+        lifetime,
+        creation_time,
         signature,
-        &state.pool
+        &state.pool,
     );
 
     match send_result {

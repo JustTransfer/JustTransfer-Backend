@@ -24,10 +24,11 @@
 - Add a counter to max number of transfers (avoid server overload)
 - OPAQUE save server state
 - Use TLD for the signatures (not just concatenate)
-- Add a key rotation option
 - Put public key of signature in the message
 - Validate public key retrieved from the server (Authenticated Data in AEAD)
+- Add a key rotation option
 - Add a delete account option
+- Login endpoint to have a supervisor
 
 ## Install Diesel
 ```bash

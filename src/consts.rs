@@ -1,10 +1,11 @@
 use libsodium_sys::*;
 
 /// Const for Server
-pub const URL: &str = "0.0.0.0:3000";
+pub const URL: &str = "0.0.0.0:3333";
 pub const MAX_BODY_SIZE: usize = 4294967296;
 pub const MAX_TIME_MARGIN: i64 = 2; // minutes
 pub const MAX_LIFETIME_TRANSFER: i32 = 7; // days
+pub const FILE_STORAGE_PATH: &str = "./files/";
 
 
 /// Const for mac

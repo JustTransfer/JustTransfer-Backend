@@ -23,6 +23,7 @@ use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use generic_array::GenericArray;
 use generic_array::typenum::U64;
+use uuid::Uuid;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -368,7 +369,8 @@ impl Server {
         receiver: &str,
         filename_param: Vec<u8>,
         nonce_filename_param: Vec<u8>,
-        message_param: Vec<u8>,
+        //message_param: Vec<u8>,
+        message_id_param: Uuid,
         nonce_message_param: Vec<u8>,
         max_downloads_param: i32,
         lifetime_param: i32,
@@ -418,7 +420,7 @@ impl Server {
             receiver_id: &receiver.id,
             filename: &filename_param,
             nonce_filename: &nonce_filename_param,
-            message: &message_param,
+            message_id: &message_id_param,
             nonce_message: &nonce_message_param,
             max_downloads: &max_downloads_param,
             lifetime: &lifetime_param,
@@ -479,7 +481,7 @@ impl Server {
                 receiver.field(users::username),
                 messages::filename,
                 messages::nonce_filename,
-                messages::message,
+                messages::message_id,
                 messages::nonce_message,
                 messages::max_downloads,
                 messages::lifetime,
@@ -492,5 +494,30 @@ impl Server {
             .ok_or("No messages found")?;
 
         Ok(messages_get)
+    }
+
+    pub fn get_message(
+        &mut self,
+        mac: Vec<u8>,
+        username_param: &str,
+        message_id_param: Uuid,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<Message, Box<dyn std::error::Error>> {
+
+        use crate::schema::users;
+        use crate::schema::messages;
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Check if the user is connected
+        self.check_mac(username_param, mac)?;
+
+        // Check if the message belongs to the user
+        let message = messages
+            .filter(message_id.eq(message_id_param))
+            .first::<Message>(&mut conn)
+            .optional()?
+            .ok_or("Message not found")?;
+
+        Ok(message)
     }
 }

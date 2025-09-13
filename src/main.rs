@@ -60,6 +60,7 @@ async fn main() {
         .route("/pubkey/enc", post(api_handlers::get_pub_key_enc))
         .route("/pubkey/sign", post(api_handlers::get_pub_key_sign))
         .route("/messages", post(api_handlers::message_get))
+        .route("/message/{id}", post(api_handlers::message_get_one))
         .route("/message", post(api_handlers::message_send))
         .with_state(state.clone())
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))

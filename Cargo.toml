@@ -14,7 +14,7 @@ opaque-ke = { version = "3.0.0", features = ["ristretto255", "argon2"] }
 rand = "0.8.5"
 generic-array = "0.14.7"
 
-axum = { version = "0.8.4", features = ["multipart"]}
+axum = { version = "0.8.4", features = ["multipart", "tokio"]}
 http = "1.3.1"
 serde = { version = "1.0.219", features = ["derive"] }
 tracing-subscriber = "0.3.20"
@@ -22,6 +22,12 @@ tokio = { version = "1.47.1", features = ["full"] }
 serde_json = "1.0.143"
 
 dotenvy = "0.15"
-diesel = { version = "2.2.0", features = ["postgres", "r2d2", "chrono"] }
+diesel = { version = "2.2.0", features = ["postgres", "r2d2", "chrono", "uuid"] }
 tower-http = { version = "0.6.6", features = ["cors", "trace"] }
 base64 = "0.22.1"
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+tokio-util = { version = "0.7.16", features = ["io"] }
+http-body-util = "0.1.3"
+futures = "0.3.31"
+bytes = "1.10.1"
+futures-util = "0.3.31"

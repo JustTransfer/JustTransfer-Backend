@@ -5,6 +5,7 @@ use opaque_ke::ServerRegistrationLen;
 use serde::Serialize;
 use crate::consts::*;
 use crate::server::DefaultCipherSuite;
+use uuid::Uuid;
 
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::users)]
@@ -52,7 +53,7 @@ pub struct Message {
     pub receiver_id: i32,
     pub filename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
-    pub message: Vec<u8>,
+    pub message_id: Uuid,
     pub nonce_message: Vec<u8>,
     pub max_downloads: i32,
     pub lifetime: i32,
@@ -68,7 +69,7 @@ pub struct NewMessage<'a> {
     pub receiver_id: &'a i32,
     pub filename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
-    pub message: &'a Vec<u8>,
+    pub message_id: &'a Uuid,
     pub nonce_message: &'a Vec<u8>,
     pub max_downloads: &'a i32,
     pub lifetime: &'a i32,
@@ -84,7 +85,7 @@ pub struct MessageWithUsernames {
     pub receiver: String,
     pub filename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
-    pub message: Vec<u8>,
+    pub message_id: Uuid,
     pub nonce_message: Vec<u8>,
     pub max_downloads: i32,
     pub lifetime: i32,
@@ -100,7 +101,7 @@ pub struct MessageWithUsernamesEncoded {
     pub receiver: String,
     pub filename: String,
     pub nonce_filename: String,
-    pub message: String,
+    pub message_id: Uuid,
     pub nonce_message: String,
     pub max_downloads: i32,
     pub lifetime: i32,
