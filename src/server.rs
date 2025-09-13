@@ -15,15 +15,21 @@ use diesel::PgConnection;
 use diesel::dsl::{sql, now as sql_now};
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
-use crate::models::*;
-use crate::schema::messages::dsl::*;
-use crate::schema::users::dsl::*;
-use crate::*;
 use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use generic_array::GenericArray;
 use generic_array::typenum::U64;
 use uuid::Uuid;
+
+use std::fs;
+use std::path::Path;
+
+use crate::models::*;
+use crate::schema::messages::dsl::*;
+use crate::schema::users::dsl::*;
+use crate::*;
+
+
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -440,19 +446,43 @@ impl Server {
 
     // TODO process only message belonging to the user, not all messages
     fn delete_invalid_messages(&mut self, pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
-        use crate::schema::messages;
+
         let mut conn = pool.get().expect("Failed to get DB connection");
 
-        // Delete the messages that have reached max downloads
-        let num_deleted_max_downloads = diesel::delete(messages.filter(number_downloads.ge(max_downloads)))
-            .execute(&mut conn)
-            .expect("Error deleting posts");
+        // Get message with max downloads
+        let messages_to_delete: Vec<Message> = messages
+            .filter(number_downloads.ge(max_downloads))
+            .load(&mut conn)?;
 
-        // Delete the messages that have expired
+        // Delete files from disk
+        for msg in &messages_to_delete {
+            let file_path = String::from(FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            if Path::new(&file_path).exists() {
+                fs::remove_file(&file_path)?;
+            }
+        }
+
+        // Delete from DB
+        diesel::delete(messages.filter(number_downloads.ge(max_downloads)))
+            .execute(&mut conn)?;
+
+        // Get expired messages
         let expiry = sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')");
-        let num_deleted_lifetime = diesel::delete(messages.filter(expiry.le(sql_now)))
-            .execute(&mut conn)
-            .expect("Error deleting posts");
+        let expired_messages: Vec<Message> = messages
+            .filter(expiry.clone().le(sql_now))
+            .load(&mut conn)?;
+
+        // Delete files from disk
+        for msg in &expired_messages {
+            let file_path = String::from(FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            if Path::new(&file_path).exists() {
+                fs::remove_file(&file_path)?;
+            }
+        }
+
+        // Delete from DB
+        diesel::delete(messages.filter(expiry.le(sql_now)))
+            .execute(&mut conn)?;
 
         Ok(())
     }
