@@ -48,15 +48,53 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new() -> Self {
-        let mut rng = OsRng;
-        let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
+    pub fn new(pool: &r2d2::Pool<ConnectionManager<PgConnection>>) -> Self {
+
+        use crate::schema::opaque_settings;
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Try to load OPAQUE settings from DB
+        let setting: Option<OpaqueSetting> = opaque_settings::table
+            .first::<OpaqueSetting>(&mut conn)
+            .optional()
+            .expect("Error loading OPAQUE settings");
+
+        let server_setup = if let Some(s) = setting {
+            // Deserialize settings
+            ServerSetup::<DefaultCipherSuite>::deserialize(&s.settings)
+                .expect("Error deserializing OPAQUE settings")
+        } else {
+            // Create new settings
+            let mut rng = OsRng;
+            let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
+            // Save settings to DB
+            let new_setting = NewOpaqueSetting {
+                settings: &server_setup.serialize().to_vec(),
+            };
+
+            diesel::insert_into(opaque_settings::table)
+                .values(&new_setting)
+                .returning(OpaqueSetting::as_returning())
+                .get_result::<OpaqueSetting>(&mut conn)
+                .expect("Error saving OPAQUE settings");
+
+            server_setup
+        };
 
         Server {
             server_opaque: server_setup,
             user_in_connection: HashMap::new(),
             connected_users: HashMap::new(),
         }
+
+        /*let mut rng = OsRng;
+        let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
+
+        Server {
+            server_opaque: server_setup,
+            user_in_connection: HashMap::new(),
+            connected_users: HashMap::new(),
+        }*/
     }
 
     fn connect_user(&mut self, username_param: String, key_communication: GenericArray<u8, U64>) -> Result<(), Box<dyn std::error::Error>> {

@@ -8,6 +8,20 @@ use crate::server::DefaultCipherSuite;
 use uuid::Uuid;
 
 #[derive(Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::opaque_settings)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct OpaqueSetting {
+    pub id: i32,
+    pub settings: Vec<u8>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::opaque_settings)]
+pub struct NewOpaqueSetting<'a> {
+    pub settings: &'a Vec<u8>,
+}
+
+#[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::users)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(belongs_to(User, foreign_key = role))]

@@ -18,6 +18,13 @@ diesel::table! {
 }
 
 diesel::table! {
+    opaque_settings (id) {
+        id -> Int4,
+        settings -> Bytea,
+    }
+}
+
+diesel::table! {
     roles (role) {
         role -> Text,
     }
@@ -42,6 +49,7 @@ diesel::joinable!(users -> roles (role));
 
 diesel::allow_tables_to_appear_in_same_query!(
     messages,
+    opaque_settings,
     roles,
     users,
 );

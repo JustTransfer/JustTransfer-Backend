@@ -35,7 +35,7 @@ async fn main() {
     let pool = r2d2::Pool::builder().build(manager).expect("Failed to create pool");
 
     //let mut srv = server::Server::new();
-    let srv = Arc::new(Mutex::new(server::Server::new()));
+    let srv = Arc::new(Mutex::new(server::Server::new(&pool.clone())));
 
     let state = api_handlers::AppState {
         srv: srv.clone(),

@@ -1,7 +1,15 @@
+-- Table OPAQUE settings
+CREATE TABLE opaque_settings
+(
+    id                       SERIAL PRIMARY KEY,
+    settings                 BYTEA NOT NULL
+);
+
+
 -- Table roles
 CREATE TABLE roles
 (
-    role TEXT PRIMARY KEY
+    role                    TEXT PRIMARY KEY
 );
 
 -- Fill the roles table with initial data
