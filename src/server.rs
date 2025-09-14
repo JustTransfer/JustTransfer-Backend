@@ -86,15 +86,6 @@ impl Server {
             user_in_connection: HashMap::new(),
             connected_users: HashMap::new(),
         }
-
-        /*let mut rng = OsRng;
-        let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
-
-        Server {
-            server_opaque: server_setup,
-            user_in_connection: HashMap::new(),
-            connected_users: HashMap::new(),
-        }*/
     }
 
     fn connect_user(&mut self, username_param: String, key_communication: GenericArray<u8, U64>) -> Result<(), Box<dyn std::error::Error>> {
