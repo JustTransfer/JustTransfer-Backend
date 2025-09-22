@@ -71,10 +71,7 @@ async fn main() {
         .route("/", get(api_handlers::root))
         .route("/register/start", post(api_handlers::register_user_start))
         .route("/register/end", post(api_handlers::register_user_end))
-        .route(
-            "/register/update",
-            post(api_handlers::register_user_end_update),
-        )
+        .route("/register/update", post(api_handlers::register_user_end_update))
         .route("/login/start", post(api_handlers::login_user_start))
         .route("/login/end", post(api_handlers::login_user_end))
         .route("/logout", post(api_handlers::logout))

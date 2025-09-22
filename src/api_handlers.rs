@@ -1,31 +1,56 @@
-use futures_util::StreamExt;
-use futures_util::TryStreamExt;
-use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
-use std::fs::metadata;
 use crate::server::{DefaultCipherSuite, Server};
-use axum::{extract::{State, Multipart, Path}, http::StatusCode, response::IntoResponse, Json};
-use http_body_util::StreamBody;
-use opaque_ke::ClientRegistrationStartResult;
-use serde::{Deserialize, Serialize};
-use diesel::PgConnection;
+use axum::{extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, Json};
 use diesel::r2d2::{self, ConnectionManager};
+use diesel::PgConnection;
+use futures_util::TryStreamExt;
+use http_body_util::StreamBody;
+use serde::{Deserialize, Serialize};
+use std::fs::metadata;
+use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
-use tokio::fs::{File as TokioFile};
-use tokio_util::io::{ReaderStream};
 use bytes::Bytes;
+use tokio::fs::File as TokioFile;
+use tokio_util::io::ReaderStream;
 
-use crate::consts::{ENC_KEY_LEN_PUB, ENC_LEN_NONCE, FILE_STORAGE_PATH, MAC_LEN, SIGN_KEY_LEN_PUB, SYM_LEN_NONCE};
-use opaque_ke::*;
-use std::sync::{Arc, Mutex};
+use crate::consts::*;
 use axum::body::Body;
 use axum::response::Response;
-use generic_array::GenericArray;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{DateTime, Utc};
-use http::{header, HeaderMap, HeaderValue};
+use http::header;
+use opaque_ke::*;
+use std::sync::{Arc, Mutex};
 use uuid::Uuid;
+use validator::{Validate, ValidationError};
 
 use crate::models::*;
+
+
+fn validate_username(username: &str) -> Result<(), ValidationError> {
+    // Check length
+    if username.len() < MIN_LENGTH_USERNAME || username.len() > MAX_LENGTH_USERNAME {
+        return Err(ValidationError::new("invalid_length"));
+    }
+
+    // Allow only alphanumeric characters and underscores
+    if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        return Err(ValidationError::new("invalid_characters"));
+    }
+
+    Ok(())
+}
+
+fn validate_int_param(value: i32) -> Result<(), ValidationError> {
+    if value < 0 {
+        return Err(ValidationError::new("invalid_value"));
+    }
+
+    if value > MAX_VALUE_INT {
+        return Err(ValidationError::new("value_too_large"));
+    }
+
+    Ok(())
+}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -35,12 +60,15 @@ pub struct AppState {
 
 // basic handler that responds with a static string
 pub async fn root() -> &'static str {
-    "Welcome to the JujuTransfer!"
+    // TODO: return some useful info like number transfers max, max size, etc
+    "Welcome to the GoGoTransfer!"
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct RegisterUserStart {
+    #[validate(custom(function = "validate_username"))]
     username: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_start: String,
 }
 
@@ -53,6 +81,13 @@ pub async fn register_user_start(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserStart>,
 ) -> (StatusCode, Json<RegisterUserStartResult>) {
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(RegisterUserStartResult { result: "".to_string() }));
+    }
+
     let mut srv = state.srv.lock().unwrap();
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
@@ -65,22 +100,29 @@ pub async fn register_user_start(
     (
         StatusCode::OK,
         Json(RegisterUserStartResult {
-            // result: base64::encode(server_registration_start_result.serialize()),
             result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
         }),
     )
 }
 
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct RegisterUserEnd {
+    #[validate(custom(function = "validate_username"))]
     username: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cpriv_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_priv_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     pub_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cpriv_sign: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_priv_sign: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     pub_sign: String,
 }
 
@@ -88,7 +130,12 @@ pub async fn register_user_end(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEnd>,
 ) -> (StatusCode) {
-    let mut srv = state.srv.lock().unwrap();
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return StatusCode::BAD_REQUEST;
+    }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
     let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
@@ -103,6 +150,7 @@ pub async fn register_user_end(
     let pub_sign = URL_SAFE_NO_PAD.decode(&payload.pub_sign).expect("Base64 decode failed");
 
 
+    let mut srv = state.srv.lock().unwrap();
     let server_registration_finish = srv.server_registration_finish(
         req,
         &*payload.username,
@@ -121,35 +169,63 @@ pub async fn register_user_end(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct RegisterUserEndUpdate {
+    #[validate(custom(function = "validate_username"))]
     username: String,
-    mac: [u8; MAC_LEN],
-    client_registration_finish: RegistrationUpload<DefaultCipherSuite>,
-    cpriv_enc: Vec<u8>,                   // TODO const
-    nonce_priv_enc: [u8; SYM_LEN_NONCE],  // TODO const
-    pub_enc: [u8; 32],                    // TODO const
-    cpriv_sign: Vec<u8>,                  // TODO const
-    nonce_priv_sign: [u8; SYM_LEN_NONCE], // TODO const
-    pub_sign: [u8; 32],                   // TODO const
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    mac: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_finish: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    cpriv_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_priv_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    pub_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    cpriv_sign: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_priv_sign: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    pub_sign: String,
 }
 
 pub async fn register_user_end_update(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> (StatusCode) {
-    let mut srv = state.srv.lock().unwrap();
 
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return StatusCode::BAD_REQUEST;
+    }
+
+    // Decode the base64 encoded keys
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
+    let client_registration_finish = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
+    let mac = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+    let cpriv_enc = URL_SAFE_NO_PAD.decode(&payload.cpriv_enc).expect("Base64 decode failed");
+    let nonce_priv_enc = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_enc).expect("Base64 decode failed");
+    let pub_enc = URL_SAFE_NO_PAD.decode(&payload.pub_enc).expect("Base64 decode failed");
+
+    let cpriv_sign = URL_SAFE_NO_PAD.decode(&payload.cpriv_sign).expect("Base64 decode failed");
+    let nonce_priv_sign = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_sign).expect("Base64 decode failed");
+    let pub_sign = URL_SAFE_NO_PAD.decode(&payload.pub_sign).expect("Base64 decode failed");
+
+    let mut srv = state.srv.lock().unwrap();
     let server_registration_finish = srv.server_registration_finish_update(
-        payload.client_registration_finish,
+        client_registration_finish,
         &*payload.username,
-        payload.mac,
-        payload.cpriv_enc,
-        payload.nonce_priv_enc,
-        payload.pub_enc,
-        payload.cpriv_sign,
-        payload.nonce_priv_sign,
-        payload.pub_sign,
+        mac,
+        cpriv_enc,
+        nonce_priv_enc,
+        pub_enc,
+        cpriv_sign,
+        nonce_priv_sign,
+        pub_sign,
         &state.pool,
     );
 
@@ -159,16 +235,16 @@ pub async fn register_user_end_update(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct LoginStart {
+    #[validate(custom(function = "validate_username"))]
     username: String,
-    // client_registration_start: CredentialRequest<DefaultCipherSuite>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_start: String
 }
 
 #[derive(Serialize)]
 pub struct LoginStartResult {
-    // result: CredentialResponse<DefaultCipherSuite>,
     result: String,
 }
 
@@ -176,11 +252,17 @@ pub async fn login_user_start(
     State(state): State<AppState>,
     Json(payload): Json<LoginStart>,
 ) -> (StatusCode, Json<LoginStartResult>) {
-    let mut srv = state.srv.lock().unwrap();
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(LoginStartResult { result: "".to_string() }));
+    }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
 
+    let mut srv = state.srv.lock().unwrap();
     let server_login_start = srv.server_login_start(
         &*payload.username,
         req,
@@ -195,10 +277,11 @@ pub async fn login_user_start(
     )
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct LoginEnd {
+    #[validate(custom(function = "validate_username"))]
     username: String,
-    // client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_login_finish_result: String
 }
 
@@ -217,11 +300,23 @@ pub async fn login_user_end(
     Json(payload): Json<LoginEnd>,
 ) -> (StatusCode, Json<LoginEndResult>) {
 
-    let mut srv = state.srv.lock().unwrap();
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(LoginEndResult {
+            pub_enc: "".to_string(),
+            cpriv_enc: "".to_string(),
+            nonce_priv_enc: "".to_string(),
+            pub_sign: "".to_string(),
+            cpriv_sign: "".to_string(),
+            nonce_priv_sign: "".to_string(),
+        }));
+    }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
 
+    let mut srv = state.srv.lock().unwrap();
     let server_login_finish = srv.server_login_finish(
         &*payload.username,
         req,
@@ -262,19 +357,25 @@ pub async fn login_user_end(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct Logout {
+    #[validate(custom(function = "validate_username"))]
     username: String,
-    // mac: [u8; MAC_LEN],
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
 }
 
 pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> (StatusCode) {
 
-    let mut srv = state.srv.lock().unwrap();
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return StatusCode::BAD_REQUEST;
+    }
 
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
 
+    let mut srv = state.srv.lock().unwrap();
     let logout_result = srv.logout(&*payload.username, mac_bytes);
 
     match logout_result {
@@ -283,10 +384,13 @@ pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) 
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct GetPubKeyEnc {
+    #[validate(custom(function = "validate_username"))]
     username: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
+    #[validate(custom(function = "validate_username"))]
     user_pub_key: String,
 }
 
@@ -300,9 +404,19 @@ pub async fn get_pub_key_enc(
     Json(payload): Json<GetPubKeyEnc>,
 ) -> (StatusCode, Json<GetPubKeyEncResult>) {
 
-    let srv = state.srv.lock().unwrap();
+    println!("username: {}", payload.username);
+    println!("mac: {}", payload.mac);
+    println!("user_pub_key: {}", payload.user_pub_key);
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(GetPubKeyEncResult { pub_enc: "".to_string() }));
+    }
 
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+
+    let srv = state.srv.lock().unwrap();
     let pub_enc = srv.get_pub_key_enc(&*payload.username, mac_bytes, &*payload.user_pub_key, &state.pool);
 
     match pub_enc {
@@ -315,10 +429,13 @@ pub async fn get_pub_key_enc(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct GetPubKeySign {
+    #[validate(custom(function = "validate_username"))]
     username: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
+    #[validate(custom(function = "validate_username"))]
     user_pub_key: String,
 }
 
@@ -332,9 +449,15 @@ pub async fn get_pub_key_sign(
     Json(payload): Json<GetPubKeySign>,
 ) -> (StatusCode, Json<GetPubKeySignResult>) {
 
-    let srv = state.srv.lock().unwrap();
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(GetPubKeySignResult { pub_sign: "".to_string() }));
+    }
 
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+
+    let srv = state.srv.lock().unwrap();
     let pub_sign = srv.get_pub_key_sign(&*payload.username, mac_bytes, &*payload.user_pub_key, &state.pool);
 
     match pub_sign {
@@ -347,9 +470,11 @@ pub async fn get_pub_key_sign(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct GetMessage {
+    #[validate(custom(function = "validate_username"))]
     username: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
 }
 
@@ -363,9 +488,15 @@ pub async fn message_get(
     Json(payload): Json<GetMessage>,
 ) -> (StatusCode, Json<GetMessageResult>) {
 
-    let mut srv = state.srv.lock().unwrap();
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(GetMessageResult { messages: vec![] }));
+    }
+
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
 
+    let mut srv = state.srv.lock().unwrap();
     let messages = srv.get_messages(mac_bytes, &*payload.username, &state.pool);
 
     // Convert the fields of each messages to base64
@@ -408,10 +539,17 @@ pub async fn message_get_one(
     Json(payload): Json<GetMessage>,
 ) -> impl IntoResponse {
 
-    let mut srv = state.srv.lock().unwrap();
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
 
+    let mut srv = state.srv.lock().unwrap();
     let message = srv.get_message(mac_bytes, &*payload.username, id, &state.pool);
+
     let filename = "encrypted_file"; // Default filename
 
     let mut file_path = PathBuf::from(FILE_STORAGE_PATH);
@@ -450,24 +588,34 @@ pub async fn message_get_one(
     response
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Validate)]
 pub struct SendMessage {
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
+    #[validate(custom(function = "validate_username"))]
     sender: String,
+    #[validate(custom(function = "validate_username"))]
     receiver: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     message: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_message: String,
+    #[validate(custom(function = "validate_int_param"))]
     max_downloads: i32,
+    #[validate(custom(function = "validate_int_param"))]
     lifetime: i32,
+    // TODO validate creation time
     creation_time: chrono::DateTime<chrono::Utc>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     signature: String,
 }
 
 pub async fn message_send(
     State(state): State<AppState>,
-    // Json(payload): Json<SendMessage>,
     mut multipart: Multipart,
 ) -> (StatusCode) {
 
@@ -514,32 +662,38 @@ pub async fn message_send(
         }
     }
 
-    // Extract and decode required fields
-    let mac = URL_SAFE_NO_PAD
-        .decode(fields.get("mac").ok_or(()).unwrap())
-        .expect("Base64 decode failed");
-    let filename = URL_SAFE_NO_PAD
-        .decode(fields.get("filename").ok_or(()).unwrap())
-        .expect("Base64 decode failed");
-    let nonce_filename = URL_SAFE_NO_PAD
-        .decode(fields.get("nonce_filename").ok_or(()).unwrap())
-        .expect("Base64 decode failed");
-    let nonce_message = URL_SAFE_NO_PAD
-        .decode(fields.get("nonce_message").ok_or(()).unwrap())
-        .expect("Base64 decode failed");
-    let signature = URL_SAFE_NO_PAD
-        .decode(fields.get("signature").ok_or(()).unwrap())
-        .expect("Base64 decode failed");
+    // Validate payload
+    let send_message_payload = SendMessage {
+        mac: fields.get("mac").unwrap().to_string(),
+        sender: fields.get("sender").unwrap().to_string(),
+        receiver: fields.get("receiver").unwrap().to_string(),
+        filename: fields.get("filename").unwrap().to_string(),
+        nonce_filename: fields.get("nonce_filename").unwrap().to_string(),
+        message: fields.get("message").unwrap().to_string(),
+        nonce_message: fields.get("nonce_message").unwrap().to_string(),
+        max_downloads: fields.get("max_downloads").unwrap().parse().unwrap(),
+        lifetime: fields.get("lifetime").unwrap().parse().unwrap(),
+        creation_time: fields.get("creation_time").unwrap().parse().unwrap(),
+        signature: fields.get("signature").unwrap().to_string(),
+    };
 
-    let max_downloads: i32 = fields
-        .get("max_downloads")
-        .ok_or(())
-        .unwrap()
-        .parse()
-        .unwrap();
-    let lifetime: i32 = fields.get("lifetime").ok_or(()).unwrap().parse().unwrap();
+    if let Err(e) = send_message_payload.validate() {
+        println!("Validation error: {:?}", e);
+        // Clean up the uploaded file if validation fails
+        if let Some(id) = message_file_id {
+            let mut path = PathBuf::from(FILE_STORAGE_PATH);
+            path.push(&id.to_string());
+            let _ = std::fs::remove_file(path);
+        }
+        return StatusCode::BAD_REQUEST;
+    }
 
-    let creation_time: DateTime<Utc> = fields.get("creation_time").ok_or(()).unwrap().parse().unwrap();
+    // Decode the base64 encoded fields
+    let mac = URL_SAFE_NO_PAD.decode(&send_message_payload.mac).expect("Base64 decode failed");
+    let filename = URL_SAFE_NO_PAD.decode(&send_message_payload.filename).expect("Base64 decode failed");
+    let nonce_filename = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_filename).expect("Base64 decode failed");
+    let nonce_message = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_message).expect("Base64 decode failed");
+    let signature = URL_SAFE_NO_PAD.decode(&send_message_payload.signature).expect("Base64 decode failed");
 
     let mut srv = state.srv.lock().unwrap();
     let send_result = srv.send_message(
@@ -550,9 +704,9 @@ pub async fn message_send(
         nonce_filename,
         message_file_id.unwrap(),
         nonce_message,
-        max_downloads,
-        lifetime,
-        creation_time,
+        send_message_payload.max_downloads,
+        send_message_payload.lifetime,
+        send_message_payload.creation_time,
         signature,
         &state.pool,
     );

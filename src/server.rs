@@ -198,13 +198,13 @@ impl Server {
         &mut self,
         client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
         username_param: &str,
-        mac: [u8; MAC_LEN],
+        mac: Vec<u8>,
         cpriv1: Vec<u8>,
-        nonce1: [u8; SYM_LEN_NONCE],
-        pub1: [u8; ENC_KEY_LEN_PUB],
+        nonce1: Vec<u8>,
+        pub1: Vec<u8>,
         cpriv2: Vec<u8>,
-        nonce2: [u8; SYM_LEN_NONCE],
-        pub2: [u8; SIGN_KEY_LEN_PUB],
+        nonce2: Vec<u8>,
+        pub2: Vec<u8>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         use crate::schema::users;

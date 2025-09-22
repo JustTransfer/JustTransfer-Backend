@@ -7,6 +7,14 @@ pub const MAX_TIME_MARGIN: i64 = 2; // minutes
 pub const MAX_LIFETIME_TRANSFER: i32 = 7; // days
 pub const FILE_STORAGE_PATH: &str = "./files/";
 
+/// Const for Validation
+pub const MIN_LENGTH_USERNAME: usize = 3;
+pub const MAX_LENGTH_USERNAME: usize = 32;
+pub const MIN_LENGTH_BASE64: u64 = 16;
+pub const MAX_LENGTH_BASE64: u64 = 4096;
+pub const MAX_VALUE_INT: i32 = 1000;
+
+
 
 /// Const for mac
 pub const MAC_LEN: usize = crypto_auth_BYTES as usize;

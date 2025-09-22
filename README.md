@@ -13,6 +13,9 @@
 - Free, limit in size (10 GB, 100 files, max 15 days)
 - Premium, no size limit, no time limit, etc.
 
+## Features
+- TODO
+
 ## TODO Backend
 - Fix HTTP return codes
 - Validate email (email format and code transmitted by email)
@@ -24,17 +27,12 @@
 - Add a key rotation option
 - Add a delete account option
 - Login endpoint to have a supervisor
+- Upgrade Database performance
+  - Indexes
+  - Partitioning
+  - Replication
 
 - Files in a bucket S3
-
-## TODO Frontend
-- Validate password strength
-- Support large files (not in memory)
-- Support drag and drop
-- Make account page (key rotation, delete account, etc.)
-- Make anonymous transfer page (create transfer and receive transfer)
-- Use TLD for the signatures (not just concatenate)
-- Validate public key retrieved from the server (Authenticated Data in AEAD)
 
 ## Install Diesel
 ```bash
