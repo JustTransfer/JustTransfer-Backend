@@ -7,6 +7,8 @@ use http_body_util::StreamBody;
 use serde::{Deserialize, Serialize};
 use std::fs::metadata;
 use std::{collections::HashMap, fs::File, io::Write, path::PathBuf};
+use std::error::Error;
+
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 use bytes::Bytes;
 use tokio::fs::File as TokioFile;
@@ -129,7 +131,7 @@ pub struct RegisterUserEnd {
 pub async fn register_user_end(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEnd>,
-) -> (StatusCode) {
+) -> StatusCode {
 
     // Validate payload
     if let Err(e) = payload.validate() {
@@ -708,6 +710,358 @@ pub async fn message_send(
         send_message_payload.lifetime,
         send_message_payload.creation_time,
         signature,
+        &state.pool,
+    );
+
+    match send_result {
+        Ok(_) => (StatusCode::OK),
+        Err(_) => (StatusCode::BAD_REQUEST),
+    }
+}
+
+///
+/// Anonymous messages
+///
+
+#[derive(Deserialize, Validate)]
+pub struct AnonymousGetMessageStart {
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_start: String,
+}
+
+#[derive(Serialize)]
+pub struct AnonymousGetMessageResultStart {
+    result: String,
+}
+
+pub async fn anonymous_message_get_one_metadata_start(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(payload): Json<AnonymousGetMessageStart>,
+) -> (StatusCode, Json<AnonymousGetMessageResultStart>) {
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(AnonymousGetMessageResultStart { result: "".to_string() }));
+    }
+
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
+    let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
+    let mut srv = state.srv.lock().unwrap();
+    let server_login_start = srv.server_login_start_anonymous(
+        id,
+        req,
+        &state.pool
+    ).expect("Failed to start login");
+
+    (
+        StatusCode::OK,
+        Json(AnonymousGetMessageResultStart {
+            result: URL_SAFE_NO_PAD.encode(server_login_start.serialize()),
+        }),
+    )
+}
+
+#[derive(Deserialize, Validate)]
+pub struct AnonymousGetMessage {
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_login_finish_result: String
+}
+
+#[derive(Serialize)]
+pub struct AnonymousGetMessageResult {
+    message: AnonymousMessageMetadataEncoded,
+}
+
+pub async fn anonymous_message_get_one_metadata(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(payload): Json<AnonymousGetMessage>,
+) -> (StatusCode, Json<AnonymousGetMessageResult>) {
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(AnonymousGetMessageResult { message: AnonymousMessageMetadataEncoded {
+            id: Uuid::nil(),
+            filename: "".to_string(),
+            nonce_filename: "".to_string(),
+            message_id: Uuid::nil(),
+            nonce_message: "".to_string(),
+            max_downloads: 0,
+            lifetime: 0,
+            creation_time: chrono::Utc::now(),
+            number_downloads: 0,
+        } }));
+    }
+
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
+    let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
+    let mut srv = state.srv.lock().unwrap();
+    let message = srv.anonymous_get_message_metadata(id, req, &state.pool);
+
+    match message {
+        Ok(message) => (
+            StatusCode::OK,
+            Json(AnonymousGetMessageResult {
+                message: AnonymousMessageMetadataEncoded {
+                    id: message.id,
+                    filename: URL_SAFE_NO_PAD.encode(message.filename),
+                    nonce_filename: URL_SAFE_NO_PAD.encode(message.nonce_filename),
+                    message_id: message.message_id,
+                    nonce_message: URL_SAFE_NO_PAD.encode(message.nonce_message),
+                    max_downloads: message.max_downloads,
+                    lifetime: message.lifetime,
+                    creation_time: message.creation_time,
+                    number_downloads: message.number_downloads,
+                },
+            }),
+        ),
+        Err(_) => (
+            StatusCode::NO_CONTENT,
+            Json(AnonymousGetMessageResult {
+                message: AnonymousMessageMetadataEncoded {
+                    id: Uuid::nil(),
+                    filename: "".to_string(),
+                    nonce_filename: "".to_string(),
+                    message_id: Uuid::nil(),
+                    nonce_message: "".to_string(),
+                    max_downloads: 0,
+                    lifetime: 0,
+                    creation_time: chrono::Utc::now(),
+                    number_downloads: 0,
+                },
+            }),
+        ),
+    }
+}
+
+#[derive(Deserialize, Validate)]
+pub struct AnonymousGetMessageContent {
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    mac: String,
+}
+
+pub async fn anonymous_message_get_content(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(payload): Json<AnonymousGetMessageContent>,
+) -> impl IntoResponse {
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return StatusCode::BAD_REQUEST.into_response();
+    }
+
+    let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
+
+    let mut srv = state.srv.lock().unwrap();
+    let message = srv.anonymous_get_message(id, mac_bytes, &state.pool);
+
+    match message {
+        Err(_) => return StatusCode::BAD_REQUEST.into_response(),
+        Ok(_) => {}
+    }
+
+    let filename = "encrypted_file"; // Default filename
+
+    let mut file_path = PathBuf::from(ANONYMOUS_FILE_STORAGE_PATH);
+    file_path.push(&message.unwrap().message_id.to_string());
+
+    let meta = match metadata(&file_path) {
+        Ok(m) => m,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+    let file_size = meta.len();
+
+    let file = match File::open(&file_path) {
+        Ok(f) => f,
+        Err(_) => return StatusCode::NOT_FOUND.into_response(),
+    };
+
+    let stream = ReaderStream::new(TokioFile::from_std(file))
+        .map_ok(Bytes::from)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
+
+    // Convert stream into axum::body::Body
+    let body = StreamBody::new(stream);
+
+    // Wrap StreamBody into axum::body::Body
+    let response = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/octet-stream")
+        .header(header::CONTENT_LENGTH, file_size.to_string())
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}\"", filename),
+        )
+        .body(Body::from_stream(body))
+        .unwrap();
+
+    response
+}
+
+#[derive(Deserialize, Validate)]
+pub struct AnonymousSendMessageStart {
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_start: String,
+}
+
+#[derive(Serialize)]
+pub struct AnonymousSendMessageResultStart {
+    id: Uuid,
+    result: String,
+}
+
+pub async fn anonymous_message_send_start(
+    State(state): State<AppState>,
+    Json(payload): Json<AnonymousSendMessageStart>,
+) -> (StatusCode, Json<AnonymousSendMessageResultStart>) {
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageResultStart {
+            id: Uuid::nil(),
+            result: "".to_string() }));
+    }
+
+    let mut srv = state.srv.lock().unwrap();
+
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
+    let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+
+    // Generate a unique id for the transfer
+    let id = Uuid::new_v4();
+
+    let server_registration_start_result = srv
+        .anonymous_send_message_start(id, req)
+        .expect("Failed to start registration");
+
+    (
+        StatusCode::OK,
+        Json(AnonymousSendMessageResultStart {
+            id: id,
+            result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
+        }),
+    )
+}
+
+#[derive(Deserialize, Validate)]
+pub struct AnonymousSendMessage {
+    // TODO validate Uuid
+    id: Uuid,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_finish: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    message: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_message: String,
+    #[validate(custom(function = "validate_int_param"))]
+    max_downloads: i32,
+    #[validate(custom(function = "validate_int_param"))]
+    lifetime: i32,
+    // TODO validate creation time
+    creation_time: chrono::DateTime<chrono::Utc>,
+}
+
+pub async fn anonymous_message_send(
+    State(state): State<AppState>,
+    mut multipart: Multipart,
+) -> StatusCode {
+
+    let mut fields: HashMap<String, String> = HashMap::new();
+    let mut message_file_id: Option<Uuid> = None;
+
+    while let Some(mut field) = match multipart.next_field().await {
+        Ok(f) => f,
+        Err(_) => return StatusCode::BAD_REQUEST,
+    } {
+        let name = field.name().unwrap_or("").to_string();
+
+        if name == "message" {
+            // Create a unique file on disk
+            let id = Uuid::new_v4();
+            let file_id = id.to_string();
+            let mut path = PathBuf::from(ANONYMOUS_FILE_STORAGE_PATH);
+            std::fs::create_dir_all(&path).ok(); // ensure directory exists
+            path.push(&file_id);
+
+            match File::create(&path) {
+                Ok(mut file) => {
+                    // Stream chunks to disk
+                    while let Some(chunk) = match field.chunk().await {
+                        Ok(c) => c,
+                        Err(_) => return StatusCode::BAD_REQUEST,
+                    } {
+                        if let Err(_) = file.write_all(&chunk) {
+                            return StatusCode::INTERNAL_SERVER_ERROR;
+                        }
+                    }
+                    // Store the file id (or path) instead of the raw bytes
+                    message_file_id = Some(id);
+                    fields.insert("message".to_string(), file_id);
+                }
+                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
+            }
+        } else {
+            let text = match field.text().await {
+                Ok(t) => t,
+                Err(_) => return StatusCode::BAD_REQUEST,
+            };
+            fields.insert(name, text);
+        }
+    }
+
+    // Validate payload
+    let send_message_payload = AnonymousSendMessage {
+        id: fields.get("id").unwrap().parse().unwrap(),
+        client_registration_finish: fields.get("client_registration_finish").unwrap().to_string(),
+        filename: fields.get("filename").unwrap().to_string(),
+        nonce_filename: fields.get("nonce_filename").unwrap().to_string(),
+        message: fields.get("message").unwrap().to_string(),
+        nonce_message: fields.get("nonce_message").unwrap().to_string(),
+        max_downloads: fields.get("max_downloads").unwrap().parse().unwrap(),
+        lifetime: fields.get("lifetime").unwrap().parse().unwrap(),
+        creation_time: fields.get("creation_time").unwrap().parse().unwrap(),
+    };
+
+    if let Err(e) = send_message_payload.validate() {
+        println!("Validation error: {:?}", e);
+        // Clean up the uploaded file if validation fails
+        if let Some(id) = message_file_id {
+            let mut path = PathBuf::from(ANONYMOUS_FILE_STORAGE_PATH);
+            path.push(&id.to_string());
+            let _ = std::fs::remove_file(path);
+        }
+        return StatusCode::BAD_REQUEST;
+    }
+
+    // Decode the base64 encoded fields
+    let bytes = URL_SAFE_NO_PAD.decode(&send_message_payload.client_registration_finish).expect("Base64 decode failed");
+    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+    let filename = URL_SAFE_NO_PAD.decode(&send_message_payload.filename).expect("Base64 decode failed");
+    let nonce_filename = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_filename).expect("Base64 decode failed");
+    let nonce_message = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_message).expect("Base64 decode failed");
+
+    let mut srv = state.srv.lock().unwrap();
+    let send_result = srv.anonymous_send_message(
+        req,
+        send_message_payload.id,
+        filename,
+        nonce_filename,
+        message_file_id.unwrap(),
+        nonce_message,
+        send_message_payload.max_downloads,
+        send_message_payload.lifetime,
+        send_message_payload.creation_time,
         &state.pool,
     );
 

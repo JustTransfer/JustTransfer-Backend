@@ -5,7 +5,7 @@ use opaque_ke::ServerRegistrationLen;
 use serde::Serialize;
 use crate::consts::*;
 use crate::server::DefaultCipherSuite;
-use uuid::Uuid;
+use uuid::{NonNilUuid, Uuid};
 
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::opaque_settings)]
@@ -129,4 +129,61 @@ pub struct MessageWithUsernamesEncoded {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct Role {
     pub role: String,
+}
+
+#[derive(Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::anonymousmessages)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct AnonymousMessage {
+    pub id: Uuid,
+    pub password_file: Vec<u8>,
+    pub filename: Vec<u8>,
+    pub nonce_filename: Vec<u8>,
+    pub message_id: Uuid,
+    pub nonce_message: Vec<u8>,
+    pub max_downloads: i32,
+    pub lifetime: i32,
+    pub creation_time: chrono::DateTime<Utc>,
+    pub number_downloads: i32,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::anonymousmessages)]
+pub struct NewAnonymousMessage<'a> {
+    pub id: &'a Uuid,
+    pub password_file: &'a Vec<u8>,
+    pub filename: &'a Vec<u8>,
+    pub nonce_filename: &'a Vec<u8>,
+    pub message_id: &'a Uuid,
+    pub nonce_message: &'a Vec<u8>,
+    pub max_downloads: &'a i32,
+    pub lifetime: &'a i32,
+    pub creation_time: &'a chrono::DateTime<Utc>,
+    pub number_downloads: &'a i32,
+}
+
+#[derive(Queryable, Serialize, Clone)]
+pub struct AnonymousMessageMetadata {
+    pub id: Uuid,
+    pub filename: Vec<u8>,
+    pub nonce_filename: Vec<u8>,
+    pub message_id: Uuid,
+    pub nonce_message: Vec<u8>,
+    pub max_downloads: i32,
+    pub lifetime: i32,
+    pub creation_time: chrono::DateTime<Utc>,
+    pub number_downloads: i32,
+}
+
+#[derive(Queryable, Serialize, Clone)]
+pub struct AnonymousMessageMetadataEncoded {
+    pub id: Uuid,
+    pub filename: String,
+    pub nonce_filename: String,
+    pub message_id: Uuid,
+    pub nonce_message: String,
+    pub max_downloads: i32,
+    pub lifetime: i32,
+    pub creation_time: chrono::DateTime<Utc>,
+    pub number_downloads: i32,
 }

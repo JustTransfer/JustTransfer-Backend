@@ -26,6 +26,7 @@
 - Put public key of signature in the message
 - Add a key rotation option
 - Add a delete account option
+- Add delete message inbox option
 - Login endpoint to have a supervisor
 - Upgrade Database performance
   - Indexes

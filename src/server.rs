@@ -24,12 +24,11 @@ use uuid::Uuid;
 use std::fs;
 use std::path::Path;
 
+use crate::*;
 use crate::models::*;
 use crate::schema::messages::dsl::*;
 use crate::schema::users::dsl::*;
-use crate::*;
-
-
+use crate::schema::anonymousmessages::dsl::*;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -45,11 +44,13 @@ pub struct Server {
     server_opaque: ServerSetup<DefaultCipherSuite>,
     user_in_connection: HashMap<String, ServerLogin<DefaultCipherSuite>>,
     connected_users: HashMap<String, GenericArray<u8, U64>>,
+
+    anonymous_user_in_connection: HashMap<Uuid, ServerLogin<DefaultCipherSuite>>,
+    anonymous_user_connected: HashMap<Uuid, GenericArray<u8, U64>>,
 }
 
 impl Server {
     pub fn new(pool: &r2d2::Pool<ConnectionManager<PgConnection>>) -> Self {
-
         use crate::schema::opaque_settings;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -85,6 +86,8 @@ impl Server {
             server_opaque: server_setup,
             user_in_connection: HashMap::new(),
             connected_users: HashMap::new(),
+            anonymous_user_in_connection: HashMap::new(),
+            anonymous_user_connected: HashMap::new(),
         }
     }
 
@@ -137,7 +140,7 @@ impl Server {
             client_registration_start_result,
             username_param.as_bytes(),
         )
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         Ok(server_registration_start_result.message)
     }
@@ -227,7 +230,7 @@ impl Server {
 
         let user = diesel::update(users.find(user_id))
             .set((
-                password_file.eq(password_file_bytes.to_vec()),
+                users::password_file.eq(password_file_bytes.to_vec()),
                 public_key_enc.eq(pub1.to_vec()),
                 nonce_enc.eq(nonce1.to_vec()),
                 cipher_private_key_enc.eq(cpriv1),
@@ -250,7 +253,6 @@ impl Server {
     ) -> Result<CredentialResponse<DefaultCipherSuite>,
         Box<dyn std::error::Error>,
     > {
-
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -275,7 +277,7 @@ impl Server {
             username_param.as_bytes(),
             ServerLoginStartParameters::default(),
         )
-        .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string())?;
 
         self.user_in_connection
             .insert(username_param.to_string(), server_login_start_result.state.clone());
@@ -358,7 +360,6 @@ impl Server {
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; ENC_KEY_LEN_PUB]> {
-
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -381,7 +382,6 @@ impl Server {
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; SIGN_KEY_LEN_PUB]> {
-
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -413,7 +413,6 @@ impl Server {
         signature_param: Vec<u8>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -475,12 +474,11 @@ impl Server {
 
     // TODO process only message belonging to the user, not all messages
     fn delete_invalid_messages(&mut self, pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
-
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Get message with max downloads
         let messages_to_delete: Vec<Message> = messages
-            .filter(number_downloads.ge(max_downloads))
+            .filter(crate::schema::messages::number_downloads.ge(crate::schema::messages::max_downloads))
             .load(&mut conn)?;
 
         // Delete files from disk
@@ -492,7 +490,7 @@ impl Server {
         }
 
         // Delete from DB
-        diesel::delete(messages.filter(number_downloads.ge(max_downloads)))
+        diesel::delete(messages.filter(crate::schema::messages::number_downloads.ge(crate::schema::messages::max_downloads)))
             .execute(&mut conn)?;
 
         // Get expired messages
@@ -522,7 +520,6 @@ impl Server {
         username_param: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<Vec<MessageWithUsernames>, Box<dyn std::error::Error>> {
-
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -567,7 +564,6 @@ impl Server {
         message_id_param: Uuid,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<Message, Box<dyn std::error::Error>> {
-
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -580,7 +576,7 @@ impl Server {
 
         // Get the message
         let mut message = messages
-            .filter(message_id.eq(message_id_param))
+            .filter(messages::message_id.eq(message_id_param))
             .first::<Message>(&mut conn)
             .optional()?
             .ok_or("Message not found")?;
@@ -592,18 +588,282 @@ impl Server {
             .first::<i32>(&mut conn)
             .optional()?
             .ok_or("User not found")? {
-                return Err(Box::new(io::Error::new(
-                    io::ErrorKind::Other,
-                    "Message does not belong to the user",
-                )));
-            }
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "Message does not belong to the user",
+            )));
+        }
 
         // Increment the message download count
         let updated_rows = diesel::update(messages.filter(messages::id.eq(message.id)))
-            .set(number_downloads.eq(number_downloads + 1))
+            .set(messages::number_downloads.eq(messages::number_downloads + 1))
             .execute(&mut conn)
             .expect("Error updating message");
 
         Ok(message)
+    }
+
+    ///
+    /// Anonymous Messages
+    ///
+
+    // TODO process only message belonging to the user, not all messages
+    fn delete_invalid_anonymous_messages(&mut self, pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::schema::anonymousmessages;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Get message with max downloads
+        let messages_to_delete: Vec<AnonymousMessage> = anonymousmessages
+            .filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads))
+            .load(&mut conn)?;
+
+        // Delete files from disk
+        for msg in &messages_to_delete {
+            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            if Path::new(&file_path).exists() {
+                fs::remove_file(&file_path)?;
+            }
+        }
+
+        // Delete from DB
+        diesel::delete(anonymousmessages.filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads)))
+            .execute(&mut conn)?;
+
+        // Get expired messages
+        let expiry = sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')");
+        let expired_messages: Vec<Message> = messages
+            .filter(expiry.clone().le(sql_now))
+            .load(&mut conn)?;
+
+        // Delete files from disk
+        for msg in &expired_messages {
+            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            if Path::new(&file_path).exists() {
+                fs::remove_file(&file_path)?;
+            }
+        }
+
+        // Delete from DB
+        diesel::delete(messages.filter(expiry.le(sql_now)))
+            .execute(&mut conn)?;
+
+        Ok(())
+    }
+
+    pub fn anonymous_send_message_start(
+        &mut self,
+        id_param: Uuid,
+        client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
+    ) -> Result<RegistrationResponse<DefaultCipherSuite>, Box<dyn std::error::Error>> {
+        let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
+            &self.server_opaque,
+            client_registration_start_result,
+            id_param.as_bytes(),
+        )
+            .map_err(|e| e.to_string())?;
+
+        Ok(server_registration_start_result.message)
+    }
+
+    pub fn anonymous_send_message(
+        &mut self,
+        client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
+        id_transfer: Uuid,
+        filename_param: Vec<u8>,
+        nonce_filename_param: Vec<u8>,
+        message_id_param: Uuid,
+        nonce_message_param: Vec<u8>,
+        max_downloads_param: i32,
+        lifetime_param: i32,
+        creation_time_param: chrono::DateTime<Utc>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::schema::anonymousmessages;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Check if the creation time is correct
+        let now = Utc::now();
+        if creation_time_param > now + Duration::minutes(MAX_TIME_MARGIN) || creation_time_param < now - Duration::minutes(MAX_TIME_MARGIN) {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "Creation time is not correct",
+            )));
+        }
+
+        // Check if the lifetime is correct
+        if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_ANONYMOUS_TRANSFER {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "Lifetime is not correct",
+            )));
+        }
+
+        let password_file_param =
+            ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
+
+        let new_message = NewAnonymousMessage {
+            id: &id_transfer,
+            password_file: &password_file_param.serialize().to_vec(),
+            filename: &filename_param,
+            nonce_filename: &nonce_filename_param,
+            message_id: &message_id_param,
+            nonce_message: &nonce_message_param,
+            max_downloads: &max_downloads_param,
+            lifetime: &lifetime_param,
+            creation_time: &creation_time_param,
+            number_downloads: &0,
+        };
+
+        diesel::insert_into(anonymousmessages::table)
+            .values(&new_message)
+            .returning(AnonymousMessage::as_returning())
+            .get_result(&mut conn)
+            .expect("Error saving new message");
+
+        Ok(())
+    }
+
+    pub fn server_login_start_anonymous(
+        &mut self,
+        id_param: Uuid,
+        client_login_start_result: CredentialRequest<DefaultCipherSuite>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<CredentialResponse<DefaultCipherSuite>,
+        Box<dyn std::error::Error>,
+    > {
+        use crate::schema::anonymousmessages;
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        let annonymous_message = anonymousmessages::table
+            .filter(anonymousmessages::id.eq(id_param))
+            .first::<AnonymousMessage>(&mut conn)
+            .optional()?
+            .ok_or("User not found")?;
+
+        let password_file_bytes = annonymous_message.password_file.clone();
+
+        let password_file_param =
+            ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
+                .map_err(|e| e.to_string())?;
+
+        let mut server_rng = OsRng;
+        let server_login_start_result = ServerLogin::start(
+            &mut server_rng,
+            &self.server_opaque,
+            Some(password_file_param),
+            client_login_start_result,
+            id_param.as_bytes(),
+            ServerLoginStartParameters::default(),
+        )
+            .map_err(|e| e.to_string())?;
+
+        self.anonymous_user_in_connection
+            .insert(id_param, server_login_start_result.state.clone());
+
+        Ok(server_login_start_result.message)
+    }
+
+    pub fn anonymous_get_message_metadata(
+        &mut self,
+        id_param: Uuid,
+        client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<AnonymousMessageMetadata, Box<dyn std::error::Error>> {
+        use crate::schema::anonymousmessages;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        let server_login_start_result = self.anonymous_user_in_connection
+            .remove(&id_param)
+            .ok_or("No login in progress for this user")?;
+
+        let server_login_finish_result = server_login_start_result
+            .finish(client_login_finish_result)
+            .map_err(|e| e.to_string())?;
+
+        // Key to check if the user is connected
+        let key_communication = server_login_finish_result.session_key.clone();
+
+        if key_communication.len() < MAC_LEN {
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "Error in key generation",
+            )));
+        }
+
+        self.anonymous_user_connected.insert(id_param, key_communication.clone());
+
+        // Delete invalid messages
+        self.delete_invalid_anonymous_messages(pool)?;
+
+        let messages_get = anonymousmessages::table
+            .filter(anonymousmessages::id.eq(id_param))
+            .select((
+                anonymousmessages::id,
+                anonymousmessages::filename,
+                anonymousmessages::nonce_filename,
+                anonymousmessages::message_id,
+                anonymousmessages::nonce_message,
+                anonymousmessages::max_downloads,
+                anonymousmessages::lifetime,
+                anonymousmessages::creation_time,
+                anonymousmessages::number_downloads,
+            ))
+            .first::<AnonymousMessageMetadata>(&mut conn)
+            .optional()?
+            .ok_or("No messages found")?;
+
+        Ok(messages_get)
+    }
+
+    pub fn anonymous_get_message(
+        &mut self,
+        id_param: Uuid,
+        mac: Vec<u8>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<AnonymousMessage, Box<dyn std::error::Error>> {
+        use crate::schema::anonymousmessages;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Check if the user is connected using mac
+        let key_communication = self.anonymous_user_connected.get(&id_param).ok_or("User not connected")?;
+        let id_string = id_param.to_string();
+        let result = unsafe {
+            crypto_auth_verify(
+                mac.as_ptr(),
+                id_string.as_bytes().as_ptr(),
+                id_string.as_bytes().len() as u64,
+                key_communication.as_ptr(),
+            )
+        };
+
+        if result != 0 {
+            println!("MAC invalid");
+            return Err(Box::new(io::Error::new(
+                io::ErrorKind::Other,
+                "MAC invalid",
+            )));
+        }
+
+        // Delete invalid messages
+        self.delete_invalid_anonymous_messages(pool)?;
+
+        // Get the message
+        let mut anonymousmessage = anonymousmessages
+            .filter(anonymousmessages::id.eq(id_param))
+            .first::<AnonymousMessage>(&mut conn)
+            .optional()?
+            .ok_or("Message not found")?;
+
+        // Increment the message download count
+        let updated_rows = diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
+            .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
+            .execute(&mut conn)
+            .expect("Error updating message");
+
+        Ok(anonymousmessage)
     }
 }

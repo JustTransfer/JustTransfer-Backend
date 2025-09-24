@@ -52,3 +52,19 @@ CREATE TABLE messages
     signature        BYTEA         NOT NULL,
     number_downloads INT DEFAULT 0 NOT NULL
 );
+
+-- Table Anonymous messages
+CREATE TABLE anonymousMessages
+(
+    id               UUID PRIMARY KEY,
+
+    password_file    BYTEA         NOT NULL,
+    filename         BYTEA         NOT NULL,
+    nonce_filename   BYTEA         NOT NULL,
+    message_id       UUID          NOT NULL UNIQUE,
+    nonce_message    BYTEA         NOT NULL,
+    max_downloads    INT           NOT NULL,
+    lifetime         INT           NOT NULL,
+    creation_time    TIMESTAMPTZ   NOT NULL,
+    number_downloads INT DEFAULT 0 NOT NULL
+);

@@ -1,6 +1,21 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
+    anonymousmessages (id) {
+        id -> Uuid,
+        password_file -> Bytea,
+        filename -> Bytea,
+        nonce_filename -> Bytea,
+        message_id -> Uuid,
+        nonce_message -> Bytea,
+        max_downloads -> Int4,
+        lifetime -> Int4,
+        creation_time -> Timestamptz,
+        number_downloads -> Int4,
+    }
+}
+
+diesel::table! {
     messages (id) {
         id -> Int4,
         sender_id -> Int4,
@@ -48,6 +63,7 @@ diesel::table! {
 diesel::joinable!(users -> roles (role));
 
 diesel::allow_tables_to_appear_in_same_query!(
+    anonymousmessages,
     messages,
     opaque_settings,
     roles,
