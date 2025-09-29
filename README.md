@@ -10,7 +10,7 @@
 
 
 ## Price plan
-- Free, limit in size (10 GB, 100 files, max 15 days)
+- Free, limit in size (10 GB, 100 files, max 15 days, max downloads)
 - Premium, no size limit, no time limit, etc.
 
 ## Features
@@ -24,7 +24,7 @@
 - Add a counter to max number of anonymous transfers (avoid server overload)
 - Add a counter to max number of transfers (avoid server overload)
 - Put public key of signature in the message
-- Add a key rotation option
+- Add a key rotation option (should keep old messages)
 - Add a delete account option
 - Add delete message inbox option
 - Login endpoint to have a supervisor
@@ -32,6 +32,11 @@
   - Indexes
   - Partitioning
   - Replication
+- OPAQUE
+  - Use dummy password file (None) if not found
+  - Check server public key
+  - Change the way connected user are stored (hashmap)
+  - Change password/Key rotation should keep old messages readable
 
 - Files in a bucket S3
 
