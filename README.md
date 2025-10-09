@@ -52,7 +52,7 @@ Set Path variable `C:\Program Files\PostgreSQL\17\bin`.
 
 ```bash
 diesel setup
-diesel migration generate initial_migration # Fulfill the up.sql and down.sql files
+diesel migration generate initial_migration # Fulfill the up.sql and down.sql files from the database
 diesel migration run
 
 diesel print-schema > src/schema.rs # Generate schema.rs from the database

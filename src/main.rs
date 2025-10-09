@@ -9,7 +9,7 @@ use axum::{
     http::StatusCode,
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 
@@ -85,6 +85,7 @@ async fn main() {
         .route("/anonymous/message/{id}/content", post(api_handlers::anonymous_message_get_content))
         .route("/anonymous/message/start", post(api_handlers::anonymous_message_send_start))
         .route("/anonymous/message", post(api_handlers::anonymous_message_send))
+        .route("/anonymous/message/chunk", put(api_handlers::anonymous_message_send_chunk))
         .with_state(state.clone())
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)

@@ -7,7 +7,7 @@ diesel::table! {
         filename -> Bytea,
         nonce_filename -> Bytea,
         message_id -> Uuid,
-        nonce_message -> Bytea,
+        header -> Bytea,
         max_downloads -> Int4,
         lifetime -> Int4,
         creation_time -> Timestamptz,
