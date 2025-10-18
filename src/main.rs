@@ -2,6 +2,7 @@ use http_body_util::BodyExt;
 use inquire::Select;
 use libsodium_sys::*;
 use std::sync::{Arc, Mutex};
+use serde::{Deserialize, Serialize};
 
 use axum::{
     body::{Body, Bytes},
@@ -21,10 +22,68 @@ use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
 use dotenvy::dotenv;
 use std::env;
+use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
+use jsonwebtoken::errors::Error;
+
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 use JujuTransfer::server::Server;
 use JujuTransfer::*;
+use JujuTransfer::consts::{AUTH_HEADER, JWT_DURATION_MINUTES};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String, // user id or username
+    exp: usize,  // expiration time as UNIX timestamp
+}
+
+pub fn create_jwt(user_id: &str) -> Result<String, Error> {
+    let expiration = chrono::Utc::now()
+        .checked_add_signed(chrono::Duration::minutes(JWT_DURATION_MINUTES))
+        .expect("valid timestamp")
+        .timestamp() as usize;
+
+    let claims = Claims {
+        sub: user_id.to_owned(),
+        exp: expiration,
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(consts::SECRET_KEY.as_ref()),
+    )
+}
+
+fn verify_jwt(token: &str) -> Result<TokenData<Claims>, Error> {
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(consts::SECRET_KEY.as_ref()),
+        &Validation::default(),
+    )
+}
+
+async fn jwt_auth(req: Request, next: Next) -> Result<Response, StatusCode> {
+    // Get the Cookie
+    let headers = req.headers();
+    if let Some(cookie_header) = headers.get("Cookie") {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            // Look for the jwt_token cookie
+            for cookie in cookie_str.split(';') {
+                let cookie = cookie.trim();
+                if let Some(token) = cookie.strip_prefix(AUTH_HEADER) {
+                    let token = token.trim_start_matches('=').trim();
+                    return match verify_jwt(token) {
+                        Ok(_) => Ok(next.run(req).await), // JWT is valid, proceed to next handler
+                        Err(_) => Err(StatusCode::UNAUTHORIZED), // Invalid JWT
+                    }
+                }
+            }
+        }
+    }
+
+    Err(StatusCode::UNAUTHORIZED) // No Authorization header or invalid token
+}
 
 #[tokio::main]
 async fn main() {
@@ -53,7 +112,9 @@ async fn main() {
         .expect("Failed to create pool");
 
     //let mut srv = server::Server::new();
-    let srv = Arc::new(Mutex::new(server::Server::new(&pool.clone())));
+    let srv = Arc::new(Mutex::new(
+        server::Server::new(&pool.clone()).expect("Failed to create server"),
+    ));
 
     let state = api_handlers::AppState {
         srv: srv.clone(),
@@ -68,30 +129,31 @@ async fn main() {
 
     // build our application with a route
     let app = Router::new()
-        .route("/", get(api_handlers::root))
-        .route("/register/start", post(api_handlers::register_user_start))
-        .route("/register/end", post(api_handlers::register_user_end))
-        .route("/register/update", post(api_handlers::register_user_end_update))
-        .route("/login/start", post(api_handlers::login_user_start))
-        .route("/login/end", post(api_handlers::login_user_end))
-        .route("/logout", post(api_handlers::logout))
-        .route("/pubkey/enc", post(api_handlers::get_pub_key_enc))
-        .route("/pubkey/sign", post(api_handlers::get_pub_key_sign))
-        .route("/messages", post(api_handlers::message_get))
-        .route("/message/{id}", post(api_handlers::message_get_one))
-        .route("/message", post(api_handlers::message_send))
-        .route("/anonymous/message/{id}/start", post(api_handlers::anonymous_message_get_one_metadata_start))
-        .route("/anonymous/message/{id}", post(api_handlers::anonymous_message_get_one_metadata))
-        .route("/anonymous/message/{id}/content", post(api_handlers::anonymous_message_get_content))
-        .route("/anonymous/message/start", post(api_handlers::anonymous_message_send_start))
-        .route("/anonymous/message", post(api_handlers::anonymous_message_send))
-        .route("/anonymous/message/chunk", put(api_handlers::anonymous_message_send_chunk))
+        //.route("/api/logout", post(api_handlers::logout))
+        .route("/api/pubkey/enc", post(api_handlers::get_pub_key_enc))
+        .route("/api/pubkey/sign", post(api_handlers::get_pub_key_sign))
+        .route("/api/messages", post(api_handlers::message_get))
+        .route("/api/message/{id}", post(api_handlers::message_get_one))
+        .route("/api/message", post(api_handlers::message_send))
+        .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous_message_get_one_metadata_start))
+        .route("/api/anonymous/message/{id}", post(api_handlers::anonymous_message_get_one_metadata))
+        .route("/api/anonymous/message/{id}/content", post(api_handlers::anonymous_message_get_content))
+        .route("/api/anonymous/message/start", post(api_handlers::anonymous_message_send_start))
+        .route("/api/anonymous/message", post(api_handlers::anonymous_message_send))
+        .route("/api/anonymous/message/chunk", put(api_handlers::anonymous_message_send_chunk))
+        .layer(middleware::from_fn(jwt_auth)) // Apply JWT auth middleware
+        .route("/api", get(api_handlers::root))
+        .route("/api/register/start", post(api_handlers::register_user_start))
+        .route("/api/register/end", post(api_handlers::register_user_end))
+        .route("/api/register/update", post(api_handlers::register_user_end_update))
+        .route("/api/login/start", post(api_handlers::login_user_start))
+        .route("/api/login/end", post(api_handlers::login_user_end))
         .with_state(state.clone())
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)
         .layer(middleware::from_fn(print_request_response));
 
-    // run our app with hyper, listening globally on port 3000
+    println!("Server running on {}", consts::URL);
     let listener = tokio::net::TcpListener::bind(consts::URL).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

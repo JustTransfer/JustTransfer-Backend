@@ -1,13 +1,19 @@
 use libsodium_sys::*;
 
+/// Environment variable list
+pub const ENV_VARS: [&str; 1] = ["DATABASE_URL"];
+
 /// Const for Server
-pub const URL: &str = "0.0.0.0:3333";
+pub const URL: &str = "0.0.0.0:80";
 pub const MAX_BODY_SIZE: usize = 100 * 1024 * 1024 * 1024; // 100 GB
 pub const MAX_TIME_MARGIN: i64 = 2; // minutes
 pub const MAX_LIFETIME_ANONYMOUS_TRANSFER: i32 = 7; // days
 pub const MAX_LIFETIME_TRANSFER: i32 = 7; // days
 pub const FILE_STORAGE_PATH: &str = "./files/";
 pub const ANONYMOUS_FILE_STORAGE_PATH: &str = "./anonymous_files/";
+pub const JWT_DURATION_MINUTES: i64 = 60;
+pub const AUTH_HEADER: &str = "auth-token";
+pub const SECRET_KEY: &str = "super_secret_key"; // TODO change to load from env
 
 /// Const for Validation
 pub const MIN_LENGTH_USERNAME: usize = 3;

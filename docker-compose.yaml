@@ -12,12 +12,56 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data_juju_transfer:/var/lib/postgresql/data
-    networks:
-      - network_juju_transfer
+    healthcheck:
+      test: [ "CMD", "pg_isready", "-U", "${POSTGRESQL_USERNAME}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  reverse_proxy:
+    image: traefik
+    command:
+      - --providers.docker
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./traefik/ssl:/etc/traefik/certificates
+      - ./traefik/traefik.yaml:/etc/traefik/traefik.yaml
+    ports:
+      - "80:80" # Web sites
+      - "443:443" # Web sites
+      - "8080:8080" # Traefik dashboard
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    labels:
+      - traefik.http.routers.backend.rule=Host(`localhost`) &&
+        PathPrefix(`/api`)
+      - traefik.http.routers.backend.entrypoints=https
+      - traefik.http.routers.backend.tls=true
+      - traefik.http.services.backend.loadbalancer.sticky=true
+      - traefik.http.services.backend.loadbalancer.sticky.cookie.name=StickyCookie
+      - traefik.http.services.backend.loadbalancer.sticky.cookie.secure=true
+      - traefik.http.services.backend.loadbalancer.sticky.cookie.samesite=strict
+    deploy:
+      replicas: 1
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../jujuTransfer-Frontend
+      dockerfile: Dockerfile
+    labels:
+      - traefik.http.routers.frontend.rule=Host(`localhost`)
+      - traefik.http.routers.frontend.entrypoints=https
+      - traefik.http.routers.frontend.tls=true
+    deploy:
+      replicas: 1
+    environment:
+      - REACT_APP_API_URL=${REACT_APP_API_URL}
 
 volumes:
   postgres_data_juju_transfer:
-
-networks:
-  network_juju_transfer:
-    driver: bridge

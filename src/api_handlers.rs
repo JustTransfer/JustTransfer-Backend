@@ -1,12 +1,13 @@
 use crate::server::{DefaultCipherSuite, Server};
-use axum::{body::Body, body::to_bytes, body::BodyDataStream, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json};
+use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json};
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
 use futures_util::TryStreamExt;
 use http_body_util::StreamBody;
 use serde::{Deserialize, Serialize};
 use std::fs::metadata;
-use std::{collections::HashMap, fs::File, io::Write, path::PathBuf, fs::{OpenOptions},};
+use std::{collections::HashMap, fs::File, io::Write, path::PathBuf, fs::{OpenOptions}};
 
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 use bytes::Bytes;
@@ -15,15 +16,42 @@ use tokio_util::io::ReaderStream;
 
 use crate::consts::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{DateTime, Utc};
 use http::header;
 use opaque_ke::*;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
+use dotenvy::dotenv;
+use std::env;
+use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 use crate::models::*;
 use crate::schema::messages::message_id;
+
+
+#[derive(Debug, Serialize, Deserialize)]
+struct Claims {
+    sub: String, // user id or username
+    exp: usize,  // expiration time as UNIX timestamp
+}
+
+pub fn create_jwt(user_id: &str) -> Result<String, Error> {
+    let expiration = chrono::Utc::now()
+        .checked_add_signed(chrono::Duration::minutes(JWT_DURATION_MINUTES))
+        .expect("valid timestamp")
+        .timestamp() as usize;
+
+    let claims = Claims {
+        sub: user_id.to_owned(),
+        exp: expiration,
+    };
+
+    encode(
+        &Header::default(),
+        &claims,
+        &EncodingKey::from_secret(SECRET_KEY.as_ref()),
+    )
+}
 
 fn validate_username(username: &str) -> Result<(), ValidationError> {
     // Check length
@@ -57,10 +85,20 @@ pub struct AppState {
     pub pool: DbPool,
 }
 
+#[derive(Serialize)]
+pub struct RootResponse {
+    result: String,
+}
+
 // basic handler that responds with a static string
-pub async fn root() -> &'static str {
-    // TODO: return some useful info like number transfers max, max size, etc
-    "Welcome to the GoGoTransfer!"
+pub async fn root() -> Json<RootResponse> {
+    dotenv().ok();
+
+    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+
+    Json(RootResponse {
+        result: format!("JujuTransfer Server is running. Database URL: {}", database_url),
+    })
 }
 
 #[derive(Deserialize, Validate)]
@@ -292,24 +330,27 @@ pub struct LoginEndResult {
     pub_sign: String,
     cpriv_sign: String,
     nonce_priv_sign: String,
+    auth_token: String,
 }
 
 pub async fn login_user_end(
     State(state): State<AppState>,
     Json(payload): Json<LoginEnd>,
-) -> (StatusCode, Json<LoginEndResult>) {
+) -> (CookieJar, (StatusCode, Json<LoginEndResult>)) {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(LoginEndResult {
+        return (CookieJar::new(), (
+            StatusCode::BAD_REQUEST, Json(LoginEndResult {
             pub_enc: "".to_string(),
             cpriv_enc: "".to_string(),
             nonce_priv_enc: "".to_string(),
             pub_sign: "".to_string(),
             cpriv_sign: "".to_string(),
             nonce_priv_sign: "".to_string(),
-        }));
+            auth_token: "".to_string(),
+        })));
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
@@ -325,6 +366,20 @@ pub async fn login_user_end(
     match server_login_finish {
         Ok((pub_enc, cpriv_enc, nonce_priv_enc, pub_sign, cpriv_sign, nonce_priv_sign)) => {
 
+            // Generate JWT token
+            let token = create_jwt(&payload.username).expect("Failed to create JWT token");
+            let token_clone = token.clone();
+
+            // Create cookie (HttpOnly, Secure for production)
+            let cookie = Cookie::build((AUTH_HEADER, token))
+                .http_only(false)// TODO change
+                .secure(true)
+                .same_site(SameSite::Strict)
+                .path("/")
+                .finish();
+
+            let jar = CookieJar::new().add(cookie);
+
             // Encode the keys to base64
             let pub_enc = URL_SAFE_NO_PAD.encode(pub_enc);
             let cpriv_enc = URL_SAFE_NO_PAD.encode(cpriv_enc);
@@ -333,16 +388,21 @@ pub async fn login_user_end(
             let cpriv_sign = URL_SAFE_NO_PAD.encode(cpriv_sign);
             let nonce_priv_sign = URL_SAFE_NO_PAD.encode(nonce_priv_sign);
 
-            (StatusCode::OK, Json(LoginEndResult {
+            let content = Json(LoginEndResult {
                 pub_enc,
                 cpriv_enc,
                 nonce_priv_enc,
                 pub_sign,
                 cpriv_sign,
                 nonce_priv_sign,
-            }))
+                auth_token: token_clone,
+            });
+
+            (jar, (StatusCode::OK, content))
         }
         Err(_) => (
+            CookieJar::new(),
+            (
             StatusCode::BAD_REQUEST,
             Json(LoginEndResult {
                 pub_enc: "".to_string(),
@@ -351,12 +411,14 @@ pub async fn login_user_end(
                 pub_sign: "".to_string(),
                 cpriv_sign: "".to_string(),
                 nonce_priv_sign: "".to_string(),
+                auth_token: "".to_string(),
             }),
+            )
         ),
     }
 }
 
-#[derive(Deserialize, Validate)]
+/*#[derive(Deserialize, Validate)]
 pub struct Logout {
     #[validate(custom(function = "validate_username"))]
     username: String,
@@ -381,7 +443,7 @@ pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) 
         Ok(_) => (StatusCode::OK),
         Err(_) => (StatusCode::BAD_REQUEST),
     }
-}
+}*/
 
 #[derive(Deserialize, Validate)]
 pub struct GetPubKeyEnc {
@@ -415,7 +477,7 @@ pub async fn get_pub_key_enc(
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
 
     let srv = state.srv.lock().unwrap();
-    let pub_enc = srv.get_pub_key_enc(&*payload.username, mac_bytes, &*payload.user_pub_key, &state.pool);
+    let pub_enc = srv.get_pub_key_enc(&*payload.user_pub_key, &state.pool);
 
     match pub_enc {
         Some(pub_enc) => {
@@ -456,7 +518,7 @@ pub async fn get_pub_key_sign(
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
 
     let srv = state.srv.lock().unwrap();
-    let pub_sign = srv.get_pub_key_sign(&*payload.username, mac_bytes, &*payload.user_pub_key, &state.pool);
+    let pub_sign = srv.get_pub_key_sign(&*payload.user_pub_key, &state.pool);
 
     match pub_sign {
         Some(pub_sign) => {
@@ -495,7 +557,7 @@ pub async fn message_get(
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
 
     let mut srv = state.srv.lock().unwrap();
-    let messages = srv.get_messages(mac_bytes, &*payload.username, &state.pool);
+    let messages = srv.get_messages(&*payload.username, &state.pool);
 
     // Convert the fields of each messages to base64
     let messages_encoded = match messages {
@@ -546,7 +608,7 @@ pub async fn message_get_one(
     let mac_bytes = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
 
     let mut srv = state.srv.lock().unwrap();
-    let message = srv.get_message(mac_bytes, &*payload.username, id, &state.pool);
+    let message = srv.get_message(&*payload.username, id, &state.pool);
 
     let filename = "encrypted_file"; // Default filename
 
@@ -694,7 +756,6 @@ pub async fn message_send(
 
     let mut srv = state.srv.lock().unwrap();
     let send_result = srv.send_message(
-        mac,
         fields.get("sender").unwrap(),
         fields.get("receiver").unwrap(),
         filename,
@@ -1016,10 +1077,11 @@ pub async fn anonymous_message_send_chunk(
         return StatusCode::INTERNAL_SERVER_ERROR;
     }
 
-    // Optionally, you can log or handle the final chunk differently
+    // Finalize if this was the last chunk
     if chunk_index == total_chunks - 1 {
         println!("All chunks received for file {}", id);
-        // You could trigger a finalize or move step here
+
+        // TODO write the total size to DB
     }
 
     StatusCode::OK

@@ -43,14 +43,24 @@ impl CipherSuite for DefaultCipherSuite {
 pub struct Server {
     server_opaque: ServerSetup<DefaultCipherSuite>,
     user_in_connection: HashMap<String, ServerLogin<DefaultCipherSuite>>,
-    connected_users: HashMap<String, GenericArray<u8, U64>>,
 
     anonymous_user_in_connection: HashMap<Uuid, ServerLogin<DefaultCipherSuite>>,
     anonymous_user_connected: HashMap<Uuid, GenericArray<u8, U64>>,
 }
 
 impl Server {
-    pub fn new(pool: &r2d2::Pool<ConnectionManager<PgConnection>>) -> Self {
+    pub fn new(pool: &r2d2::Pool<ConnectionManager<PgConnection>>) -> Result<Server, Box<dyn std::error::Error>> {
+
+        // Check if the environment variables exist
+        for var in ENV_VARS {
+            if std::env::var(var).is_err() {
+                return Err(Box::new(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Environment variable {} not set", var),
+                )));
+            }
+        }
+
         use crate::schema::opaque_settings;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -82,52 +92,12 @@ impl Server {
             server_setup
         };
 
-        Server {
+        Ok(Server {
             server_opaque: server_setup,
             user_in_connection: HashMap::new(),
-            connected_users: HashMap::new(),
             anonymous_user_in_connection: HashMap::new(),
             anonymous_user_connected: HashMap::new(),
-        }
-    }
-
-    fn connect_user(&mut self, username_param: String, key_communication: GenericArray<u8, U64>) -> Result<(), Box<dyn std::error::Error>> {
-        self.connected_users.insert(username_param, key_communication);
-        Ok(())
-    }
-
-    fn get_connected_user(&self, username_param: &str) -> GenericArray<u8, U64> {
-        self.connected_users.get(username_param).cloned().unwrap_or(GenericArray::default())
-    }
-
-    fn disconnect_user(&mut self, username_param: &str) -> Result<(), Box<dyn std::error::Error>> {
-        self.connected_users.remove(username_param);
-
-        Ok(())
-    }
-
-    fn check_mac(
-        &self,
-        username_param: &str,
-        mac: Vec<u8>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let result = unsafe {
-            crypto_auth_verify(
-                mac.as_ptr(),
-                username_param.as_bytes().as_ptr(),
-                username_param.as_bytes().len() as u64,
-                self.get_connected_user(username_param).as_ptr(),
-            )
-        };
-
-        if result != 0 {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::Other,
-                "MAC invalid",
-            )));
-        }
-
-        Ok(())
+        })
     }
 
     pub fn server_registration_start(
@@ -217,9 +187,6 @@ impl Server {
             ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
         let password_file_bytes = password_file_param.serialize();
-
-        // Check if the user is connected using mac
-        self.check_mac(&*username_param, mac.to_vec()).ok();
 
         let user_id = users::table
             .filter(users::username.eq(username_param))
@@ -322,8 +289,6 @@ impl Server {
             )));
         }
 
-        self.connect_user(username_param.to_string(), key_communication)?;
-
         let user = users::table
             .filter(users::username.eq(username_param))
             .first::<User>(&mut conn)
@@ -340,7 +305,8 @@ impl Server {
         ))
     }
 
-    pub fn logout(
+    // TODO remove
+    /*pub fn logout(
         &mut self,
         username_param: &str,
         mac: Vec<u8>,
@@ -351,20 +317,15 @@ impl Server {
         self.disconnect_user(username_param)?;
 
         Ok(())
-    }
+    }*/
 
     pub fn get_pub_key_enc(
         &self,
-        username_param: &str,
-        mac: Vec<u8>,
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; ENC_KEY_LEN_PUB]> {
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
-
-        // Check if the user is connected using mac
-        self.check_mac(username_param, mac).ok()?;
 
         let user = crate::schema::users::table
             .filter(crate::schema::users::username.eq(username_pub_key))
@@ -377,16 +338,11 @@ impl Server {
 
     pub fn get_pub_key_sign(
         &self,
-        username_param: &str,
-        mac: Vec<u8>,
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; SIGN_KEY_LEN_PUB]> {
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
-
-        // Check if the user is connected using mac
-        self.check_mac(username_param, mac).ok()?;
 
         let user = crate::schema::users::table
             .filter(crate::schema::users::username.eq(username_pub_key))
@@ -399,12 +355,10 @@ impl Server {
 
     pub fn send_message(
         &mut self,
-        mac: Vec<u8>,
         sender: &str,
         receiver: &str,
         filename_param: Vec<u8>,
         nonce_filename_param: Vec<u8>,
-        //message_param: Vec<u8>,
         message_id_param: Uuid,
         nonce_message_param: Vec<u8>,
         max_downloads_param: i32,
@@ -416,9 +370,6 @@ impl Server {
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
-
-        // Check if the user is connected using mac
-        self.check_mac(sender, mac)?;
 
         // Check if the creation time is correct
         let now = Utc::now();
@@ -516,16 +467,12 @@ impl Server {
 
     pub fn get_messages(
         &mut self,
-        mac: Vec<u8>,
         username_param: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<Vec<MessageWithUsernames>, Box<dyn std::error::Error>> {
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
-
-        // Check if the user is connected
-        self.check_mac(username_param, mac)?;
 
         // Delete invalid messages
         self.delete_invalid_messages(pool)?;
@@ -559,7 +506,6 @@ impl Server {
 
     pub fn get_message(
         &mut self,
-        mac: Vec<u8>,
         username_param: &str,
         message_id_param: Uuid,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -567,9 +513,6 @@ impl Server {
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
-
-        // Check if the user is connected
-        self.check_mac(username_param, mac)?;
 
         // Delete invalid messages
         self.delete_invalid_messages(pool)?;
