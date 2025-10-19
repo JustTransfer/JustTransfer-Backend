@@ -39,9 +39,6 @@ impl CipherSuite for DefaultCipherSuite {
 #[derive(Clone)]
 pub struct Server {
     server_opaque: ServerSetup<DefaultCipherSuite>,
-    user_in_connection: HashMap<String, ServerLogin<DefaultCipherSuite>>,
-
-    anonymous_user_in_connection: HashMap<Uuid, ServerLogin<DefaultCipherSuite>>,
 }
 
 impl Server {
@@ -90,8 +87,6 @@ impl Server {
 
         Ok(Server {
             server_opaque: server_setup,
-            user_in_connection: HashMap::new(),
-            anonymous_user_in_connection: HashMap::new(),
         })
     }
 
@@ -241,8 +236,14 @@ impl Server {
         )
             .map_err(|e| e.to_string())?;
 
-        self.user_in_connection
-            .insert(username_param.to_string(), server_login_start_result.state.clone());
+        // Store the state of ServerLogin in the DB
+        let user = diesel::update(users.find(user.id))
+            .set(users::server_login.eq(Some(
+                server_login_start_result.state.serialize().to_vec(),
+            )))
+            .returning(User::as_returning())
+            .get_result(&mut conn)
+            .unwrap();
 
         Ok(server_login_start_result.message)
     }
@@ -266,9 +267,25 @@ impl Server {
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
-        let server_login_start_result = self.user_in_connection
-            .remove(username_param)
-            .ok_or("No login in progress for this user")?;
+
+        // Load the ServerLogin state from the DB
+        let server_login_start_result = {
+            let server_login_state_bytes = users::table
+                .filter(users::username.eq(username_param))
+                .select(users::server_login)
+                .first::<Option<Vec<u8>>>(&mut conn)
+                .optional()?
+                .ok_or("User not found")?
+                .ok_or("No login in progress for this user")?;
+
+            diesel::update(users.filter(users::username.eq(username_param)))
+                .set(users::server_login.eq::<Option<Vec<u8>>>(None))
+                .execute(&mut conn)
+                .expect("Error updating anonymous message");
+
+            ServerLogin::deserialize(&server_login_state_bytes)
+                .map_err(|e| e.to_string())?
+        };
 
         let server_login_finish_result = server_login_start_result
             .finish(client_login_finish_result)
@@ -697,8 +714,13 @@ impl Server {
         )
             .map_err(|e| e.to_string())?;
 
-        self.anonymous_user_in_connection
-            .insert(id_param, server_login_start_result.state.clone());
+        // Save the ServerLogin state in DB
+        let updated_rows = diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
+            .set(anonymousmessages::server_login.eq(Some(
+                server_login_start_result.state.serialize().to_vec(),
+            )))
+            .execute(&mut conn)
+            .expect("Error updating anonymous message");
 
         Ok(server_login_start_result.message)
     }
@@ -713,9 +735,24 @@ impl Server {
 
         let mut conn = pool.get().expect("Failed to get DB connection");
 
-        let server_login_start_result = self.anonymous_user_in_connection
-            .remove(&id_param)
-            .ok_or("No login in progress for this user")?;
+        // Load the ServerLogin state from the DB
+        let server_login_start_result = {
+            let server_login_state_bytes = anonymousmessages::table
+                .filter(anonymousmessages::id.eq(id_param))
+                .select(anonymousmessages::server_login)
+                .first::<Option<Vec<u8>>>(&mut conn)
+                .optional()?
+                .ok_or("User not found")?
+                .ok_or("No login in progress for this user")?;
+
+            diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
+                .set(anonymousmessages::server_login.eq::<Option<Vec<u8>>>(None))
+                .execute(&mut conn)
+                .expect("Error updating anonymous message");
+
+            ServerLogin::deserialize(&server_login_state_bytes)
+                .map_err(|e| e.to_string())?
+        };
 
         let server_login_finish_result = server_login_start_result
             .finish(client_login_finish_result)

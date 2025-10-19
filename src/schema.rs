@@ -4,6 +4,7 @@ diesel::table! {
     anonymousmessages (id) {
         id -> Uuid,
         password_file -> Bytea,
+        server_login -> Nullable<Bytea>,
         filename -> Bytea,
         nonce_filename -> Bytea,
         message_id -> Uuid,
@@ -50,6 +51,7 @@ diesel::table! {
         id -> Int4,
         username -> Text,
         password_file -> Bytea,
+        server_login -> Nullable<Bytea>,
         role -> Text,
         public_key_enc -> Bytea,
         nonce_enc -> Bytea,

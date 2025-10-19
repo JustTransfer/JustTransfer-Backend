@@ -25,6 +25,7 @@ pub struct User {
     pub id: i32,
     pub username: String,
     pub password_file: Vec<u8>,
+    pub server_login: Option<Vec<u8>>,
     pub role: String,
 
     pub public_key_enc: Vec<u8>,
@@ -133,6 +134,7 @@ pub struct Role {
 pub struct AnonymousMessage {
     pub id: Uuid,
     pub password_file: Vec<u8>,
+    pub server_login: Option<Vec<u8>>,
     pub filename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub message_id: Uuid,

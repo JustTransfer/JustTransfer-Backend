@@ -24,6 +24,7 @@ CREATE TABLE users
     id                      SERIAL PRIMARY KEY,
     username                TEXT  NOT NULL UNIQUE,
     password_file           BYTEA NOT NULL,
+    server_login            BYTEA,
     role                    TEXT  NOT NULL REFERENCES roles (role) ON DELETE RESTRICT,
 
     public_key_enc          BYTEA NOT NULL,
@@ -59,6 +60,8 @@ CREATE TABLE anonymousMessages
     id               UUID PRIMARY KEY,
 
     password_file    BYTEA         NOT NULL,
+    server_login     BYTEA,
+
     filename         BYTEA         NOT NULL,
     nonce_filename   BYTEA         NOT NULL,
     message_id       UUID          NOT NULL UNIQUE,
