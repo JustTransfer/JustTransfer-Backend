@@ -24,9 +24,11 @@ use validator::{Validate, ValidationError};
 
 use dotenvy::dotenv;
 use std::env;
+use axum::extract::Request;
+use axum::middleware::Next;
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
+use crate::consts;
 use crate::models::*;
-use crate::schema::messages::message_id;
 
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -51,6 +53,36 @@ pub fn create_jwt(user_id: &str) -> Result<String, Error> {
         &claims,
         &EncodingKey::from_secret(SECRET_KEY.as_ref()),
     )
+}
+
+fn verify_jwt(token: &str) -> Result<TokenData<Claims>, Error> {
+    decode::<Claims>(
+        token,
+        &DecodingKey::from_secret(consts::SECRET_KEY.as_ref()),
+        &Validation::default(),
+    )
+}
+
+pub async fn jwt_auth(req: Request, next: Next) -> Result<Response, StatusCode> {
+    // Get the Cookie
+    let headers = req.headers();
+    if let Some(cookie_header) = headers.get("Cookie") {
+        if let Ok(cookie_str) = cookie_header.to_str() {
+            // Look for the jwt_token cookie
+            for cookie in cookie_str.split(';') {
+                let cookie = cookie.trim();
+                if let Some(token) = cookie.strip_prefix(AUTH_HEADER) {
+                    let token = token.trim_start_matches('=').trim();
+                    return match verify_jwt(token) {
+                        Ok(_) => Ok(next.run(req).await), // JWT is valid, proceed to next handler
+                        Err(_) => Err(StatusCode::UNAUTHORIZED), // Invalid JWT
+                    }
+                }
+            }
+        }
+    }
+
+    Err(StatusCode::UNAUTHORIZED) // No Authorization header or invalid token
 }
 
 fn validate_username(username: &str) -> Result<(), ValidationError> {
@@ -835,12 +867,13 @@ pub async fn anonymous_message_get_one_metadata(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<AnonymousGetMessage>,
-) -> (StatusCode, Json<AnonymousGetMessageResult>) {
+) -> (CookieJar, (StatusCode, Json<AnonymousGetMessageResult>)) {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(AnonymousGetMessageResult {
+        return (CookieJar::new(), (
+            StatusCode::BAD_REQUEST, Json(AnonymousGetMessageResult {
             message: AnonymousMessageMetadataEncoded {
                 id: Uuid::nil(),
                 filename: "".to_string(),
@@ -852,7 +885,7 @@ pub async fn anonymous_message_get_one_metadata(
                 creation_time: chrono::Utc::now(),
                 number_downloads: 0,
             }
-        }));
+        })));
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
@@ -861,24 +894,43 @@ pub async fn anonymous_message_get_one_metadata(
     let mut srv = state.srv.lock().unwrap();
     let message = srv.anonymous_get_message_metadata(id, req, &state.pool);
 
+
     match message {
-        Ok(message) => (
-            StatusCode::OK,
-            Json(AnonymousGetMessageResult {
+
+        Ok(msg) => {
+
+            // Create cookie jar
+            let token = create_jwt(&*msg.id.to_string()).expect("Failed to create JWT token");
+
+            // Create cookie (HttpOnly, Secure for production)
+            let cookie = Cookie::build((AUTH_HEADER, token))
+                .http_only(true)
+                .secure(true)
+                .same_site(SameSite::Strict)
+                .path("/")
+                .finish();
+
+            let jar = CookieJar::new().add(cookie);
+
+            let resp = Json(AnonymousGetMessageResult {
                 message: AnonymousMessageMetadataEncoded {
-                    id: message.id,
-                    filename: URL_SAFE_NO_PAD.encode(message.filename),
-                    nonce_filename: URL_SAFE_NO_PAD.encode(message.nonce_filename),
-                    message_id: message.message_id,
-                    header: URL_SAFE_NO_PAD.encode(message.header),
-                    max_downloads: message.max_downloads,
-                    lifetime: message.lifetime,
-                    creation_time: message.creation_time,
-                    number_downloads: message.number_downloads,
+                    id: msg.id,
+                    filename: URL_SAFE_NO_PAD.encode(msg.filename),
+                    nonce_filename: URL_SAFE_NO_PAD.encode(msg.nonce_filename),
+                    message_id: msg.message_id,
+                    header: URL_SAFE_NO_PAD.encode(msg.header),
+                    max_downloads: msg.max_downloads,
+                    lifetime: msg.lifetime,
+                    creation_time: msg.creation_time,
+                    number_downloads: msg.number_downloads,
                 },
-            }),
-        ),
+            });
+
+            (jar, (StatusCode::OK, resp))
+
+        }
         Err(_) => (
+            CookieJar::new(), (
             StatusCode::NO_CONTENT,
             Json(AnonymousGetMessageResult {
                 message: AnonymousMessageMetadataEncoded {
@@ -892,7 +944,7 @@ pub async fn anonymous_message_get_one_metadata(
                     creation_time: chrono::Utc::now(),
                     number_downloads: 0,
                 },
-            }),
+            })),
         ),
     }
 }
@@ -920,7 +972,7 @@ pub async fn anonymous_message_get_content(
     // Acquire the message while holding the lock, then drop the lock immediately
     let message = {
         let mut srv = state.srv.lock().unwrap();
-        match srv.anonymous_get_message(id, mac_bytes, &state.pool) {
+        match srv.anonymous_get_message(id, &state.pool) {
             Ok(msg) => msg,
             Err(_) => return StatusCode::BAD_REQUEST.into_response(),
         }
@@ -1007,6 +1059,82 @@ pub async fn anonymous_message_send_start(
     )
 }
 
+#[derive(Deserialize, Validate)]
+pub struct AnonymousSendMessageFinish {
+    // TODO validate Uuid
+    id: Uuid,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_finish: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    header: String,
+    #[validate(custom(function = "validate_int_param"))]
+    max_downloads: i32,
+    #[validate(custom(function = "validate_int_param"))]
+    lifetime: i32,
+    // TODO validate creation time
+    creation_time: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Serialize)]
+pub struct AnonymousSendMessageFinishResult {
+    upload_id: Uuid,
+}
+
+pub async fn anonymous_message_send(
+    State(state): State<AppState>,
+    Json(payload): Json<AnonymousSendMessageFinish>,
+) -> (StatusCode, Json<AnonymousSendMessageFinishResult>) {
+
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
+        return (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageFinishResult {
+            upload_id: Uuid::nil(),
+        }));
+    }
+
+    // Decode the base64 encoded fields
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
+    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+    let filename = URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed");
+    let nonce_filename = URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed");
+    let header = URL_SAFE_NO_PAD.decode(&payload.header).expect("Base64 decode failed");
+
+    let message_file_id = Uuid::new_v4(); // Generate a new UUID for the message file
+
+
+    let mut srv = state.srv.lock().unwrap();
+
+    let send_result = srv.anonymous_send_message(
+        req,
+        payload.id,
+        filename,
+        nonce_filename,
+        message_file_id,
+        header,
+        payload.max_downloads,
+        payload.lifetime,
+        payload.creation_time,
+        &state.pool,
+    );
+
+    match send_result {
+        Ok(_) =>
+            (StatusCode::OK, Json(AnonymousSendMessageFinishResult {
+                upload_id: message_file_id,
+            })),
+        Err(_) =>
+            (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageFinishResult {
+                upload_id: Uuid::nil(),
+            })),
+    }
+
+}
+
 pub async fn anonymous_message_send_chunk(
     State(state): State<AppState>,
     headers: axum::http::HeaderMap,
@@ -1086,201 +1214,3 @@ pub async fn anonymous_message_send_chunk(
 
     StatusCode::OK
 }
-
-#[derive(Deserialize, Validate)]
-pub struct AnonymousSendMessageFinish {
-    // TODO validate Uuid
-    id: Uuid,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    client_registration_finish: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    filename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    nonce_filename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    header: String,
-    #[validate(custom(function = "validate_int_param"))]
-    max_downloads: i32,
-    #[validate(custom(function = "validate_int_param"))]
-    lifetime: i32,
-    // TODO validate creation time
-    creation_time: chrono::DateTime<chrono::Utc>,
-}
-
-#[derive(Serialize)]
-pub struct AnonymousSendMessageFinishResult {
-    upload_id: Uuid,
-}
-
-pub async fn anonymous_message_send(
-    State(state): State<AppState>,
-    Json(payload): Json<AnonymousSendMessageFinish>,
-) -> (StatusCode, Json<AnonymousSendMessageFinishResult>) {
-
-    // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageFinishResult {
-            upload_id: Uuid::nil(),
-        }));
-    }
-
-    // Decode the base64 encoded fields
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
-    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
-    let filename = URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed");
-    let nonce_filename = URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed");
-    let header = URL_SAFE_NO_PAD.decode(&payload.header).expect("Base64 decode failed");
-
-    let message_file_id = Uuid::new_v4(); // Generate a new UUID for the message file
-
-
-    let mut srv = state.srv.lock().unwrap();
-
-    let send_result = srv.anonymous_send_message(
-        req,
-        payload.id,
-        filename,
-        nonce_filename,
-        message_file_id,
-        header,
-        payload.max_downloads,
-        payload.lifetime,
-        payload.creation_time,
-        &state.pool,
-    );
-
-    match send_result {
-        Ok(_) =>
-            (StatusCode::OK, Json(AnonymousSendMessageFinishResult {
-                upload_id: message_file_id,
-            })),
-        Err(_) =>
-            (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageFinishResult {
-                upload_id: Uuid::nil(),
-            })),
-    }
-
-}
-
-/*#[derive(Deserialize, Validate)]
-    pub struct AnonymousSendMessage {
-        // TODO validate Uuid
-        id: Uuid,
-        #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-        client_registration_finish: String,
-        #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-        filename: String,
-        #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-        nonce_filename: String,
-        #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-        message: String,
-        #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-        nonce_message: String,
-        #[validate(custom(function = "validate_int_param"))]
-        max_downloads: i32,
-        #[validate(custom(function = "validate_int_param"))]
-        lifetime: i32,
-        // TODO validate creation time
-        creation_time: chrono::DateTime<chrono::Utc>,
-    }
-
-    pub async fn anonymous_message_send(
-        State(state): State<AppState>,
-        mut multipart: Multipart,
-    ) -> StatusCode {
-
-        let mut fields: HashMap<String, String> = HashMap::new();
-        let mut message_file_id: Option<Uuid> = None;
-
-        while let Some(mut field) = match multipart.next_field().await {
-            Ok(f) => f,
-            Err(_) => return StatusCode::BAD_REQUEST,
-        } {
-            let name = field.name().unwrap_or("").to_string();
-
-            if name == "message" {
-                // Create a unique file on disk
-                let id = Uuid::new_v4();
-                let file_id = id.to_string();
-                let mut path = PathBuf::from(ANONYMOUS_FILE_STORAGE_PATH);
-                std::fs::create_dir_all(&path).ok(); // ensure directory exists
-                path.push(&file_id);
-
-                match File::create(&path) {
-                    Ok(mut file) => {
-                        // Stream chunks to disk
-                        while let Some(chunk) = match field.chunk().await {
-                            Ok(c) => c,
-                            Err(_) => return StatusCode::BAD_REQUEST,
-                        } {
-                            if let Err(_) = file.write_all(&chunk) {
-                                return StatusCode::INTERNAL_SERVER_ERROR;
-                            }
-                        }
-                        // Store the file id (or path) instead of the raw bytes
-                        message_file_id = Some(id);
-                        fields.insert("message".to_string(), file_id);
-                    }
-                    Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-                }
-            } else {
-                let text = match field.text().await {
-                    Ok(t) => t,
-                    Err(_) => return StatusCode::BAD_REQUEST,
-                };
-                fields.insert(name, text);
-            }
-        }
-
-        // Validate payload
-        let send_message_payload = AnonymousSendMessage {
-            id: fields.get("id").unwrap().parse().unwrap(),
-            client_registration_finish: fields.get("client_registration_finish").unwrap().to_string(),
-            filename: fields.get("filename").unwrap().to_string(),
-            nonce_filename: fields.get("nonce_filename").unwrap().to_string(),
-            message: fields.get("message").unwrap().to_string(),
-            nonce_message: fields.get("nonce_message").unwrap().to_string(),
-            max_downloads: fields.get("max_downloads").unwrap().parse().unwrap(),
-            lifetime: fields.get("lifetime").unwrap().parse().unwrap(),
-            creation_time: fields.get("creation_time").unwrap().parse().unwrap(),
-        };
-
-        if let Err(e) = send_message_payload.validate() {
-            println!("Validation error: {:?}", e);
-            // Clean up the uploaded file if validation fails
-            if let Some(id) = message_file_id {
-                let mut path = PathBuf::from(ANONYMOUS_FILE_STORAGE_PATH);
-                path.push(&id.to_string());
-                let _ = std::fs::remove_file(path);
-            }
-            return StatusCode::BAD_REQUEST;
-        }
-
-        // Decode the base64 encoded fields
-        let bytes = URL_SAFE_NO_PAD.decode(&send_message_payload.client_registration_finish).expect("Base64 decode failed");
-        let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
-        let filename = URL_SAFE_NO_PAD.decode(&send_message_payload.filename).expect("Base64 decode failed");
-        let nonce_filename = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_filename).expect("Base64 decode failed");
-        let nonce_message = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_message).expect("Base64 decode failed");
-
-        let mut srv = state.srv.lock().unwrap();
-        let send_result = srv.anonymous_send_message(
-            req,
-            send_message_payload.id,
-            filename,
-            nonce_filename,
-            message_file_id.unwrap(),
-            nonce_message,
-            send_message_payload.max_downloads,
-            send_message_payload.lifetime,
-            send_message_payload.creation_time,
-            &state.pool,
-        );
-
-        match send_result {
-            Ok(_) => (StatusCode::OK),
-            Err(_) => (StatusCode::BAD_REQUEST),
-        }
-    }*/
-

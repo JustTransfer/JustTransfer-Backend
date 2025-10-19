@@ -20,7 +20,6 @@
 - Fix HTTP return codes
 - Validate email (email format and code transmitted by email)
 - Add a username which is unique in the app (in addition to email)
-- Anonymous mode
 - Add a counter to max number of anonymous transfers (avoid server overload)
 - Add a counter to max number of transfers (avoid server overload)
 - Put public key of signature in the message

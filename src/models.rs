@@ -1,11 +1,7 @@
 use chrono::Utc;
 use diesel::prelude::*;
-use generic_array::GenericArray;
-use opaque_ke::ServerRegistrationLen;
 use serde::Serialize;
-use crate::consts::*;
-use crate::server::DefaultCipherSuite;
-use uuid::{NonNilUuid, Uuid};
+use uuid::{Uuid};
 
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::opaque_settings)]

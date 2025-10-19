@@ -1,13 +1,12 @@
 use libsodium_sys::*;
-use num_bigint::BigUint;
-use std::time::{Instant, SystemTime};
+use std::time::{SystemTime};
 
 use crate::consts::*;
 use argon2::Argon2;
 use opaque_ke::*;
 use rand::rngs::OsRng;
 use std::default::Default;
-use std::{io, result};
+use std::{io};
 use std::collections::HashMap;
 use chrono::{Duration, Utc};
 use diesel::r2d2::{self, ConnectionManager};
@@ -17,8 +16,6 @@ type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
-use generic_array::GenericArray;
-use generic_array::typenum::U64;
 use uuid::Uuid;
 
 use std::fs;
@@ -45,7 +42,6 @@ pub struct Server {
     user_in_connection: HashMap<String, ServerLogin<DefaultCipherSuite>>,
 
     anonymous_user_in_connection: HashMap<Uuid, ServerLogin<DefaultCipherSuite>>,
-    anonymous_user_connected: HashMap<Uuid, GenericArray<u8, U64>>,
 }
 
 impl Server {
@@ -96,7 +92,6 @@ impl Server {
             server_opaque: server_setup,
             user_in_connection: HashMap::new(),
             anonymous_user_in_connection: HashMap::new(),
-            anonymous_user_connected: HashMap::new(),
         })
     }
 
@@ -726,18 +721,6 @@ impl Server {
             .finish(client_login_finish_result)
             .map_err(|e| e.to_string())?;
 
-        // Key to check if the user is connected
-        let key_communication = server_login_finish_result.session_key.clone();
-
-        if key_communication.len() < MAC_LEN {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::Other,
-                "Error in key generation",
-            )));
-        }
-
-        self.anonymous_user_connected.insert(id_param, key_communication.clone());
-
         // Delete invalid messages
         self.delete_invalid_anonymous_messages(pool)?;
 
@@ -764,32 +747,11 @@ impl Server {
     pub fn anonymous_get_message(
         &mut self,
         id_param: Uuid,
-        mac: Vec<u8>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<AnonymousMessage, Box<dyn std::error::Error>> {
         use crate::schema::anonymousmessages;
 
         let mut conn = pool.get().expect("Failed to get DB connection");
-
-        // Check if the user is connected using mac
-        let key_communication = self.anonymous_user_connected.get(&id_param).ok_or("User not connected")?;
-        let id_string = id_param.to_string();
-        let result = unsafe {
-            crypto_auth_verify(
-                mac.as_ptr(),
-                id_string.as_bytes().as_ptr(),
-                id_string.as_bytes().len() as u64,
-                key_communication.as_ptr(),
-            )
-        };
-
-        if result != 0 {
-            println!("MAC invalid");
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::Other,
-                "MAC invalid",
-            )));
-        }
 
         // Delete invalid messages
         self.delete_invalid_anonymous_messages(pool)?;
