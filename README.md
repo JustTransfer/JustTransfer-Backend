@@ -37,6 +37,10 @@
   - Change the way connected user are stored (hashmap)
   - Change password/Key rotation should keep old messages readable
 
+- Load config from env file in a single point
+  - Remove it from the server
+- Fix Docker image size
+
 - Files in a bucket S3
 
 ## Install Diesel
