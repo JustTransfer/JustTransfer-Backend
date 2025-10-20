@@ -39,7 +39,6 @@
 
 - Load config from env file in a single point
   - Remove it from the server
-- Fix Docker image size
 
 - Files in a bucket S3
 
