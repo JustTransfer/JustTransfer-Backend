@@ -56,15 +56,8 @@ async fn main() {
         .build(manager)
         .expect("Failed to create pool");
 
-    //let mut srv = server::Server::new();
-    let srv = Arc::new(Mutex::new(
-        server::Server::new(&pool.clone()).expect("Failed to create server"),
-    ));
-
-    let state = api_handlers::AppState {
-        srv: srv.clone(),
-        pool: pool.clone(),
-    };
+    // Init server
+    Server::new(&pool.clone()).expect("Failed to create server");
 
     use tower_http::cors::{Any, CorsLayer};
     let cors = CorsLayer::new()
@@ -93,7 +86,7 @@ async fn main() {
         .route("/api/anonymous/message/chunk", put(api_handlers::anonymous_message_send_chunk))
         .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous_message_get_one_metadata_start))
         .route("/api/anonymous/message/{id}", post(api_handlers::anonymous_message_get_one_metadata))
-        .with_state(state.clone())
+        .with_state(pool.clone())
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)
         .layer(middleware::from_fn(print_request_response));

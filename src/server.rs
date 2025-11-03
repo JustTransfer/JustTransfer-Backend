@@ -26,6 +26,7 @@ use crate::models::*;
 use crate::schema::messages::dsl::*;
 use crate::schema::users::dsl::*;
 use crate::schema::anonymousmessages::dsl::*;
+use crate::schema::opaque_settings;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -37,9 +38,7 @@ impl CipherSuite for DefaultCipherSuite {
 }
 
 #[derive(Clone)]
-pub struct Server {
-    server_opaque: ServerSetup<DefaultCipherSuite>,
-}
+pub struct Server {}
 
 impl Server {
     pub fn new(pool: &r2d2::Pool<ConnectionManager<PgConnection>>) -> Result<Server, Box<dyn std::error::Error>> {
@@ -53,6 +52,20 @@ impl Server {
                 )));
             }
         }
+
+        // Initialize OPAQUE settings in DB if not present
+        let server = Server {
+            // Stateless server
+        };
+
+        Server::server_init_db(pool)?;
+
+        Ok(server)
+    }
+
+    pub fn server_init_db(
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
 
         use crate::schema::opaque_settings;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -85,18 +98,47 @@ impl Server {
             server_setup
         };
 
-        Ok(Server {
-            server_opaque: server_setup,
-        })
+        Ok(())
+    }
+
+    fn get_opaque_settings(
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<ServerSetup<DefaultCipherSuite>, Box<dyn std::error::Error>> {
+
+        use crate::schema::opaque_settings;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+        let setting = opaque_settings::table
+            .first::<OpaqueSetting>(&mut conn)
+            .optional()?
+            .ok_or_else(|| {
+                Box::<dyn std::error::Error>::from(io::Error::new(
+                    io::ErrorKind::Other,
+                    "OPAQUE settings not found in DB",
+                ))
+            })?;
+
+        let server_opaque = ServerSetup::<DefaultCipherSuite>::deserialize(&setting.settings)
+            .map_err(|e| {
+                Box::<dyn std::error::Error>::from(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Error deserializing OPAQUE settings: {}", e),
+                ))
+            })?;
+
+        Ok(server_opaque)
     }
 
     pub fn server_registration_start(
-        &mut self,
         username_param: &str,
         client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<RegistrationResponse<DefaultCipherSuite>, Box<dyn std::error::Error>> {
+
+        let server_opaque = Server::get_opaque_settings(pool)?;
+
         let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
-            &self.server_opaque,
+            &server_opaque,
             client_registration_start_result,
             username_param.as_bytes(),
         )
@@ -106,7 +148,6 @@ impl Server {
     }
 
     pub fn server_registration_finish(
-        &mut self,
         client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
         username_param: &str,
         cpriv_enc: Vec<u8>,
@@ -158,10 +199,8 @@ impl Server {
     }
 
     pub fn server_registration_finish_update(
-        &mut self,
         client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
         username_param: &str,
-        mac: Vec<u8>,
         cpriv1: Vec<u8>,
         nonce1: Vec<u8>,
         pub1: Vec<u8>,
@@ -203,7 +242,6 @@ impl Server {
     }
 
     pub fn server_login_start(
-        &mut self,
         username_param: &str,
         client_login_start_result: CredentialRequest<DefaultCipherSuite>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -225,10 +263,12 @@ impl Server {
             ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
                 .map_err(|e| e.to_string())?;
 
+        let server_opaque = Server::get_opaque_settings(pool)?;
+
         let mut server_rng = OsRng;
         let server_login_start_result = ServerLogin::start(
             &mut server_rng,
-            &self.server_opaque,
+            &server_opaque,
             Some(password_file_param),
             client_login_start_result,
             username_param.as_bytes(),
@@ -249,7 +289,6 @@ impl Server {
     }
 
     pub fn server_login_finish(
-        &mut self,
         username_param: &str,
         client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -321,10 +360,7 @@ impl Server {
     /*pub fn logout(
         &mut self,
         username_param: &str,
-        mac: Vec<u8>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        // Check if the user is connected using mac
-        self.check_mac(username_param, mac)?;
 
         self.disconnect_user(username_param)?;
 
@@ -332,7 +368,6 @@ impl Server {
     }*/
 
     pub fn get_pub_key_enc(
-        &self,
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; ENC_KEY_LEN_PUB]> {
@@ -349,7 +384,6 @@ impl Server {
     }
 
     pub fn get_pub_key_sign(
-        &self,
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; SIGN_KEY_LEN_PUB]> {
@@ -366,7 +400,6 @@ impl Server {
     }
 
     pub fn send_message(
-        &mut self,
         sender: &str,
         receiver: &str,
         filename_param: Vec<u8>,
@@ -436,7 +469,7 @@ impl Server {
     }
 
     // TODO process only message belonging to the user, not all messages
-    fn delete_invalid_messages(&mut self, pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
+    fn delete_invalid_messages(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Get message with max downloads
@@ -478,7 +511,6 @@ impl Server {
     }
 
     pub fn get_messages(
-        &mut self,
         username_param: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<Vec<MessageWithUsernames>, Box<dyn std::error::Error>> {
@@ -487,7 +519,7 @@ impl Server {
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Delete invalid messages
-        self.delete_invalid_messages(pool)?;
+        Server::delete_invalid_messages(pool)?;
 
         let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
 
@@ -517,7 +549,6 @@ impl Server {
     }
 
     pub fn get_message(
-        &mut self,
         username_param: &str,
         message_id_param: Uuid,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -527,7 +558,7 @@ impl Server {
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Delete invalid messages
-        self.delete_invalid_messages(pool)?;
+        Server::delete_invalid_messages(pool)?;
 
         // Get the message
         let mut message = messages
@@ -563,7 +594,7 @@ impl Server {
     ///
 
     // TODO process only message belonging to the user, not all messages
-    fn delete_invalid_anonymous_messages(&mut self, pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
+    fn delete_invalid_anonymous_messages(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
         use crate::schema::anonymousmessages;
 
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -607,12 +638,15 @@ impl Server {
     }
 
     pub fn anonymous_send_message_start(
-        &mut self,
         id_param: Uuid,
         client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<RegistrationResponse<DefaultCipherSuite>, Box<dyn std::error::Error>> {
+
+        let server_opaque = Server::get_opaque_settings(pool)?;
+
         let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
-            &self.server_opaque,
+            &server_opaque,
             client_registration_start_result,
             id_param.as_bytes(),
         )
@@ -622,7 +656,6 @@ impl Server {
     }
 
     pub fn anonymous_send_message(
-        &mut self,
         client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
         id_transfer: Uuid,
         filename_param: Vec<u8>,
@@ -681,7 +714,6 @@ impl Server {
     }
 
     pub fn server_login_start_anonymous(
-        &mut self,
         id_param: Uuid,
         client_login_start_result: CredentialRequest<DefaultCipherSuite>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -704,9 +736,10 @@ impl Server {
                 .map_err(|e| e.to_string())?;
 
         let mut server_rng = OsRng;
+        let server_opaque = Server::get_opaque_settings(pool)?;
         let server_login_start_result = ServerLogin::start(
             &mut server_rng,
-            &self.server_opaque,
+            &server_opaque,
             Some(password_file_param),
             client_login_start_result,
             id_param.as_bytes(),
@@ -726,7 +759,6 @@ impl Server {
     }
 
     pub fn anonymous_get_message_metadata(
-        &mut self,
         id_param: Uuid,
         client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -759,7 +791,7 @@ impl Server {
             .map_err(|e| e.to_string())?;
 
         // Delete invalid messages
-        self.delete_invalid_anonymous_messages(pool)?;
+        Server::delete_invalid_anonymous_messages(pool)?;
 
         let messages_get = anonymousmessages::table
             .filter(anonymousmessages::id.eq(id_param))
@@ -782,7 +814,6 @@ impl Server {
     }
 
     pub fn anonymous_get_message(
-        &mut self,
         id_param: Uuid,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<AnonymousMessage, Box<dyn std::error::Error>> {
@@ -791,10 +822,10 @@ impl Server {
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Delete invalid messages
-        self.delete_invalid_anonymous_messages(pool)?;
+        Server::delete_invalid_anonymous_messages(pool)?;
 
         // Get the message
-        let mut anonymousmessage = anonymousmessages
+        let anonymousmessage = anonymousmessages
             .filter(anonymousmessages::id.eq(id_param))
             .first::<AnonymousMessage>(&mut conn)
             .optional()?
