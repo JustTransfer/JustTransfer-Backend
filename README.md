@@ -39,6 +39,8 @@
 
 - Load config from env file in a single point
   - Remove it from the server
+ 
+- Auto run migration at server start (no cli required) and maque Down.sql
 
 - Files in a bucket S3
 
@@ -61,4 +63,5 @@ diesel migration generate initial_migration # Fulfill the up.sql and down.sql fi
 diesel migration run
 
 diesel print-schema > src/schema.rs # Generate schema.rs from the database
+
 ```
