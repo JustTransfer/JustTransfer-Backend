@@ -44,6 +44,8 @@
 
 - Files in a bucket S3
 
+- Mecanism to report a transfer and delete it
+
 ## Install Diesel
 ```bash
 setx PQ_LIB_DIR "C:\Program Files\PostgreSQL\17\lib"
@@ -65,3 +67,4 @@ diesel migration run
 diesel print-schema > src/schema.rs # Generate schema.rs from the database
 
 ```
+
