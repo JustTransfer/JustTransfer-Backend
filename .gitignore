@@ -21,3 +21,5 @@ target
 .idea/
 /files/
 /anonymous_files/
+.env
+minio.env

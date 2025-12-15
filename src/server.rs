@@ -411,9 +411,10 @@ impl Server {
         creation_time_param: chrono::DateTime<Utc>,
         signature_param: Vec<u8>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use crate::schema::users;
         use crate::schema::messages;
+
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Check if the creation time is correct

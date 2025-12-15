@@ -1,5 +1,5 @@
 use crate::server::{DefaultCipherSuite, Server};
-use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json};
+use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
@@ -23,12 +23,23 @@ use validator::{Validate, ValidationError};
 
 use dotenvy::dotenv;
 use std::env;
+use aws_sdk_s3::Client;
 use axum::extract::Request;
 use axum::middleware::Next;
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
+
+use aws_sdk_s3::presigning::PresigningConfig;
+use std::time::Duration;
+
 use crate::consts;
 use crate::models::*;
 
+// todo remove duplicate with main.rs
+#[derive(Clone)]
+pub struct AppState {
+    pub db: DbPool,
+    pub s3: Client,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
@@ -140,7 +151,7 @@ pub struct RegisterUserStartResult {
 }
 
 pub async fn register_user_start(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<RegisterUserStart>,
 ) -> (StatusCode, Json<RegisterUserStartResult>) {
 
@@ -154,7 +165,7 @@ pub async fn register_user_start(
     let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
 
     let server_registration_start_result = Server::
-        server_registration_start(&*payload.username, req, &pool)
+        server_registration_start(&*payload.username, req, &state.db)
         .expect("Failed to start registration");
 
     (
@@ -187,7 +198,7 @@ pub struct RegisterUserEnd {
 }
 
 pub async fn register_user_end(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<RegisterUserEnd>,
 ) -> StatusCode {
 
@@ -219,7 +230,7 @@ pub async fn register_user_end(
         cpriv_sign,
         nonce_priv_sign,
         pub_sign,
-        &pool,
+        &state.db,
     );
 
     match server_registration_finish {
@@ -251,7 +262,7 @@ pub struct RegisterUserEndUpdate {
 }
 
 pub async fn register_user_end_update(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> (StatusCode) {
 
@@ -283,7 +294,7 @@ pub async fn register_user_end_update(
         cpriv_sign,
         nonce_priv_sign,
         pub_sign,
-        &pool,
+        &state.db,
     );
 
     match server_registration_finish {
@@ -306,7 +317,7 @@ pub struct LoginStartResult {
 }
 
 pub async fn login_user_start(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<LoginStart>,
 ) -> (StatusCode, Json<LoginStartResult>) {
 
@@ -322,7 +333,7 @@ pub async fn login_user_start(
     let server_login_start = Server::server_login_start(
         &*payload.username,
         req,
-        &pool,
+        &state.db,
     ).expect("Failed to start login");
 
     (
@@ -353,7 +364,7 @@ pub struct LoginEndResult {
 }
 
 pub async fn login_user_end(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<LoginEnd>,
 ) -> (CookieJar, (StatusCode, Json<LoginEndResult>)) {
 
@@ -378,7 +389,7 @@ pub async fn login_user_end(
     let server_login_finish = Server::server_login_finish(
         &*payload.username,
         req,
-        &pool,
+        &state.db,
     );
 
     match server_login_finish {
@@ -444,7 +455,7 @@ pub struct Logout {
     mac: String,
 }
 
-pub async fn logout(State(pool): State<DbPool>, Json(payload): Json<Logout>) -> (StatusCode) {
+pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> (StatusCode) {
 
     // Validate payload
     if let Err(e) = payload.validate() {
@@ -477,7 +488,7 @@ pub struct GetPubKeyEncResult {
 }
 
 pub async fn get_pub_key_enc(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<GetPubKeyEnc>,
 ) -> (StatusCode, Json<GetPubKeyEncResult>) {
 
@@ -487,7 +498,7 @@ pub async fn get_pub_key_enc(
         return (StatusCode::BAD_REQUEST, Json(GetPubKeyEncResult { pub_enc: "".to_string() }));
     }
     
-    let pub_enc = Server::get_pub_key_enc(&*payload.user_pub_key, &pool);
+    let pub_enc = Server::get_pub_key_enc(&*payload.user_pub_key, &state.db);
 
     match pub_enc {
         Some(pub_enc) => {
@@ -515,7 +526,7 @@ pub struct GetPubKeySignResult {
 }
 
 pub async fn get_pub_key_sign(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<GetPubKeySign>,
 ) -> (StatusCode, Json<GetPubKeySignResult>) {
 
@@ -525,7 +536,7 @@ pub async fn get_pub_key_sign(
         return (StatusCode::BAD_REQUEST, Json(GetPubKeySignResult { pub_sign: "".to_string() }));
     }
     
-    let pub_sign = Server::get_pub_key_sign(&*payload.user_pub_key, &pool);
+    let pub_sign = Server::get_pub_key_sign(&*payload.user_pub_key, &state.db);
 
     match pub_sign {
         Some(pub_sign) => {
@@ -550,8 +561,8 @@ pub struct GetMessageResult {
     messages: Vec<MessageWithUsernamesEncoded>,
 }
 
-pub async fn message_get(
-    State(pool): State<DbPool>,
+pub async fn get_messages(
+    State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
 ) -> (StatusCode, Json<GetMessageResult>) {
 
@@ -561,7 +572,7 @@ pub async fn message_get(
         return (StatusCode::BAD_REQUEST, Json(GetMessageResult { messages: vec![] }));
     }
     
-    let messages = Server::get_messages(&*payload.username, &pool);
+    let messages = Server::get_messages(&*payload.username, &state.db);
 
     // Convert the fields of each messages to base64
     let messages_encoded = match messages {
@@ -597,9 +608,9 @@ pub async fn message_get(
     }
 }
 
-pub async fn message_get_one(
+pub async fn get_one_message(
     Path(id): Path<Uuid>,
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
 ) -> impl IntoResponse {
 
@@ -609,7 +620,7 @@ pub async fn message_get_one(
         return StatusCode::BAD_REQUEST.into_response();
     }
     
-    let message = Server::get_message(&*payload.username, id, &pool);
+    let message = Server::get_message(&*payload.username, id, &state.db);
 
     let filename = "encrypted_file"; // Default filename
 
@@ -650,7 +661,7 @@ pub async fn message_get_one(
 }
 
 #[derive(Deserialize, Validate)]
-pub struct SendMessage {
+pub struct UploadMessage {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
     #[validate(custom(function = "validate_username"))]
@@ -661,8 +672,6 @@ pub struct SendMessage {
     filename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    message: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_message: String,
     #[validate(custom(function = "validate_int_param"))]
@@ -675,104 +684,57 @@ pub struct SendMessage {
     signature: String,
 }
 
-pub async fn message_send(
-    State(pool): State<DbPool>,
-    mut multipart: Multipart,
-) -> (StatusCode) {
-    let mut fields: HashMap<String, String> = HashMap::new();
-    let mut message_file_id: Option<Uuid> = None;
+#[derive(Serialize)]
+pub struct UploadMessageResult {
+    upload_url: String,
+}
 
-    while let Some(mut field) = match multipart.next_field().await {
-        Ok(f) => f,
-        Err(_) => return StatusCode::BAD_REQUEST,
-    } {
-        let name = field.name().unwrap_or("").to_string();
-
-        if name == "message" {
-            // Create a unique file on disk
-            let id = Uuid::new_v4();
-            let file_id = id.to_string();
-            let mut path = PathBuf::from(FILE_STORAGE_PATH);
-            std::fs::create_dir_all(&path).ok(); // ensure directory exists
-            path.push(&file_id);
-
-            match File::create(&path) {
-                Ok(mut file) => {
-                    // Stream chunks to disk
-                    while let Some(chunk) = match field.chunk().await {
-                        Ok(c) => c,
-                        Err(_) => return StatusCode::BAD_REQUEST,
-                    } {
-                        if let Err(_) = file.write_all(&chunk) {
-                            return StatusCode::INTERNAL_SERVER_ERROR;
-                        }
-                    }
-                    // Store the file id (or path) instead of the raw bytes
-                    message_file_id = Some(id);
-                    fields.insert("message".to_string(), file_id);
-                }
-                Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-            }
-        } else {
-            let text = match field.text().await {
-                Ok(t) => t,
-                Err(_) => return StatusCode::BAD_REQUEST,
-            };
-            fields.insert(name, text);
-        }
-    }
+#[axum::debug_handler]
+pub async fn upload_message(
+    State(state): State<AppState>,
+    Json(payload): Json<UploadMessage>,
+) -> (StatusCode, Json<UploadMessageResult>) {
 
     // Validate payload
-    let send_message_payload = SendMessage {
-        mac: fields.get("mac").unwrap().to_string(),
-        sender: fields.get("sender").unwrap().to_string(),
-        receiver: fields.get("receiver").unwrap().to_string(),
-        filename: fields.get("filename").unwrap().to_string(),
-        nonce_filename: fields.get("nonce_filename").unwrap().to_string(),
-        message: fields.get("message").unwrap().to_string(),
-        nonce_message: fields.get("nonce_message").unwrap().to_string(),
-        max_downloads: fields.get("max_downloads").unwrap().parse().unwrap(),
-        lifetime: fields.get("lifetime").unwrap().parse().unwrap(),
-        creation_time: fields.get("creation_time").unwrap().parse().unwrap(),
-        signature: fields.get("signature").unwrap().to_string(),
-    };
-
-    if let Err(e) = send_message_payload.validate() {
+    if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        // Clean up the uploaded file if validation fails
-        if let Some(id) = message_file_id {
-            let mut path = PathBuf::from(FILE_STORAGE_PATH);
-            path.push(&id.to_string());
-            let _ = std::fs::remove_file(path);
-        }
-        return StatusCode::BAD_REQUEST;
+        return (StatusCode::BAD_REQUEST, Json(UploadMessageResult { upload_url: "".to_string() }));
     }
 
-    // Decode the base64 encoded fields
-    let mac = URL_SAFE_NO_PAD.decode(&send_message_payload.mac).expect("Base64 decode failed");
-    let filename = URL_SAFE_NO_PAD.decode(&send_message_payload.filename).expect("Base64 decode failed");
-    let nonce_filename = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_filename).expect("Base64 decode failed");
-    let nonce_message = URL_SAFE_NO_PAD.decode(&send_message_payload.nonce_message).expect("Base64 decode failed");
-    let signature = URL_SAFE_NO_PAD.decode(&send_message_payload.signature).expect("Base64 decode failed");
+    let message_id = Uuid::new_v4();
 
     let send_result = Server::send_message(
-        fields.get("sender").unwrap(),
-        fields.get("receiver").unwrap(),
-        filename,
-        nonce_filename,
-        message_file_id.unwrap(),
-        nonce_message,
-        send_message_payload.max_downloads,
-        send_message_payload.lifetime,
-        send_message_payload.creation_time,
-        signature,
-        &pool,
+        &payload.sender,
+        &payload.receiver,
+        URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed"),
+        URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed"),
+        message_id,
+        URL_SAFE_NO_PAD.decode(&payload.nonce_message).expect("Base64 decode failed"),
+        payload.max_downloads,
+        payload.lifetime,
+        payload.creation_time,
+        URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed"),
+        &state.db,
     );
 
-    match send_result {
-        Ok(_) => (StatusCode::OK),
-        Err(_) => (StatusCode::BAD_REQUEST),
+    if send_result.is_err() {
+        return (StatusCode::BAD_REQUEST, Json(UploadMessageResult { upload_url: "".to_string() }));
     }
+
+    // Generate pre-signed S3 upload URL
+    let upload_url = state.s3
+        .put_object()
+        .bucket("gogo-transfer-bucket")
+        .key(message_id.to_string())
+        .presigned(
+            PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
+        )
+        .await
+        .expect("Failed to generate presigned URL")
+        .uri()
+        .to_string();
+
+    (StatusCode::CREATED, Json(UploadMessageResult { upload_url }))
 }
 
 ///
@@ -792,7 +754,7 @@ pub struct AnonymousGetMessageResultStart {
 
 pub async fn anonymous_message_get_one_metadata_start(
     Path(id): Path<Uuid>,
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<AnonymousGetMessageStart>,
 ) -> (StatusCode, Json<AnonymousGetMessageResultStart>) {
 
@@ -808,7 +770,7 @@ pub async fn anonymous_message_get_one_metadata_start(
     let server_login_start = Server::server_login_start_anonymous(
         id,
         req,
-        &pool,
+        &state.db,
     ).expect("Failed to start login");
 
     (
@@ -832,7 +794,7 @@ pub struct AnonymousGetMessageResult {
 
 pub async fn anonymous_message_get_one_metadata(
     Path(id): Path<Uuid>,
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<AnonymousGetMessage>,
 ) -> (CookieJar, (StatusCode, Json<AnonymousGetMessageResult>)) {
 
@@ -858,7 +820,7 @@ pub async fn anonymous_message_get_one_metadata(
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
 
-    let message = Server::anonymous_get_message_metadata(id, req, &pool);
+    let message = Server::anonymous_get_message_metadata(id, req, &state.db);
 
 
     match message {
@@ -915,7 +877,7 @@ pub async fn anonymous_message_get_one_metadata(
     }
 }
 
-#[derive(Deserialize, Validate)]
+/*#[derive(Deserialize, Validate)]
 pub struct AnonymousGetMessageContent {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
@@ -923,7 +885,7 @@ pub struct AnonymousGetMessageContent {
 
 pub async fn anonymous_message_get_content(
     Path(id): Path<Uuid>,
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<AnonymousGetMessageContent>,
 ) -> impl IntoResponse {
 
@@ -935,7 +897,7 @@ pub async fn anonymous_message_get_content(
     
     // Acquire the message while holding the lock, then drop the lock immediately
     let message = {
-        match Server::anonymous_get_message(id, &pool) {
+        match Server::anonymous_get_message(id, &state.db) {
             Ok(msg) => msg,
             Err(_) => return StatusCode::BAD_REQUEST.into_response(),
         }
@@ -974,7 +936,7 @@ pub async fn anonymous_message_get_content(
         )
         .body(Body::from_stream(body))
         .unwrap()
-}
+}*/
 
 #[derive(Deserialize, Validate)]
 pub struct AnonymousSendMessageStart {
@@ -989,7 +951,7 @@ pub struct AnonymousSendMessageResultStart {
 }
 
 pub async fn anonymous_message_send_start(
-    State(pool): State<DbPool>,
+    State(state): State<AppState>,
     Json(payload): Json<AnonymousSendMessageStart>,
 ) -> (StatusCode, Json<AnonymousSendMessageResultStart>) {
     // Validate payload
@@ -1008,7 +970,7 @@ pub async fn anonymous_message_send_start(
     let id = Uuid::new_v4();
 
     let server_registration_start_result = Server::
-        anonymous_send_message_start(id, req, &pool)
+        anonymous_send_message_start(id, req, &state.db)
         .expect("Failed to start registration");
 
     (
@@ -1021,7 +983,7 @@ pub async fn anonymous_message_send_start(
 }
 
 #[derive(Deserialize, Validate)]
-pub struct AnonymousSendMessageFinish {
+pub struct UploadAnonymousMessageFinish {
     // TODO validate Uuid
     id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -1041,19 +1003,19 @@ pub struct AnonymousSendMessageFinish {
 }
 
 #[derive(Serialize)]
-pub struct AnonymousSendMessageFinishResult {
+pub struct UploadAnonymousMessageFinishResult {
     upload_id: Uuid,
 }
 
-pub async fn anonymous_message_send(
-    State(pool): State<DbPool>,
-    Json(payload): Json<AnonymousSendMessageFinish>,
-) -> (StatusCode, Json<AnonymousSendMessageFinishResult>) {
+pub async fn upload_anonymous_message(
+    State(state): State<AppState>,
+    Json(payload): Json<UploadAnonymousMessageFinish>,
+) -> (StatusCode, Json<UploadAnonymousMessageFinishResult>) {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageFinishResult {
+        return (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
             upload_id: Uuid::nil(),
         }));
     }
@@ -1077,24 +1039,24 @@ pub async fn anonymous_message_send(
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,
-        &pool,
+        &state.db,
     );
 
     match send_result {
         Ok(_) =>
-            (StatusCode::OK, Json(AnonymousSendMessageFinishResult {
+            (StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
                 upload_id: message_file_id,
             })),
         Err(_) =>
-            (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageFinishResult {
+            (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
                 upload_id: Uuid::nil(),
             })),
     }
 
 }
 
-pub async fn anonymous_message_send_chunk(
-    State(pool): State<DbPool>,
+/* pub async fn anonymous_message_send_chunk(
+    State(state): State<AppState>,
     headers: axum::http::HeaderMap,
     body: Bytes,
 ) -> StatusCode {
@@ -1170,4 +1132,4 @@ pub async fn anonymous_message_send_chunk(
     }
 
     StatusCode::OK
-}
+}*/

@@ -26,23 +26,25 @@ services:
       - "9001:9001"
     volumes:
       - minio-data:/data
-      - ./config:/root/.minio
+      - ./minio.env:/etc/minio/minio.env:ro
     environment:
-      - MINIO_ROOT_USER=admin
-      - MINIO_ROOT_PASSWORD=SecurePassword123!
-      - MINIO_BROWSER_REDIRECT_URL=http://localhost:9001
+      - MINIO_CONFIG_ENV_FILE=/etc/minio/minio.env
     command: server /data --console-address ":9001"
     restart: unless-stopped
+    networks:
+      default:
+        aliases:
+          - minio.localhost
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
-      interval: 30s
+      interval: 10s
       timeout: 20s
-      retries: 3
+      retries: 5
 
   reverse_proxy:
     image: traefik
     command:
-      - --providers.docker
+      - --providers.swarm
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./traefik/ssl:/etc/traefik/certificates
@@ -57,7 +59,7 @@ services:
       context: .
       dockerfile: Dockerfile
     labels:
-      - traefik.http.routers.backend.rule=Host(`localhost`) && PathPrefix(`/api`)
+      - traefik.http.routers.backend.rule=Host("localhost") && PathPrefix("/api")
       - traefik.http.routers.backend.entrypoints=https
       - traefik.http.routers.backend.tls=true
       - traefik.http.services.backend.loadbalancer.sticky=true
@@ -79,7 +81,7 @@ services:
       context: ../jujuTransfer-Frontend
       dockerfile: Dockerfile
     labels:
-      - traefik.http.routers.frontend.rule=Host(`localhost`)
+      - traefik.http.routers.frontend.rule=Host("localhost")
       - traefik.http.routers.frontend.entrypoints=https
       - traefik.http.routers.frontend.tls=true
     deploy:
