@@ -21,9 +21,22 @@ services:
   minio:
     image: minio/minio:latest
     container_name: juju_transfer_minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
+#    ports:
+#      - "9000:9000"
+#      - "9001:9001"
+    labels:
+        # MinIO API
+      - traefik.http.routers.minio.rule=Host(`s3.localhost`)
+      - traefik.http.routers.minio.service=minio
+      - traefik.http.services.minio.loadbalancer.server.port=9000
+      - traefik.http.routers.minio.entrypoints=http
+
+      # MinIO Console
+      - traefik.http.routers.console.rule=Host(`consoles3.localhost`)
+      - traefik.http.routers.console.service=console
+      - traefik.http.services.console.loadbalancer.server.port=9001
+      - traefik.http.routers.console.entrypoints=https
+      - traefik.http.routers.console.tls=true
     volumes:
       - minio-data:/data
       - ./minio.env:/etc/minio/minio.env:ro
@@ -31,10 +44,6 @@ services:
       - MINIO_CONFIG_ENV_FILE=/etc/minio/minio.env
     command: server /data --console-address ":9001"
     restart: unless-stopped
-    networks:
-      default:
-        aliases:
-          - minio.localhost
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 10s
@@ -53,6 +62,8 @@ services:
       - "80:80" # Web sites
       - "443:443" # Web sites
       - "8080:8080" # Traefik dashboard
+      - "9000:9000" # MinIO API
+      - "9001:9001" # MinIO Console
 
   backend:
     build:
@@ -66,6 +77,8 @@ services:
       - traefik.http.services.backend.loadbalancer.sticky.cookie.name=StickyCookie
       - traefik.http.services.backend.loadbalancer.sticky.cookie.secure=true
       - traefik.http.services.backend.loadbalancer.sticky.cookie.samesite=strict
+    extra_hosts:
+      - "s3.localhost:172.19.0.5"
     env_file:
       - .env
     deploy:

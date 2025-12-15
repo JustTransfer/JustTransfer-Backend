@@ -12,12 +12,12 @@ providers:
 entryPoints:
   http:
     address: ":80"
-    http:
-      redirections:
-        entryPoint:
-          to: https
-          scheme: https
-          permanent: true
+#    http:  # Disable HTTP to HTTPS redirection to use HTTP endpoint for S3 API
+#      redirections:
+#        entryPoint:
+#          to: https
+#          scheme: https
+#          permanent: true
   https:
     address: ":443"
 

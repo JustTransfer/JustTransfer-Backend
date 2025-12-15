@@ -65,7 +65,7 @@ async fn main() {
     println!("Buckets:");
     while let Some(Ok(output)) = buckets.next().await {
         for bucket in output.buckets() {
-            println!("{}", bucket.name().unwrap_or_default());
+            println!("- {}", bucket.name().unwrap_or_default());
         }
     }
 
