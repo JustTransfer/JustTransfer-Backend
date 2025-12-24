@@ -127,7 +127,7 @@ async fn main() {
         .route("/api/pubkey/enc", post(api_handlers::get_pub_key_enc))
         .route("/api/pubkey/sign", post(api_handlers::get_pub_key_sign))
         .route("/api/messages", post(api_handlers::get_messages))
-        //.route("/api/message/{id}", post(api_handlers::get_one_message))
+        .route("/api/message/{id}", post(api_handlers::get_one_message))
         .route("/api/message", post(api_handlers::upload_message))
         //.route("/api/anonymous/message/{id}/content", post(api_handlers::anonymous_message_get_content))
         .layer(middleware::from_fn(api_handlers::jwt_auth)) // Apply JWT auth middleware to all routes above

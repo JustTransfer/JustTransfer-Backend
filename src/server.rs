@@ -553,13 +553,13 @@ impl Server {
         username_param: &str,
         message_id_param: Uuid,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<Message, Box<dyn std::error::Error>> {
+    ) -> Result<(Message), Box<dyn std::error::Error + Send + Sync>> {
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Delete invalid messages
-        Server::delete_invalid_messages(pool)?;
+        Server::delete_invalid_messages(pool).unwrap();
 
         // Get the message
         let mut message = messages

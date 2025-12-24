@@ -608,56 +608,45 @@ pub async fn get_messages(
     }
 }
 
+#[derive(Serialize)]
+pub struct GetOneMessageResult {
+    download_url: String,
+}
+
 pub async fn get_one_message(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
-) -> impl IntoResponse {
+) -> (StatusCode, Json<GetOneMessageResult>) {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return StatusCode::BAD_REQUEST.into_response();
+        return (StatusCode::BAD_REQUEST, Json(GetOneMessageResult { download_url: "".to_string() }));
     }
-    
+
     let message = Server::get_message(&*payload.username, id, &state.db);
 
-    let filename = "encrypted_file"; // Default filename
+    if message.is_err() {
+        return (StatusCode::BAD_REQUEST, Json(GetOneMessageResult { download_url: "".to_string() }));
+    }
 
-    let mut file_path = PathBuf::from(FILE_STORAGE_PATH);
-    file_path.push(&id.to_string());
+    let message = message.unwrap();
 
-    let meta = match metadata(&file_path) {
-        Ok(m) => m,
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
-    };
-    let file_size = meta.len();
-
-    let file = match File::open(&file_path) {
-        Ok(f) => f,
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
-    };
-
-    let stream = ReaderStream::new(TokioFile::from_std(file))
-        .map_ok(Bytes::from)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
-
-    // Convert stream into axum::body::Body
-    let body = StreamBody::new(stream);
-
-    // Wrap StreamBody into axum::body::Body
-    let response = Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(header::CONTENT_LENGTH, file_size.to_string())
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", filename),
+    // Generate pre-signed S3 download URL
+    let presigned_url = state.s3
+        .get_object()
+        .bucket("gogo-transfer-bucket")
+        .key(message.message_id.to_string())
+        .presigned(
+            PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
         )
-        .body(Body::from_stream(body))
-        .unwrap();
+        .await
+        .expect("Failed to generate presigned URL")
+        .uri()
+        .to_string();
 
-    response
+    (StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url }))
 }
 
 #[derive(Deserialize, Validate)]
@@ -689,7 +678,6 @@ pub struct UploadMessageResult {
     upload_url: String,
 }
 
-#[axum::debug_handler]
 pub async fn upload_message(
     State(state): State<AppState>,
     Json(payload): Json<UploadMessage>,
