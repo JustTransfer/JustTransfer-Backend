@@ -818,7 +818,7 @@ pub async fn anonymous_message_get_one_metadata(
             // Create cookie jar
             let token = create_jwt(&*msg.id.to_string()).expect("Failed to create JWT token");
 
-            // Create cookie (HttpOnly, Secure for production)
+            // Create cookie
             let cookie = Cookie::build((AUTH_HEADER, token))
                 .http_only(true)
                 .secure(true)
@@ -861,6 +861,52 @@ pub async fn anonymous_message_get_one_metadata(
                     number_downloads: 0,
                 },
             })),
+        ),
+    }
+}
+
+#[derive(Serialize)]
+pub struct AnonymousGetMessageResultDownloadUrl {
+    download_url: String,
+}
+
+pub async fn anonymous_message_get_download_url(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    //Json(payload): Json<AnonymousGetMessage>,
+) -> (StatusCode, Json<AnonymousGetMessageResultDownloadUrl>) {
+
+    //
+    let message = Server::anonymous_get_message(id, &state.db);
+
+    match message {
+
+        Ok(msg) => {
+
+            // Generate pre-signed S3 download URL
+            let presigned_url = state.s3
+                .get_object()
+                .bucket("gogo-transfer-bucket")
+                .key(msg.message_id.to_string())
+                .presigned(
+                    PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
+                )
+                .await
+                .expect("Failed to generate presigned URL")
+                .uri()
+                .to_string();
+
+            (StatusCode::OK, Json(AnonymousGetMessageResultDownloadUrl {
+                download_url: presigned_url,
+            }))
+
+        }
+        Err(_) => (
+            StatusCode::BAD_REQUEST,
+            Json(AnonymousGetMessageResultDownloadUrl {
+                download_url: "".to_string(),
+            }
+            ),
         ),
     }
 }
@@ -992,7 +1038,8 @@ pub struct UploadAnonymousMessageFinish {
 
 #[derive(Serialize)]
 pub struct UploadAnonymousMessageFinishResult {
-    upload_id: Uuid,
+    upload_url: String,
+    transfer_id: Uuid,
 }
 
 pub async fn upload_anonymous_message(
@@ -1004,40 +1051,53 @@ pub async fn upload_anonymous_message(
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
         return (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
-            upload_id: Uuid::nil(),
+            upload_url: "".to_string(),
+            transfer_id: Uuid::nil(),
         }));
     }
 
     // Decode the base64 encoded fields
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
     let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
-    let filename = URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed");
-    let nonce_filename = URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed");
-    let header = URL_SAFE_NO_PAD.decode(&payload.header).expect("Base64 decode failed");
 
     let message_file_id = Uuid::new_v4(); // Generate a new UUID for the message file
     
     let send_result = Server::anonymous_send_message(
         req,
         payload.id,
-        filename,
-        nonce_filename,
+        URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed"),
+        URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed"),
         message_file_id,
-        header,
+        URL_SAFE_NO_PAD.decode(&payload.header).expect("Base64 decode failed"),
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,
         &state.db,
     );
 
+    // Generate pre-signed S3 upload URL
+    let upload_url = state.s3
+        .put_object()
+        .bucket("gogo-transfer-bucket") // TODO put a specific bucket for anonymous messages
+        .key(message_file_id.to_string())
+        .presigned(
+            PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
+        )
+        .await
+        .expect("Failed to generate presigned URL")
+        .uri()
+        .to_string();
+
     match send_result {
         Ok(_) =>
             (StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
-                upload_id: message_file_id,
+                upload_url,
+                transfer_id: payload.id,
             })),
         Err(_) =>
             (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
-                upload_id: Uuid::nil(),
+                upload_url: "".to_string(),
+                transfer_id: Uuid::nil(),
             })),
     }
 

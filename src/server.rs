@@ -667,7 +667,7 @@ impl Server {
         lifetime_param: i32,
         creation_time_param: chrono::DateTime<Utc>,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use crate::schema::anonymousmessages;
 
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -817,13 +817,13 @@ impl Server {
     pub fn anonymous_get_message(
         id_param: Uuid,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<AnonymousMessage, Box<dyn std::error::Error>> {
+    ) -> Result<AnonymousMessage, Box<dyn std::error::Error + Send + Sync>> {
         use crate::schema::anonymousmessages;
 
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         // Delete invalid messages
-        Server::delete_invalid_anonymous_messages(pool)?;
+        Server::delete_invalid_anonymous_messages(pool).unwrap();
 
         // Get the message
         let anonymousmessage = anonymousmessages

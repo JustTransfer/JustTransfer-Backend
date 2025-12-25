@@ -142,6 +142,7 @@ async fn main() {
         //.route("/api/anonymous/message/chunk", put(api_handlers::anonymous_message_send_chunk))
         .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous_message_get_one_metadata_start))
         .route("/api/anonymous/message/{id}", post(api_handlers::anonymous_message_get_one_metadata))
+        .route("/api/anonymous/message/{id}", get(api_handlers::anonymous_message_get_download_url))
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)
