@@ -470,6 +470,7 @@ impl Server {
     }
 
     // TODO process only message belonging to the user, not all messages
+    // TODO change to connect to S3 and delete from there
     fn delete_invalid_messages(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
         let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -595,6 +596,7 @@ impl Server {
     ///
 
     // TODO process only message belonging to the user, not all messages
+    // TODO change to connect to S3 and delete from there
     fn delete_invalid_anonymous_messages(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
         use crate::schema::anonymousmessages;
 

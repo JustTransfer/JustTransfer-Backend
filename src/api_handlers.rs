@@ -39,6 +39,8 @@ use crate::models::*;
 pub struct AppState {
     pub db: DbPool,
     pub s3: Client,
+    pub bucket_name: String,
+    pub bucket_name_anonymous: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -636,7 +638,7 @@ pub async fn get_one_message(
     // Generate pre-signed S3 download URL
     let presigned_url = state.s3
         .get_object()
-        .bucket("gogo-transfer-bucket")
+        .bucket(state.bucket_name)
         .key(message.message_id.to_string())
         .presigned(
             PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
@@ -712,7 +714,7 @@ pub async fn upload_message(
     // Generate pre-signed S3 upload URL
     let upload_url = state.s3
         .put_object()
-        .bucket("gogo-transfer-bucket")
+        .bucket(state.bucket_name)
         .key(message_id.to_string())
         .presigned(
             PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
@@ -886,7 +888,7 @@ pub async fn anonymous_message_get_download_url(
             // Generate pre-signed S3 download URL
             let presigned_url = state.s3
                 .get_object()
-                .bucket("gogo-transfer-bucket")
+                .bucket(state.bucket_name_anonymous)
                 .key(msg.message_id.to_string())
                 .presigned(
                     PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
@@ -1078,7 +1080,7 @@ pub async fn upload_anonymous_message(
     // Generate pre-signed S3 upload URL
     let upload_url = state.s3
         .put_object()
-        .bucket("gogo-transfer-bucket") // TODO put a specific bucket for anonymous messages
+        .bucket(state.bucket_name_anonymous)
         .key(message_file_id.to_string())
         .presigned(
             PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),

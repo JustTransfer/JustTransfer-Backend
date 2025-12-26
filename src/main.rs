@@ -66,25 +66,28 @@ async fn main() {
     }
 
     // If bucket does not exist, create it
-    let bucket_name = "gogo-transfer-bucket";
-    let bucket_exists = client_s3
+    let bucket_name = env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set");
+    let bucket_name_anonymous = env::var("S3_BUCKET_NAME_ANONYMOUS").expect("S3_BUCKET_NAME_ANONYMOUS must be set");
+
+    let buckets = client_s3
         .list_buckets()
         .send()
         .await
-        .unwrap()
-        .buckets()
-        .iter()
-        .any(|b| b.name().unwrap_or_default() == bucket_name);
-    if !bucket_exists {
-        client_s3
-            .create_bucket()
-            .bucket(bucket_name)
-            .send()
-            .await
-            .unwrap();
-        println!("Bucket '{}' created.", bucket_name);
-    } else {
-        println!("Bucket '{}' already exists.", bucket_name);
+        .unwrap();
+
+    let has_bucket = |name: &str| {
+        buckets
+            .buckets()
+            .iter()
+            .any(|b| b.name().unwrap_or_default() == name)
+    };
+
+    if !has_bucket(&bucket_name) {
+        client_s3.create_bucket().bucket(&bucket_name).send().await.unwrap();
+    }
+
+    if !has_bucket(&bucket_name_anonymous) {
+        client_s3.create_bucket().bucket(&bucket_name_anonymous).send().await.unwrap();
     }
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -96,6 +99,8 @@ async fn main() {
     let state = api_handlers::AppState {
         db: pool.clone(),
         s3: client_s3.clone(),
+        bucket_name: bucket_name.clone(),
+        bucket_name_anonymous: bucket_name_anonymous.clone(),
     };
 
     // Init server
