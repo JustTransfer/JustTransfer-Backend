@@ -1,4 +1,4 @@
-# JujuTransfer
+# JustTransfer
 
 
 | Sender    | Receiver  | Method                                       |

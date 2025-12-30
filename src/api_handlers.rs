@@ -135,7 +135,7 @@ pub async fn root() -> Json<RootResponse> {
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     Json(RootResponse {
-        result: format!("JujuTransfer Server is running. Database URL: {}", database_url),
+        result: format!("JustTransfer Server is running. Database URL: {}", database_url),
     })
 }
 

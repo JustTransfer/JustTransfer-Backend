@@ -27,9 +27,9 @@ use std::time::Duration;
 
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
-use JujuTransfer::server::Server;
-use JujuTransfer::*;
-use JujuTransfer::consts::{AUTH_HEADER, JWT_DURATION_MINUTES};
+use JustTransfer::server::Server;
+use JustTransfer::*;
+use JustTransfer::consts::{AUTH_HEADER, JWT_DURATION_MINUTES};
 
 #[tokio::main]
 async fn main() {

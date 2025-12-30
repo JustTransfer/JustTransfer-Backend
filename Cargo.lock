@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "JujuTransfer"
+name = "JustTransfer"
 version = "0.1.0"
 dependencies = [
  "argon2",
