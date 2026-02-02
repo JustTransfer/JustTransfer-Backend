@@ -47,9 +47,13 @@
 - Mecanism to report a transfer and delete it
 
 ## Install Diesel
+
 ```bash
 setx PQ_LIB_DIR "C:\Program Files\PostgreSQL\17\lib"
 cargo install diesel_cli --no-default-features --features postgres
+
+# On linux
+sudo apt install libpq-dev
 ```
 
 Set Path variable `C:\Program Files\PostgreSQL\17\bin`.

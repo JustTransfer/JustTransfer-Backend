@@ -30,7 +30,7 @@ use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey,
 
 use aws_sdk_s3::presigning::PresigningConfig;
 use std::time::Duration;
-
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use crate::consts;
 use crate::models::*;
 
@@ -730,6 +730,12 @@ pub async fn upload_message(
 ///
 /// Anonymous messages
 ///
+fn validate_file_size_anonymous(size: u64) -> Result<(), ValidationError> {
+    if size == 0 || size > MAX_FILE_SIZE_ANONYMOUS as u64 {
+        return Err(ValidationError::new("invalid_file_size"));
+    }
+    Ok(())
+}
 
 #[derive(Deserialize, Validate)]
 pub struct AnonymousGetMessageStart {
@@ -803,6 +809,7 @@ pub async fn anonymous_message_get_one_metadata(
                 lifetime: 0,
                 creation_time: chrono::Utc::now(),
                 number_downloads: 0,
+                chunk_size: 0,
             }
         })));
     }
@@ -841,6 +848,7 @@ pub async fn anonymous_message_get_one_metadata(
                     lifetime: msg.lifetime,
                     creation_time: msg.creation_time,
                     number_downloads: msg.number_downloads,
+                    chunk_size: CHUNK_SIZE, // TODO store it in DB
                 },
             });
 
@@ -861,6 +869,7 @@ pub async fn anonymous_message_get_one_metadata(
                     lifetime: 0,
                     creation_time: chrono::Utc::now(),
                     number_downloads: 0,
+                    chunk_size: 0,
                 },
             })),
         ),
@@ -913,67 +922,6 @@ pub async fn anonymous_message_get_download_url(
     }
 }
 
-/*#[derive(Deserialize, Validate)]
-pub struct AnonymousGetMessageContent {
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
-}
-
-pub async fn anonymous_message_get_content(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-    Json(payload): Json<AnonymousGetMessageContent>,
-) -> impl IntoResponse {
-
-    // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return StatusCode::BAD_REQUEST.into_response();
-    }
-    
-    // Acquire the message while holding the lock, then drop the lock immediately
-    let message = {
-        match Server::anonymous_get_message(id, &state.db) {
-            Ok(msg) => msg,
-            Err(_) => return StatusCode::BAD_REQUEST.into_response(),
-        }
-    };
-
-    let filename = "encrypted_file"; // Default filename
-
-    let mut file_path = PathBuf::from(ANONYMOUS_FILE_STORAGE_PATH);
-    file_path.push(&message.message_id.to_string());
-
-    let file = match TokioFile::open(&file_path).await {
-        Ok(f) => f,
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
-    };
-
-    let meta = match file.metadata().await {
-        Ok(m) => m,
-        Err(_) => return StatusCode::NOT_FOUND.into_response(),
-    };
-
-    let stream = ReaderStream::new(file)
-        .map_ok(Bytes::from)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e));
-
-    // Convert stream into axum::body::Body
-    let body = StreamBody::new(stream);
-
-    // Wrap StreamBody into axum::body::Body
-    Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/octet-stream")
-        .header(header::CONTENT_LENGTH, meta.len().to_string())
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"{}\"", filename),
-        )
-        .body(Body::from_stream(body))
-        .unwrap()
-}*/
-
 #[derive(Deserialize, Validate)]
 pub struct AnonymousSendMessageStart {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -984,6 +932,7 @@ pub struct AnonymousSendMessageStart {
 pub struct AnonymousSendMessageResultStart {
     id: Uuid,
     result: String,
+    chunk_size: usize,
 }
 
 pub async fn anonymous_message_send_start(
@@ -996,6 +945,7 @@ pub async fn anonymous_message_send_start(
         return (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageResultStart {
             id: Uuid::nil(),
             result: "".to_string(),
+            chunk_size: CHUNK_SIZE,
         }));
     }
     
@@ -1014,6 +964,7 @@ pub async fn anonymous_message_send_start(
         Json(AnonymousSendMessageResultStart {
             id: id,
             result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
+            chunk_size: CHUNK_SIZE,
         }),
     )
 }
@@ -1036,12 +987,16 @@ pub struct UploadAnonymousMessageFinish {
     lifetime: i32,
     // TODO validate creation time
     creation_time: chrono::DateTime<chrono::Utc>,
+    #[validate(custom(function = "validate_file_size_anonymous"))]
+    file_size: u64,
 }
 
 #[derive(Serialize)]
 pub struct UploadAnonymousMessageFinishResult {
-    upload_url: String,
     transfer_id: Uuid,
+    upload_urls: Vec<String>,
+    upload_id: String,
+    message_file_id: Uuid,
 }
 
 pub async fn upload_anonymous_message(
@@ -1053,8 +1008,10 @@ pub async fn upload_anonymous_message(
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
         return (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
-            upload_url: "".to_string(),
+            upload_urls: vec![],
             transfer_id: Uuid::nil(),
+            upload_id: "".to_string(),
+            message_file_id: Uuid::nil(),
         }));
     }
 
@@ -1077,109 +1034,101 @@ pub async fn upload_anonymous_message(
         &state.db,
     );
 
-    // Generate pre-signed S3 upload URL
-    let upload_url = state.s3
-        .put_object()
-        .bucket(state.bucket_name_anonymous)
+    // Calculate the Number of chunks
+    let num_chunks = (payload.file_size as f64 / CHUNK_SIZE as f64).ceil() as i32;
+    println!("Number of chunks to upload: {}", num_chunks);
+
+    // Create multipart upload
+    let create_multipart_upload_output = state.s3.create_multipart_upload()
+        .bucket(state.bucket_name_anonymous.clone())
         .key(message_file_id.to_string())
-        .presigned(
-            PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
-        )
+        .send()
         .await
-        .expect("Failed to generate presigned URL")
-        .uri()
-        .to_string();
+        .expect("Failed to create multipart upload");
+
+    let upload_id = create_multipart_upload_output.upload_id().expect("No upload ID returned").to_string();
+
+    // Generate pre-signed S3 upload URLs for each chunk
+    let mut upload_urls: Vec<String> = Vec::new();
+
+    for(part_number) in 1..=num_chunks {
+        let upload_url = state.s3.upload_part()
+            .bucket(state.bucket_name_anonymous.clone())
+            .key(message_file_id.to_string())
+            .part_number(part_number)
+            .upload_id(upload_id.clone())
+            .presigned(
+                PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
+            )
+            .await
+            .expect("Failed to generate presigned URL")
+            .uri()
+            .to_string();
+
+        upload_urls.push(upload_url.clone());
+    }
 
     match send_result {
         Ok(_) =>
             (StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
-                upload_url,
+                upload_urls,
                 transfer_id: payload.id,
+                upload_id,
+                message_file_id,
             })),
         Err(_) =>
             (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
-                upload_url: "".to_string(),
+                upload_urls: vec![],
                 transfer_id: Uuid::nil(),
+                upload_id: "".to_string(),
+                message_file_id: Uuid::nil(),
             })),
     }
-
 }
 
-/* pub async fn anonymous_message_send_chunk(
+#[derive(Deserialize, Validate)]
+pub struct UploadAnonymousMessageFinishMultipart {
+    // TODO validate upload ID
+    upload_id: String,
+    etags: Vec<String>,
+}
+
+pub async fn upload_anonymous_message_finish_multipart(
+    Path(file_id): Path<Uuid>,
     State(state): State<AppState>,
-    headers: axum::http::HeaderMap,
-    body: Bytes,
+    Json(payload): Json<UploadAnonymousMessageFinishMultipart>,
 ) -> StatusCode {
 
-    // Extract the required headers
-    let id = match headers.get("X-Upload-ID") {
-        Some(val) => match val.to_str() {
-            Ok(s) => match Uuid::parse_str(s) {
-                Ok(uuid) => uuid,
-                Err(_) => return StatusCode::BAD_REQUEST,
-            },
-            Err(_) => return StatusCode::BAD_REQUEST,
-        },
-        None => return StatusCode::BAD_REQUEST,
-    };
-
-    let chunk_index = match headers.get("X-Chunk-Index") {
-        Some(val) => match val.to_str() {
-            Ok(s) => match s.parse::<i32>() {
-                Ok(index) => index,
-                Err(_) => return StatusCode::BAD_REQUEST,
-            },
-            Err(_) => return StatusCode::BAD_REQUEST,
-        },
-        None => return StatusCode::BAD_REQUEST,
-    };
-
-    let total_chunks = match headers.get("X-Total-Chunks") {
-        Some(val) => match val.to_str() {
-            Ok(s) => match s.parse::<i32>() {
-                Ok(total) => total,
-                Err(_) => return StatusCode::BAD_REQUEST,
-            },
-            Err(_) => return StatusCode::BAD_REQUEST,
-        },
-        None => return StatusCode::BAD_REQUEST,
-    };
-
-    if chunk_index < 0 || total_chunks <= 0 {
+    // Validate payload
+    if let Err(e) = payload.validate() {
+        println!("Validation error: {:?}", e);
         return StatusCode::BAD_REQUEST;
     }
 
-    // Check if the index is valid
+    // Prepare the parts for completing the multipart upload
+    let parts = payload.etags.iter().map(|p| {
+        CompletedPart::builder()
+            .part_number((payload.etags.iter().position(|x| x == p).unwrap() as i32 + 1))
+            .e_tag(p.clone())
+            .build()
+    }).collect::<Vec<_>>();
 
-    // TODO check if the transfer ID is valid and corresponds to an ongoing transfer and user
+    // Complete multipart upload
+    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
+        .set_parts(Some(parts))
+        .build();
 
-    // Append the chunk to the file
-    // Define the file path for this transfer
-    let mut path = PathBuf::from(ANONYMOUS_FILE_STORAGE_PATH);
-    std::fs::create_dir_all(&path).ok(); // ensure directory exists
-    path.push(id.to_string());
+    let _complete_multipart_upload_res = state.s3
+        .complete_multipart_upload()
+        .bucket(state.bucket_name_anonymous.clone())
+        .key(file_id.to_string())
+        .multipart_upload(completed_multipart_upload)
+        .upload_id(payload.upload_id.clone())
+        .send()
+        .await
+        .expect("Failed to complete multipart upload");
 
-    // Open file for append (create if missing)
-    let mut file = match OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-    {
-        Ok(f) => f,
-        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR,
-    };
-
-    // Write the chunk to the file
-    if let Err(_) = file.write_all(&body) {
-        return StatusCode::INTERNAL_SERVER_ERROR;
-    }
-
-    // Finalize if this was the last chunk
-    if chunk_index == total_chunks - 1 {
-        println!("All chunks received for file {}", id);
-
-        // TODO write the total size to DB
-    }
+    // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
 
     StatusCode::OK
-}*/
+}

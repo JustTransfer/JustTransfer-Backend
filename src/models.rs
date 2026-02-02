@@ -184,4 +184,5 @@ pub struct AnonymousMessageMetadataEncoded {
     pub lifetime: i32,
     pub creation_time: chrono::DateTime<Utc>,
     pub number_downloads: i32,
+    pub chunk_size: usize,
 }

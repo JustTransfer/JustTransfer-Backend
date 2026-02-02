@@ -132,6 +132,7 @@ async fn main() {
         .route("/api/login/end", post(api_handlers::login_user_end))
         .route("/api/anonymous/message/start", post(api_handlers::anonymous_message_send_start))
         .route("/api/anonymous/message", post(api_handlers::upload_anonymous_message))
+        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::upload_anonymous_message_finish_multipart))
         //.route("/api/anonymous/message/chunk", put(api_handlers::anonymous_message_send_chunk))
         .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous_message_get_one_metadata_start))
         .route("/api/anonymous/message/{id}", post(api_handlers::anonymous_message_get_one_metadata))
