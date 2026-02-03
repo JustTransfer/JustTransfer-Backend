@@ -71,6 +71,8 @@ pub struct Message {
     pub creation_time: chrono::DateTime<Utc>,
     pub signature: Vec<u8>,
     pub number_downloads: i32,
+    pub file_size: i64,
+    pub chunk_size: i64,
 }
 
 #[derive(Insertable)]
@@ -87,6 +89,8 @@ pub struct NewMessage<'a> {
     pub creation_time: &'a chrono::DateTime<Utc>,
     pub signature: &'a Vec<u8>,
     pub number_downloads: &'a i32,
+    pub file_size: &'a i64,
+    pub chunk_size: &'a i64,
 }
 
 #[derive(Queryable, Serialize)]
@@ -103,6 +107,8 @@ pub struct MessageWithUsernames {
     pub creation_time: chrono::DateTime<Utc>,
     pub signature: Vec<u8>,
     pub number_downloads: i32,
+    pub file_size: i64,
+    pub chunk_size: i64,
 }
 
 #[derive(Queryable, Serialize)]
@@ -119,6 +125,8 @@ pub struct MessageWithUsernamesEncoded {
     pub creation_time: chrono::DateTime<Utc>,
     pub signature: String,
     pub number_downloads: i32,
+    pub file_size: i64,
+    pub chunk_size: i64,
 }
 
 #[derive(Queryable, Selectable)]
@@ -143,6 +151,8 @@ pub struct AnonymousMessage {
     pub lifetime: i32,
     pub creation_time: chrono::DateTime<Utc>,
     pub number_downloads: i32,
+    pub file_size: i64,
+    pub chunk_size: i64,
 }
 
 #[derive(Insertable)]
@@ -158,6 +168,8 @@ pub struct NewAnonymousMessage<'a> {
     pub lifetime: &'a i32,
     pub creation_time: &'a chrono::DateTime<Utc>,
     pub number_downloads: &'a i32,
+    pub file_size: &'a i64,
+    pub chunk_size: &'a i64,
 }
 
 #[derive(Queryable, Serialize, Clone)]
@@ -171,6 +183,8 @@ pub struct AnonymousMessageMetadata {
     pub lifetime: i32,
     pub creation_time: chrono::DateTime<Utc>,
     pub number_downloads: i32,
+    pub file_size: i64,
+    pub chunk_size: i64,
 }
 
 #[derive(Queryable, Serialize, Clone)]
@@ -184,5 +198,6 @@ pub struct AnonymousMessageMetadataEncoded {
     pub lifetime: i32,
     pub creation_time: chrono::DateTime<Utc>,
     pub number_downloads: i32,
-    pub chunk_size: usize,
+    pub file_size: i64,
+    pub chunk_size: i64,
 }

@@ -51,7 +51,9 @@ CREATE TABLE messages
     lifetime         INT           NOT NULL,
     creation_time    TIMESTAMPTZ   NOT NULL,
     signature        BYTEA         NOT NULL,
-    number_downloads INT DEFAULT 0 NOT NULL
+    number_downloads INT DEFAULT 0 NOT NULL,
+    file_size        BIGINT        NOT NULL,
+    chunk_size       BIGINT        NOT NULL
 );
 
 -- Table Anonymous messages
@@ -69,5 +71,7 @@ CREATE TABLE anonymousMessages
     max_downloads    INT           NOT NULL,
     lifetime         INT           NOT NULL,
     creation_time    TIMESTAMPTZ   NOT NULL,
-    number_downloads INT DEFAULT 0 NOT NULL
+    number_downloads INT DEFAULT 0 NOT NULL,
+    file_size        BIGINT        NOT NULL,
+    chunk_size       BIGINT        NOT NULL
 );

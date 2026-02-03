@@ -22,7 +22,8 @@ pub const MIN_LENGTH_BASE64: u64 = 16;
 pub const MAX_LENGTH_BASE64: u64 = 4096;
 pub const MAX_VALUE_INT: i32 = 1000;
 pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 40 * 1024 * 1024 * 1024; // 40 GB
-pub const CHUNK_SIZE: usize = 10 * 1024 * 1024; // 10 MB
+pub const MAX_FILE_SIZE_CONNECTED: i64 = 40 * 1024 * 1024 * 1024; // 40 GB
+pub const CHUNK_SIZE: i64 = 10 * 1024 * 1024; // 10 MB
 
 
 /// Const for mac

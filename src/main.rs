@@ -56,8 +56,15 @@ async fn main() {
 
     let client_s3 = Client::from_conf(client_config);
 
+    // Test S3 connection
+    while let Err(e) = client_s3.list_buckets().send().await {
+        eprintln!("Failed to connect to S3: {}. Retrying in 2 seconds...", e);
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+
     // List buckets
     let mut buckets = client_s3.list_buckets().into_paginator().send();
+
     println!("Buckets:");
     while let Some(Ok(output)) = buckets.next().await {
         for bucket in output.buckets() {
@@ -120,23 +127,23 @@ async fn main() {
         .route("/api/messages", post(api_handlers::get_messages))
         .route("/api/message/{id}", post(api_handlers::get_one_message))
         .route("/api/message", post(api_handlers::upload_message))
+        .route("/api/message/uploadfinish/{file_id}", post(api_handlers::upload_message_finish_multipart))
         //.route("/api/anonymous/message/{id}/content", post(api_handlers::anonymous_message_get_content))
-        .layer(middleware::from_fn(api_handlers::jwt_auth))
+        .layer(middleware::from_fn(api_handlers_auth::jwt_auth))
         // Apply JWT auth middleware to all routes defined before this line
 
         .route("/api", get(api_handlers::root))
         .route("/api/register/start", post(api_handlers::register_user_start))
         .route("/api/register/end", post(api_handlers::register_user_end))
-        .route("/api/register/update", post(api_handlers::register_user_end_update))
+        .route("/api/register/update", post(api_handlers::register_user_end_update))// TODO check if needs auth
         .route("/api/login/start", post(api_handlers::login_user_start))
         .route("/api/login/end", post(api_handlers::login_user_end))
-        .route("/api/anonymous/message/start", post(api_handlers::anonymous_message_send_start))
-        .route("/api/anonymous/message", post(api_handlers::upload_anonymous_message))
-        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::upload_anonymous_message_finish_multipart))
-        //.route("/api/anonymous/message/chunk", put(api_handlers::anonymous_message_send_chunk))
-        .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous_message_get_one_metadata_start))
-        .route("/api/anonymous/message/{id}", post(api_handlers::anonymous_message_get_one_metadata))
-        .route("/api/anonymous/message/{id}", get(api_handlers::anonymous_message_get_download_url))
+        .route("/api/anonymous/message/start", post(api_handlers_anonymous::anonymous_message_send_start))
+        .route("/api/anonymous/message", post(api_handlers_anonymous::upload_anonymous_message))
+        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers_anonymous::upload_anonymous_message_finish_multipart))
+        .route("/api/anonymous/message/{id}/start", post(api_handlers_anonymous::anonymous_message_get_one_metadata_start))
+        .route("/api/anonymous/message/{id}", post(api_handlers_anonymous::anonymous_message_get_one_metadata))
+        .route("/api/anonymous/message/{id}", get(api_handlers_anonymous::anonymous_message_get_download_url))
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors);

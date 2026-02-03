@@ -13,6 +13,8 @@ diesel::table! {
         lifetime -> Int4,
         creation_time -> Timestamptz,
         number_downloads -> Int4,
+        file_size -> Int8,
+        chunk_size -> Int8,
     }
 }
 
@@ -30,6 +32,8 @@ diesel::table! {
         creation_time -> Timestamptz,
         signature -> Bytea,
         number_downloads -> Int4,
+        file_size -> Int8,
+        chunk_size -> Int8,
     }
 }
 

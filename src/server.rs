@@ -356,7 +356,7 @@ impl Server {
         ))
     }
 
-    // TODO remove
+    // TODO implement logout
     /*pub fn logout(
         &mut self,
         username_param: &str,
@@ -410,6 +410,7 @@ impl Server {
         lifetime_param: i32,
         creation_time_param: chrono::DateTime<Utc>,
         signature_param: Vec<u8>,
+        file_size_param: i64,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use crate::schema::users;
@@ -458,6 +459,8 @@ impl Server {
             creation_time: &creation_time_param,
             signature: &signature_param,
             number_downloads: &0,
+            file_size: &file_size_param,
+            chunk_size: &CHUNK_SIZE,
         };
 
         diesel::insert_into(messages::table)
@@ -542,7 +545,10 @@ impl Server {
                 messages::creation_time,
                 messages::signature,
                 messages::number_downloads,
+                messages::file_size,
+                messages::chunk_size,
             ))
+            .order_by(messages::creation_time.desc())
             .load::<MessageWithUsernames>(&mut conn)
             .optional()?
             .ok_or("No messages found")?;
@@ -668,6 +674,7 @@ impl Server {
         max_downloads_param: i32,
         lifetime_param: i32,
         creation_time_param: chrono::DateTime<Utc>,
+        file_size_param: i64,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         use crate::schema::anonymousmessages;
@@ -705,6 +712,8 @@ impl Server {
             lifetime: &lifetime_param,
             creation_time: &creation_time_param,
             number_downloads: &0,
+            file_size: &file_size_param,
+            chunk_size: &CHUNK_SIZE,
         };
 
         diesel::insert_into(anonymousmessages::table)
@@ -808,6 +817,8 @@ impl Server {
                 anonymousmessages::lifetime,
                 anonymousmessages::creation_time,
                 anonymousmessages::number_downloads,
+                anonymousmessages::file_size,
+                anonymousmessages::chunk_size,
             ))
             .first::<AnonymousMessageMetadata>(&mut conn)
             .optional()?
