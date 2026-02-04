@@ -556,12 +556,12 @@ pub async fn get_messages(
                     receiver: m.receiver,
                     filename: URL_SAFE_NO_PAD.encode(m.filename),
                     nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
-                    message_id: m.message_id,
+                    file_id: m.file_id,
                     nonce_message: URL_SAFE_NO_PAD.encode(m.nonce_message),
                     max_downloads: m.max_downloads,
                     lifetime: m.lifetime,
                     creation_time: m.creation_time,
-                    signature: URL_SAFE_NO_PAD.encode(m.signature),
+                    signature: URL_SAFE_NO_PAD.encode(m.signature.unwrap()), // Sever returns only messages with signature, so unwrap is safe
                     number_downloads: m.number_downloads,
                     file_size: m.file_size,
                     chunk_size: m.chunk_size,
@@ -615,7 +615,7 @@ pub async fn get_one_message(
     let presigned_url = state.s3
         .get_object()
         .bucket(state.bucket_name)
-        .key(message.message_id.to_string())
+        .key(message.file_id.to_string())
         .presigned(
             PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
         )
@@ -651,8 +651,8 @@ pub struct UploadMessage {
     lifetime: i32,
     // TODO validate creation time
     creation_time: chrono::DateTime<chrono::Utc>,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    signature: String,
+    //#[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    // signature: String,
     #[validate(custom(function = "validate_file_size"))]
     file_size: i64,
 }
@@ -693,7 +693,7 @@ pub async fn upload_message(
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,
-        URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed"),
+        //URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed"),
         payload.file_size,
         &state.db,
     );
@@ -754,6 +754,8 @@ pub struct UploadMessageFinishMultipart {
     // TODO validate upload ID
     upload_id: String,
     etags: Vec<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    signature: String,
 }
 
 pub async fn upload_message_finish_multipart(
@@ -790,6 +792,16 @@ pub async fn upload_message_finish_multipart(
         .send()
         .await
         .expect("Failed to complete multipart upload");
+
+    let update_signature_result= Server::update_message_signature(
+        file_id,
+        URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed"),
+        &state.db,
+    );
+
+    if update_signature_result.is_err() {
+        return StatusCode::BAD_REQUEST;
+    }
 
     // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
     StatusCode::OK

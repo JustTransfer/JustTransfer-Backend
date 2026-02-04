@@ -123,7 +123,7 @@ pub async fn anonymous_message_get_one_metadata(
                     id: Uuid::nil(),
                     filename: "".to_string(),
                     nonce_filename: "".to_string(),
-                    message_id: Uuid::nil(),
+                    file_id: Uuid::nil(),
                     header: "".to_string(),
                     max_downloads: 0,
                     lifetime: 0,
@@ -162,7 +162,7 @@ pub async fn anonymous_message_get_one_metadata(
                     id: msg.id,
                     filename: URL_SAFE_NO_PAD.encode(msg.filename),
                     nonce_filename: URL_SAFE_NO_PAD.encode(msg.nonce_filename),
-                    message_id: msg.message_id,
+                    file_id: msg.file_id,
                     header: URL_SAFE_NO_PAD.encode(msg.header),
                     max_downloads: msg.max_downloads,
                     lifetime: msg.lifetime,
@@ -184,7 +184,7 @@ pub async fn anonymous_message_get_one_metadata(
                         id: Uuid::nil(),
                         filename: "".to_string(),
                         nonce_filename: "".to_string(),
-                        message_id: Uuid::nil(),
+                        file_id: Uuid::nil(),
                         header: "".to_string(),
                         max_downloads: 0,
                         lifetime: 0,
@@ -220,7 +220,7 @@ pub async fn anonymous_message_get_download_url(
             let presigned_url = state.s3
                 .get_object()
                 .bucket(state.bucket_name_anonymous)
-                .key(msg.message_id.to_string())
+                .key(msg.file_id.to_string())
                 .presigned(
                     PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
                 )

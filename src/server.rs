@@ -409,7 +409,7 @@ impl Server {
         max_downloads_param: i32,
         lifetime_param: i32,
         creation_time_param: chrono::DateTime<Utc>,
-        signature_param: Vec<u8>,
+        //signature_param: Vec<u8>,
         file_size_param: i64,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -452,12 +452,12 @@ impl Server {
             receiver_id: &receiver.id,
             filename: &filename_param,
             nonce_filename: &nonce_filename_param,
-            message_id: &message_id_param,
+            file_id: &message_id_param,
             nonce_message: &nonce_message_param,
             max_downloads: &max_downloads_param,
             lifetime: &lifetime_param,
             creation_time: &creation_time_param,
-            signature: &signature_param,
+            //signature: &signature_param,
             number_downloads: &0,
             file_size: &file_size_param,
             chunk_size: &CHUNK_SIZE,
@@ -468,6 +468,24 @@ impl Server {
             .returning(Message::as_returning())
             .get_result(&mut conn)
             .expect("Error saving new message");
+
+        Ok(())
+    }
+
+    pub fn update_message_signature(
+        file_id_param: Uuid,
+        signature_param: Vec<u8>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+        use crate::schema::messages;
+        use crate::schema::users;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+        let updated_rows = diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
+            .set(messages::signature.eq(Some(signature_param)))
+            .execute(&mut conn)
+            .expect("Error updating message");
 
         Ok(())
     }
@@ -484,7 +502,7 @@ impl Server {
 
         // Delete files from disk
         for msg in &messages_to_delete {
-            let file_path = String::from(FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            let file_path = String::from(FILE_STORAGE_PATH) + &msg.file_id.to_string();
             if Path::new(&file_path).exists() {
                 fs::remove_file(&file_path)?;
             }
@@ -502,7 +520,7 @@ impl Server {
 
         // Delete files from disk
         for msg in &expired_messages {
-            let file_path = String::from(FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            let file_path = String::from(FILE_STORAGE_PATH) + &msg.file_id.to_string();
             if Path::new(&file_path).exists() {
                 fs::remove_file(&file_path)?;
             }
@@ -532,13 +550,14 @@ impl Server {
             .inner_join(sender.on(messages::sender_id.eq(sender.field(users::id))))
             .inner_join(receiver.on(messages::receiver_id.eq(receiver.field(users::id))))
             .filter(receiver.field(users::username).eq(username_param))
+            .filter(messages::signature.is_not_null()) // Only get messages with signature
             .select((
                 messages::id,
                 sender.field(users::username),
                 receiver.field(users::username),
                 messages::filename,
                 messages::nonce_filename,
-                messages::message_id,
+                messages::file_id,
                 messages::nonce_message,
                 messages::max_downloads,
                 messages::lifetime,
@@ -570,7 +589,7 @@ impl Server {
 
         // Get the message
         let mut message = messages
-            .filter(messages::message_id.eq(message_id_param))
+            .filter(messages::file_id.eq(message_id_param))
             .first::<Message>(&mut conn)
             .optional()?
             .ok_or("Message not found")?;
@@ -615,7 +634,7 @@ impl Server {
 
         // Delete files from disk
         for msg in &messages_to_delete {
-            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.file_id.to_string();
             if Path::new(&file_path).exists() {
                 fs::remove_file(&file_path)?;
             }
@@ -633,7 +652,7 @@ impl Server {
 
         // Delete files from disk
         for msg in &expired_messages {
-            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.message_id.to_string();
+            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.file_id.to_string();
             if Path::new(&file_path).exists() {
                 fs::remove_file(&file_path)?;
             }
@@ -706,7 +725,7 @@ impl Server {
             password_file: &password_file_param.serialize().to_vec(),
             filename: &filename_param,
             nonce_filename: &nonce_filename_param,
-            message_id: &message_id_param,
+            file_id: &message_id_param,
             header: &header_param,
             max_downloads: &max_downloads_param,
             lifetime: &lifetime_param,
@@ -811,7 +830,7 @@ impl Server {
                 anonymousmessages::id,
                 anonymousmessages::filename,
                 anonymousmessages::nonce_filename,
-                anonymousmessages::message_id,
+                anonymousmessages::file_id,
                 anonymousmessages::header,
                 anonymousmessages::max_downloads,
                 anonymousmessages::lifetime,

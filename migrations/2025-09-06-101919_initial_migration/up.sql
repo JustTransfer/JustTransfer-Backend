@@ -45,12 +45,12 @@ CREATE TABLE messages
 
     filename         BYTEA         NOT NULL,
     nonce_filename   BYTEA         NOT NULL,
-    message_id       UUID          NOT NULL UNIQUE,
+    file_id          UUID          NOT NULL UNIQUE,
     nonce_message    BYTEA         NOT NULL,
     max_downloads    INT           NOT NULL,
     lifetime         INT           NOT NULL,
     creation_time    TIMESTAMPTZ   NOT NULL,
-    signature        BYTEA         NOT NULL,
+    signature        BYTEA         ,
     number_downloads INT DEFAULT 0 NOT NULL,
     file_size        BIGINT        NOT NULL,
     chunk_size       BIGINT        NOT NULL
@@ -66,7 +66,7 @@ CREATE TABLE anonymousMessages
 
     filename         BYTEA         NOT NULL,
     nonce_filename   BYTEA         NOT NULL,
-    message_id       UUID          NOT NULL UNIQUE,
+    file_id          UUID          NOT NULL UNIQUE,
     header           BYTEA         NOT NULL,
     max_downloads    INT           NOT NULL,
     lifetime         INT           NOT NULL,
