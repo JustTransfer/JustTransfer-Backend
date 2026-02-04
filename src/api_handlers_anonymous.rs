@@ -121,7 +121,7 @@ pub async fn anonymous_message_get_one_metadata(
             StatusCode::BAD_REQUEST, Json(AnonymousGetMessageResult {
                 message: AnonymousMessageMetadataEncoded {
                     id: Uuid::nil(),
-                    filename: "".to_string(),
+                    cfilename: "".to_string(),
                     nonce_filename: "".to_string(),
                     file_id: Uuid::nil(),
                     header: "".to_string(),
@@ -131,6 +131,7 @@ pub async fn anonymous_message_get_one_metadata(
                     number_downloads: 0,
                     file_size: 0,
                     chunk_size: 0,
+                    mac: "".to_string(),
                 }
             })));
     }
@@ -160,7 +161,7 @@ pub async fn anonymous_message_get_one_metadata(
             let resp = Json(AnonymousGetMessageResult {
                 message: AnonymousMessageMetadataEncoded {
                     id: msg.id,
-                    filename: URL_SAFE_NO_PAD.encode(msg.filename),
+                    cfilename: URL_SAFE_NO_PAD.encode(msg.cfilename),
                     nonce_filename: URL_SAFE_NO_PAD.encode(msg.nonce_filename),
                     file_id: msg.file_id,
                     header: URL_SAFE_NO_PAD.encode(msg.header),
@@ -170,6 +171,7 @@ pub async fn anonymous_message_get_one_metadata(
                     number_downloads: msg.number_downloads,
                     file_size: msg.file_size,
                     chunk_size: msg.chunk_size,
+                    mac: URL_SAFE_NO_PAD.encode(msg.mac.unwrap()), // Can be unwraped as checked during message retrieval
                 },
             });
 
@@ -182,7 +184,7 @@ pub async fn anonymous_message_get_one_metadata(
                 Json(AnonymousGetMessageResult {
                     message: AnonymousMessageMetadataEncoded {
                         id: Uuid::nil(),
-                        filename: "".to_string(),
+                        cfilename: "".to_string(),
                         nonce_filename: "".to_string(),
                         file_id: Uuid::nil(),
                         header: "".to_string(),
@@ -192,6 +194,7 @@ pub async fn anonymous_message_get_one_metadata(
                         number_downloads: 0,
                         file_size: 0,
                         chunk_size: 0,
+                        mac: "".to_string(),
                     },
                 })),
         ),
@@ -302,7 +305,7 @@ pub struct UploadAnonymousMessageFinish {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    filename: String,
+    cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -350,7 +353,7 @@ pub async fn upload_anonymous_message(
     let send_result = Server::anonymous_send_message(
         req,
         payload.id,
-        URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed"),
+        URL_SAFE_NO_PAD.decode(&payload.cfilename).expect("Base64 decode failed"),
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed"),
         message_file_id,
         URL_SAFE_NO_PAD.decode(&payload.header).expect("Base64 decode failed"),
@@ -418,6 +421,8 @@ pub struct UploadAnonymousMessageFinishMultipart {
     // TODO validate upload ID
     upload_id: String,
     etags: Vec<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    mac: String,
 }
 
 pub async fn upload_anonymous_message_finish_multipart(
@@ -454,6 +459,16 @@ pub async fn upload_anonymous_message_finish_multipart(
         .send()
         .await
         .expect("Failed to complete multipart upload");
+
+    let update_mac_result= Server::update_anonymous_message_mac(
+        file_id,
+        URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed"),
+        &state.db,
+    );
+
+    if update_mac_result.is_err() {
+        return StatusCode::BAD_REQUEST;
+    }
 
     // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
     StatusCode::OK

@@ -554,7 +554,7 @@ pub async fn get_messages(
                     id: m.id,
                     sender: m.sender,
                     receiver: m.receiver,
-                    filename: URL_SAFE_NO_PAD.encode(m.filename),
+                    cfilename: URL_SAFE_NO_PAD.encode(m.cfilename),
                     nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
                     file_id: m.file_id,
                     nonce_message: URL_SAFE_NO_PAD.encode(m.nonce_message),
@@ -640,7 +640,7 @@ pub struct UploadMessage {
     #[validate(custom(function = "validate_username"))]
     receiver: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    filename: String,
+    cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -686,7 +686,7 @@ pub async fn upload_message(
     let send_result = Server::send_message(
         &payload.sender,
         &payload.receiver,
-        URL_SAFE_NO_PAD.decode(&payload.filename).expect("Base64 decode failed"),
+        URL_SAFE_NO_PAD.decode(&payload.cfilename).expect("Base64 decode failed"),
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed"),
         file_id,
         URL_SAFE_NO_PAD.decode(&payload.nonce_message).expect("Base64 decode failed"),

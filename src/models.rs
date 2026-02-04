@@ -62,7 +62,7 @@ pub struct Message {
     pub id: i32,
     pub sender_id: i32,
     pub receiver_id: i32,
-    pub filename: Vec<u8>,
+    pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
     pub nonce_message: Vec<u8>,
@@ -80,7 +80,7 @@ pub struct Message {
 pub struct NewMessage<'a> {
     pub sender_id: &'a i32,
     pub receiver_id: &'a i32,
-    pub filename: &'a Vec<u8>,
+    pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
     pub file_id: &'a Uuid,
     pub nonce_message: &'a Vec<u8>,
@@ -98,7 +98,7 @@ pub struct MessageWithUsernames {
     pub id: i32,
     pub sender: String,
     pub receiver: String,
-    pub filename: Vec<u8>,
+    pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
     pub nonce_message: Vec<u8>,
@@ -116,7 +116,7 @@ pub struct MessageWithUsernamesEncoded {
     pub id: i32,
     pub sender: String,
     pub receiver: String,
-    pub filename: String,
+    pub cfilename: String,
     pub nonce_filename: String,
     pub file_id: Uuid,
     pub nonce_message: String,
@@ -143,7 +143,7 @@ pub struct AnonymousMessage {
     pub id: Uuid,
     pub password_file: Vec<u8>,
     pub server_login: Option<Vec<u8>>,
-    pub filename: Vec<u8>,
+    pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
     pub header: Vec<u8>,
@@ -153,6 +153,7 @@ pub struct AnonymousMessage {
     pub number_downloads: i32,
     pub file_size: i64,
     pub chunk_size: i64,
+    pub mac: Option<Vec<u8>>,
 }
 
 #[derive(Insertable)]
@@ -160,7 +161,7 @@ pub struct AnonymousMessage {
 pub struct NewAnonymousMessage<'a> {
     pub id: &'a Uuid,
     pub password_file: &'a Vec<u8>,
-    pub filename: &'a Vec<u8>,
+    pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
     pub file_id: &'a Uuid,
     pub header: &'a Vec<u8>,
@@ -175,7 +176,7 @@ pub struct NewAnonymousMessage<'a> {
 #[derive(Queryable, Serialize, Clone)]
 pub struct AnonymousMessageMetadata {
     pub id: Uuid,
-    pub filename: Vec<u8>,
+    pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
     pub header: Vec<u8>,
@@ -185,12 +186,13 @@ pub struct AnonymousMessageMetadata {
     pub number_downloads: i32,
     pub file_size: i64,
     pub chunk_size: i64,
+    pub mac: Option<Vec<u8>>,
 }
 
 #[derive(Queryable, Serialize, Clone)]
 pub struct AnonymousMessageMetadataEncoded {
     pub id: Uuid,
-    pub filename: String,
+    pub cfilename: String,
     pub nonce_filename: String,
     pub file_id: Uuid,
     pub header: String,
@@ -200,4 +202,5 @@ pub struct AnonymousMessageMetadataEncoded {
     pub number_downloads: i32,
     pub file_size: i64,
     pub chunk_size: i64,
+    pub mac: String,
 }

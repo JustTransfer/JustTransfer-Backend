@@ -5,7 +5,7 @@ diesel::table! {
         id -> Uuid,
         password_file -> Bytea,
         server_login -> Nullable<Bytea>,
-        filename -> Bytea,
+        cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,
         header -> Bytea,
@@ -15,6 +15,7 @@ diesel::table! {
         number_downloads -> Int4,
         file_size -> Int8,
         chunk_size -> Int8,
+        mac -> Nullable<Bytea>,
     }
 }
 
@@ -23,7 +24,7 @@ diesel::table! {
         id -> Int4,
         sender_id -> Int4,
         receiver_id -> Int4,
-        filename -> Bytea,
+        cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,
         nonce_message -> Bytea,

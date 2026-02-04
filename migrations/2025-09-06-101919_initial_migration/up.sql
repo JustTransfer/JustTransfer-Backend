@@ -43,7 +43,7 @@ CREATE TABLE messages
     sender_id        INT           NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     receiver_id      INT           NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
-    filename         BYTEA         NOT NULL,
+    cfilename         BYTEA        NOT NULL,
     nonce_filename   BYTEA         NOT NULL,
     file_id          UUID          NOT NULL UNIQUE,
     nonce_message    BYTEA         NOT NULL,
@@ -64,7 +64,7 @@ CREATE TABLE anonymousMessages
     password_file    BYTEA         NOT NULL,
     server_login     BYTEA,
 
-    filename         BYTEA         NOT NULL,
+    cfilename         BYTEA        NOT NULL,
     nonce_filename   BYTEA         NOT NULL,
     file_id          UUID          NOT NULL UNIQUE,
     header           BYTEA         NOT NULL,
@@ -73,5 +73,6 @@ CREATE TABLE anonymousMessages
     creation_time    TIMESTAMPTZ   NOT NULL,
     number_downloads INT DEFAULT 0 NOT NULL,
     file_size        BIGINT        NOT NULL,
-    chunk_size       BIGINT        NOT NULL
+    chunk_size       BIGINT        NOT NULL,
+    mac              BYTEA
 );

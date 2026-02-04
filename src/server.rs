@@ -450,7 +450,7 @@ impl Server {
         let new_message = NewMessage {
             sender_id: &sender.id,
             receiver_id: &receiver.id,
-            filename: &filename_param,
+            cfilename: &filename_param,
             nonce_filename: &nonce_filename_param,
             file_id: &message_id_param,
             nonce_message: &nonce_message_param,
@@ -555,7 +555,7 @@ impl Server {
                 messages::id,
                 sender.field(users::username),
                 receiver.field(users::username),
-                messages::filename,
+                messages::cfilename,
                 messages::nonce_filename,
                 messages::file_id,
                 messages::nonce_message,
@@ -723,7 +723,7 @@ impl Server {
         let new_message = NewAnonymousMessage {
             id: &id_transfer,
             password_file: &password_file_param.serialize().to_vec(),
-            filename: &filename_param,
+            cfilename: &filename_param,
             nonce_filename: &nonce_filename_param,
             file_id: &message_id_param,
             header: &header_param,
@@ -826,9 +826,10 @@ impl Server {
 
         let messages_get = anonymousmessages::table
             .filter(anonymousmessages::id.eq(id_param))
+            .filter(anonymousmessages::mac.is_not_null()) 
             .select((
                 anonymousmessages::id,
-                anonymousmessages::filename,
+                anonymousmessages::cfilename,
                 anonymousmessages::nonce_filename,
                 anonymousmessages::file_id,
                 anonymousmessages::header,
@@ -838,6 +839,7 @@ impl Server {
                 anonymousmessages::number_downloads,
                 anonymousmessages::file_size,
                 anonymousmessages::chunk_size,
+                anonymousmessages::mac,
             ))
             .first::<AnonymousMessageMetadata>(&mut conn)
             .optional()?
@@ -871,5 +873,22 @@ impl Server {
             .expect("Error updating message");
 
         Ok(anonymousmessage)
+    }
+
+    pub fn update_anonymous_message_mac(
+        file_id_param: Uuid,
+        mac_param: Vec<u8>,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+        use crate::schema::anonymousmessages;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+        let updated_rows = diesel::update(anonymousmessages.filter(anonymousmessages::file_id.eq(file_id_param)))
+            .set(anonymousmessages::mac.eq(Some(mac_param)))
+            .execute(&mut conn)
+            .expect("Error updating message");
+
+        Ok(())
     }
 }
