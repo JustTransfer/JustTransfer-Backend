@@ -204,8 +204,6 @@ pub struct RegisterUserEndUpdate {
     #[validate(custom(function = "validate_username"))]
     username: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cpriv_enc: String,
@@ -236,7 +234,6 @@ pub async fn register_user_end_update(
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
     let client_registration_finish = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
 
-    let mac = URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed");
     let cpriv_enc = URL_SAFE_NO_PAD.decode(&payload.cpriv_enc).expect("Base64 decode failed");
     let nonce_priv_enc = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_enc).expect("Base64 decode failed");
     let pub_enc = URL_SAFE_NO_PAD.decode(&payload.pub_enc).expect("Base64 decode failed");
@@ -443,11 +440,7 @@ pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) 
 #[derive(Deserialize, Validate)]
 pub struct GetPubKeyEnc {
     #[validate(custom(function = "validate_username"))]
-    username: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
-    #[validate(custom(function = "validate_username"))]
-    user_pub_key: String,
+    user_request_pub_key: String,
 }
 
 #[derive(Serialize)]
@@ -466,7 +459,7 @@ pub async fn get_pub_key_enc(
         return (StatusCode::BAD_REQUEST, Json(GetPubKeyEncResult { pub_enc: "".to_string() }));
     }
     
-    let pub_enc = Server::get_pub_key_enc(&*payload.user_pub_key, &state.db);
+    let pub_enc = Server::get_pub_key_enc(&*payload.user_request_pub_key, &state.db);
 
     match pub_enc {
         Some(pub_enc) => {
@@ -481,11 +474,7 @@ pub async fn get_pub_key_enc(
 #[derive(Deserialize, Validate)]
 pub struct GetPubKeySign {
     #[validate(custom(function = "validate_username"))]
-    username: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
-    #[validate(custom(function = "validate_username"))]
-    user_pub_key: String,
+    user_request_pub_key: String,
 }
 
 #[derive(Serialize)]
@@ -504,7 +493,7 @@ pub async fn get_pub_key_sign(
         return (StatusCode::BAD_REQUEST, Json(GetPubKeySignResult { pub_sign: "".to_string() }));
     }
     
-    let pub_sign = Server::get_pub_key_sign(&*payload.user_pub_key, &state.db);
+    let pub_sign = Server::get_pub_key_sign(&*payload.user_request_pub_key, &state.db);
 
     match pub_sign {
         Some(pub_sign) => {
@@ -523,9 +512,7 @@ pub async fn get_pub_key_sign(
 #[derive(Deserialize, Validate)]
 pub struct GetMessage {
     #[validate(custom(function = "validate_username"))]
-    username: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
+    username: String, // TODO username should be derived from the cookie
 }
 
 #[derive(Serialize)]
@@ -633,8 +620,6 @@ pub async fn get_one_message(
 
 #[derive(Deserialize, Validate)]
 pub struct UploadMessage {
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
     #[validate(custom(function = "validate_username"))]
     sender: String,
     #[validate(custom(function = "validate_username"))]
