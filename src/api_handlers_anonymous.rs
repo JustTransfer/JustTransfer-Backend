@@ -131,7 +131,6 @@ pub async fn anonymous_message_get_one_metadata(
                     number_downloads: 0,
                     file_size: 0,
                     chunk_size: 0,
-                    mac: "".to_string(),
                 }
             })));
     }
@@ -171,7 +170,6 @@ pub async fn anonymous_message_get_one_metadata(
                     number_downloads: msg.number_downloads,
                     file_size: msg.file_size,
                     chunk_size: msg.chunk_size,
-                    mac: URL_SAFE_NO_PAD.encode(msg.mac.unwrap()), // Can be unwraped as checked during message retrieval
                 },
             });
 
@@ -194,7 +192,6 @@ pub async fn anonymous_message_get_one_metadata(
                         number_downloads: 0,
                         file_size: 0,
                         chunk_size: 0,
-                        mac: "".to_string(),
                     },
                 })),
         ),
@@ -421,8 +418,6 @@ pub struct UploadAnonymousMessageFinishMultipart {
     // TODO validate upload ID
     upload_id: String,
     etags: Vec<String>,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
 }
 
 pub async fn upload_anonymous_message_finish_multipart(
@@ -459,16 +454,6 @@ pub async fn upload_anonymous_message_finish_multipart(
         .send()
         .await
         .expect("Failed to complete multipart upload");
-
-    let update_mac_result= Server::update_anonymous_message_mac(
-        file_id,
-        URL_SAFE_NO_PAD.decode(&payload.mac).expect("Base64 decode failed"),
-        &state.db,
-    );
-
-    if update_mac_result.is_err() {
-        return StatusCode::BAD_REQUEST;
-    }
 
     // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
     StatusCode::OK

@@ -15,7 +15,6 @@ diesel::table! {
         number_downloads -> Int4,
         file_size -> Int8,
         chunk_size -> Int8,
-        mac -> Nullable<Bytea>,
     }
 }
 

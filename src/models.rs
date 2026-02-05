@@ -153,7 +153,6 @@ pub struct AnonymousMessage {
     pub number_downloads: i32,
     pub file_size: i64,
     pub chunk_size: i64,
-    pub mac: Option<Vec<u8>>,
 }
 
 #[derive(Insertable)]
@@ -186,7 +185,6 @@ pub struct AnonymousMessageMetadata {
     pub number_downloads: i32,
     pub file_size: i64,
     pub chunk_size: i64,
-    pub mac: Option<Vec<u8>>,
 }
 
 #[derive(Queryable, Serialize, Clone)]
@@ -202,5 +200,4 @@ pub struct AnonymousMessageMetadataEncoded {
     pub number_downloads: i32,
     pub file_size: i64,
     pub chunk_size: i64,
-    pub mac: String,
 }

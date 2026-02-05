@@ -826,7 +826,6 @@ impl Server {
 
         let messages_get = anonymousmessages::table
             .filter(anonymousmessages::id.eq(id_param))
-            .filter(anonymousmessages::mac.is_not_null()) 
             .select((
                 anonymousmessages::id,
                 anonymousmessages::cfilename,
@@ -839,7 +838,6 @@ impl Server {
                 anonymousmessages::number_downloads,
                 anonymousmessages::file_size,
                 anonymousmessages::chunk_size,
-                anonymousmessages::mac,
             ))
             .first::<AnonymousMessageMetadata>(&mut conn)
             .optional()?
@@ -873,22 +871,5 @@ impl Server {
             .expect("Error updating message");
 
         Ok(anonymousmessage)
-    }
-
-    pub fn update_anonymous_message_mac(
-        file_id_param: Uuid,
-        mac_param: Vec<u8>,
-        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-
-        use crate::schema::anonymousmessages;
-
-        let mut conn = pool.get().expect("Failed to get DB connection");
-        let updated_rows = diesel::update(anonymousmessages.filter(anonymousmessages::file_id.eq(file_id_param)))
-            .set(anonymousmessages::mac.eq(Some(mac_param)))
-            .execute(&mut conn)
-            .expect("Error updating message");
-
-        Ok(())
     }
 }
