@@ -1,7 +1,7 @@
 use crate::consts::*;
-use argon2::Argon2;
-use opaque_ke::*;
 use rand::rngs::OsRng;
+use opaque_ke::*;
+use opaque_ke::argon2::Argon2;
 use std::default::Default;
 use std::{io};
 use chrono::{Duration, Utc};
@@ -24,8 +24,7 @@ use crate::schema::anonymousmessages::dsl::*;
 pub struct DefaultCipherSuite;
 impl CipherSuite for DefaultCipherSuite {
     type OprfCs = opaque_ke::Ristretto255;
-    type KeGroup = opaque_ke::Ristretto255;
-    type KeyExchange = opaque_ke::key_exchange::tripledh::TripleDh;
+    type KeyExchange = opaque_ke::TripleDh<opaque_ke::Ristretto255, sha2::Sha512>;
     type Ksf = Argon2<'static>;
 }
 
@@ -58,6 +57,8 @@ impl Server {
     pub fn server_init_db(
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Result<(), Box<dyn std::error::Error>> {
+
+        // TODO run migrations if needed
 
         use crate::schema::opaque_settings;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -264,7 +265,7 @@ impl Server {
             Some(password_file_param),
             client_login_start_result,
             username_param.as_bytes(),
-            ServerLoginStartParameters::default(),
+            ServerLoginParameters::default(),
         )
             .map_err(|e| e.to_string())?;
 
@@ -318,9 +319,10 @@ impl Server {
                 .map_err(|e| e.to_string())?
         };
 
-        let server_login_finish_result = server_login_start_result
-            .finish(client_login_finish_result)
-            .map_err(|e| e.to_string())?;
+        let server_login_finish_result = server_login_start_result.finish(
+                client_login_finish_result,
+                ServerLoginParameters::default(),
+            ).map_err(|e| e.to_string())?;
 
         let user = users::table
             .filter(users::username.eq(username_param))
@@ -733,7 +735,7 @@ impl Server {
             Some(password_file_param),
             client_login_start_result,
             id_param.as_bytes(),
-            ServerLoginStartParameters::default(),
+            ServerLoginParameters::default(),
         )
             .map_err(|e| e.to_string())?;
 
@@ -777,8 +779,10 @@ impl Server {
         };
 
         let server_login_finish_result = server_login_start_result
-            .finish(client_login_finish_result)
-            .map_err(|e| e.to_string())?;
+            .finish(
+                client_login_finish_result,
+                ServerLoginParameters::default(),
+            ).map_err(|e| e.to_string())?;
 
         // Delete invalid messages
         Server::delete_invalid_anonymous_messages(pool)?;
