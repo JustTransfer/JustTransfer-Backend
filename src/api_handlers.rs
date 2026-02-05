@@ -1,22 +1,14 @@
 use crate::server::{DefaultCipherSuite, Server};
-use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler};
+use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
-use futures_util::TryStreamExt;
-use http_body_util::StreamBody;
 use serde::{Deserialize, Serialize};
-use std::fs::metadata;
-use std::{collections::HashMap, fs::File, io::Write, path::PathBuf, fs::{OpenOptions}};
 
 type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
-use bytes::Bytes;
-use tokio::fs::File as TokioFile;
-use tokio_util::io::ReaderStream;
 
 use crate::consts::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use http::header;
 use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
@@ -24,9 +16,6 @@ use validator::{Validate, ValidationError};
 use dotenvy::dotenv;
 use std::env;
 use aws_sdk_s3::Client;
-use axum::extract::Request;
-use axum::middleware::Next;
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 
 use aws_sdk_s3::presigning::PresigningConfig;
 use std::time::Duration;
@@ -222,7 +211,7 @@ pub struct RegisterUserEndUpdate {
 pub async fn register_user_end_update(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
-) -> (StatusCode) {
+) -> StatusCode {
 
     // Validate payload
     if let Err(e) = payload.validate() {
@@ -693,7 +682,7 @@ pub async fn upload_message(
     }
 
     // Calculate the Number of chunks
-    let num_chunks = (payload.file_size as f64 / CHUNK_SIZE as f64).ceil() as i32;
+    let num_chunks = (payload.file_size as f64 / CHUNK_SIZE_CONNECTED as f64).ceil() as i32;
     println!("Number of chunks to upload: {}", num_chunks);
 
     // Create multipart upload
@@ -730,7 +719,7 @@ pub async fn upload_message(
         upload_urls: upload_urls,
         upload_id: upload_id,
         message_file_id: file_id,
-        chunk_size: CHUNK_SIZE,
+        chunk_size: CHUNK_SIZE_CONNECTED,
     }))
 }
 
@@ -758,7 +747,7 @@ pub async fn upload_message_finish_multipart(
     // Prepare the parts for completing the multipart upload
     let parts = payload.etags.iter().map(|p| {
         CompletedPart::builder()
-            .part_number((payload.etags.iter().position(|x| x == p).unwrap() as i32 + 1))
+            .part_number(payload.etags.iter().position(|x| x == p).unwrap() as i32 + 1)
             .e_tag(p.clone())
             .build()
     }).collect::<Vec<_>>();

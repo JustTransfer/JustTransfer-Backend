@@ -1,35 +1,22 @@
-use http_body_util::BodyExt;
 use libsodium_sys::*;
-use std::sync::{Arc, Mutex};
-use serde::{Deserialize, Serialize};
 
 use axum::{
-    body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Request},
-    http::StatusCode,
-    middleware::{self, Next},
-    response::{IntoResponse, Response},
+    extract::{DefaultBodyLimit},
+    middleware::{self},
     routing::{get, post, put},
-    Json, Router,
+    Router,
 };
 
-use diesel::r2d2::{self, ConnectionManager, Pool};
+use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
 use dotenvy::dotenv;
 use std::env;
-use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, TokenData, Validation};
-use jsonwebtoken::errors::Error;
 use aws_sdk_s3::{Client, config::Region};
-use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::config::{Builder, Credentials};
 
 use std::time::Duration;
-
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
-
 use JustTransfer::server::Server;
 use JustTransfer::*;
-use JustTransfer::consts::{AUTH_HEADER, JWT_DURATION_MINUTES};
 
 #[tokio::main]
 async fn main() {

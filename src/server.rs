@@ -1,13 +1,9 @@
-use libsodium_sys::*;
-use std::time::{SystemTime};
-
 use crate::consts::*;
 use argon2::Argon2;
 use opaque_ke::*;
 use rand::rngs::OsRng;
 use std::default::Default;
 use std::{io};
-use std::collections::HashMap;
 use chrono::{Duration, Utc};
 use diesel::r2d2::{self, ConnectionManager};
 use diesel::PgConnection;
@@ -18,15 +14,11 @@ use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use uuid::Uuid;
 
-use std::fs;
-use std::path::Path;
-
 use crate::*;
 use crate::models::*;
 use crate::schema::messages::dsl::*;
 use crate::schema::users::dsl::*;
 use crate::schema::anonymousmessages::dsl::*;
-use crate::schema::opaque_settings;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -330,16 +322,6 @@ impl Server {
             .finish(client_login_finish_result)
             .map_err(|e| e.to_string())?;
 
-        // Key to check if the user is connected
-        let key_communication = server_login_finish_result.session_key.clone();
-
-        if key_communication.len() < MAC_LEN {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::Other,
-                "Error in key generation",
-            )));
-        }
-
         let user = users::table
             .filter(users::username.eq(username_param))
             .first::<User>(&mut conn)
@@ -371,7 +353,6 @@ impl Server {
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; ENC_KEY_LEN_PUB]> {
-        use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         let user = crate::schema::users::table
@@ -387,7 +368,6 @@ impl Server {
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     ) -> Option<[u8; SIGN_KEY_LEN_PUB]> {
-        use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         let user = crate::schema::users::table
@@ -428,7 +408,7 @@ impl Server {
         }
 
         // Check if the lifetime is correct
-        if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_TRANSFER {
+        if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_TRANSFER_CONNECTED {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::Other,
                 "Lifetime is not correct",
@@ -460,7 +440,7 @@ impl Server {
             //signature: &signature_param,
             number_downloads: &0,
             file_size: &file_size_param,
-            chunk_size: &CHUNK_SIZE,
+            chunk_size: &CHUNK_SIZE_CONNECTED,
         };
 
         diesel::insert_into(messages::table)
@@ -479,7 +459,6 @@ impl Server {
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
         use crate::schema::messages;
-        use crate::schema::users;
 
         let mut conn = pool.get().expect("Failed to get DB connection");
         let updated_rows = diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
@@ -500,13 +479,8 @@ impl Server {
             .filter(crate::schema::messages::number_downloads.ge(crate::schema::messages::max_downloads))
             .load(&mut conn)?;
 
-        // Delete files from disk
-        for msg in &messages_to_delete {
-            let file_path = String::from(FILE_STORAGE_PATH) + &msg.file_id.to_string();
-            if Path::new(&file_path).exists() {
-                fs::remove_file(&file_path)?;
-            }
-        }
+        // Delete files from S3
+        // TODO
 
         // Delete from DB
         diesel::delete(messages.filter(crate::schema::messages::number_downloads.ge(crate::schema::messages::max_downloads)))
@@ -518,13 +492,8 @@ impl Server {
             .filter(expiry.clone().le(sql_now))
             .load(&mut conn)?;
 
-        // Delete files from disk
-        for msg in &expired_messages {
-            let file_path = String::from(FILE_STORAGE_PATH) + &msg.file_id.to_string();
-            if Path::new(&file_path).exists() {
-                fs::remove_file(&file_path)?;
-            }
-        }
+        // Delete files from S3
+        // TODO
 
         // Delete from DB
         diesel::delete(messages.filter(expiry.le(sql_now)))
@@ -579,7 +548,7 @@ impl Server {
         username_param: &str,
         message_id_param: Uuid,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<(Message), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
         use crate::schema::users;
         use crate::schema::messages;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -632,13 +601,8 @@ impl Server {
             .filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads))
             .load(&mut conn)?;
 
-        // Delete files from disk
-        for msg in &messages_to_delete {
-            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.file_id.to_string();
-            if Path::new(&file_path).exists() {
-                fs::remove_file(&file_path)?;
-            }
-        }
+        // Delete files from S3
+        // TODO
 
         // Delete from DB
         diesel::delete(anonymousmessages.filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads)))
@@ -650,13 +614,8 @@ impl Server {
             .filter(expiry.clone().le(sql_now))
             .load(&mut conn)?;
 
-        // Delete files from disk
-        for msg in &expired_messages {
-            let file_path = String::from(ANONYMOUS_FILE_STORAGE_PATH) + &msg.file_id.to_string();
-            if Path::new(&file_path).exists() {
-                fs::remove_file(&file_path)?;
-            }
-        }
+        // Delete files from S3
+        // TODO
 
         // Delete from DB
         diesel::delete(messages.filter(expiry.le(sql_now)))
@@ -710,7 +669,7 @@ impl Server {
         }
 
         // Check if the lifetime is correct
-        if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_ANONYMOUS_TRANSFER {
+        if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_TRANSFER_ANONYMOUS {
             return Err(Box::new(io::Error::new(
                 io::ErrorKind::Other,
                 "Lifetime is not correct",
@@ -732,7 +691,7 @@ impl Server {
             creation_time: &creation_time_param,
             number_downloads: &0,
             file_size: &file_size_param,
-            chunk_size: &CHUNK_SIZE,
+            chunk_size: &CHUNK_SIZE_ANONYMOUS,
         };
 
         diesel::insert_into(anonymousmessages::table)

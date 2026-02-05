@@ -1,11 +1,8 @@
 use axum::{http::StatusCode, response::Response};
-use diesel::r2d2::{self, ConnectionManager};
-use diesel::PgConnection;
 use serde::{Deserialize, Serialize};
 use axum::extract::Request;
 use axum::middleware::Next;
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 use crate::consts::*;
 use crate::consts;

@@ -3,17 +3,30 @@ use libsodium_sys::*;
 /// Environment variable list
 pub const ENV_VARS: [&str; 1] = ["DATABASE_URL"];
 
+
 /// Const for Server
 pub const URL: &str = "0.0.0.0:80";
 pub const MAX_BODY_SIZE: usize = 100 * 1024 * 1024 * 1024; // 100 GB
 pub const MAX_TIME_MARGIN: i64 = 2; // minutes
-pub const MAX_LIFETIME_ANONYMOUS_TRANSFER: i32 = 7; // days
-pub const MAX_LIFETIME_TRANSFER: i32 = 7; // days
-pub const FILE_STORAGE_PATH: &str = "./files/";
-pub const ANONYMOUS_FILE_STORAGE_PATH: &str = "./anonymous_files/";
+
+
+/// Const for JWT
 pub const JWT_DURATION_MINUTES: i64 = 60;
 pub const AUTH_HEADER: &str = "auth-token";
 pub const SECRET_KEY: &str = "super_secret_key"; // TODO change to load from env
+
+
+/// Const for Anonymous Transfer
+pub const MAX_LIFETIME_TRANSFER_ANONYMOUS: i32 = 7; // days
+pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 40 * 1024 * 1024 * 1024; // 40 GB
+pub const CHUNK_SIZE_ANONYMOUS: i64 = 10 * 1024 * 1024; // 10 MB
+
+
+/// Const for Connected Transfer
+pub const MAX_LIFETIME_TRANSFER_CONNECTED: i32 = 7; // days
+pub const MAX_FILE_SIZE_CONNECTED: i64 = 40 * 1024 * 1024 * 1024; // 40 GB
+pub const CHUNK_SIZE_CONNECTED: i64 = 10 * 1024 * 1024; // 10 MB
+
 
 /// Const for Validation
 pub const MIN_LENGTH_USERNAME: usize = 3;
@@ -21,14 +34,7 @@ pub const MAX_LENGTH_USERNAME: usize = 32;
 pub const MIN_LENGTH_BASE64: u64 = 16;
 pub const MAX_LENGTH_BASE64: u64 = 4096;
 pub const MAX_VALUE_INT: i32 = 1000;
-pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 40 * 1024 * 1024 * 1024; // 40 GB
-pub const MAX_FILE_SIZE_CONNECTED: i64 = 40 * 1024 * 1024 * 1024; // 40 GB
-pub const CHUNK_SIZE: i64 = 10 * 1024 * 1024; // 10 MB
 
-
-/// Const for mac
-pub const MAC_LEN: usize = crypto_auth_BYTES as usize;
-pub const MAC_KEY_LEN: usize = crypto_auth_KEYBYTES as usize;
 
 /// Const for sym encryption
 pub const SYM_KEY_LEN: usize = crypto_secretbox_KEYBYTES as usize;

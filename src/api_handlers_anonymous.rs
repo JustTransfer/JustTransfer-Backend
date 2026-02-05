@@ -1,12 +1,8 @@
 use crate::server::{DefaultCipherSuite, Server};
 use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use diesel::r2d2::{self, ConnectionManager};
-use diesel::PgConnection;
 
 use serde::{Deserialize, Serialize};
-
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 
 use crate::consts::*;
@@ -14,13 +10,6 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
-
-use dotenvy::dotenv;
-use std::env;
-use aws_sdk_s3::Client;
-use axum::extract::Request;
-use axum::middleware::Next;
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 
 use aws_sdk_s3::presigning::PresigningConfig;
 use std::time::Duration;
@@ -271,7 +260,7 @@ pub async fn anonymous_message_send_start(
         return (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageResultStart {
             id: Uuid::nil(),
             result: "".to_string(),
-            chunk_size: CHUNK_SIZE,
+            chunk_size: CHUNK_SIZE_ANONYMOUS,
         }));
     }
 
@@ -290,7 +279,7 @@ pub async fn anonymous_message_send_start(
         Json(AnonymousSendMessageResultStart {
             id: id,
             result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
-            chunk_size: CHUNK_SIZE,
+            chunk_size: CHUNK_SIZE_ANONYMOUS,
         }),
     )
 }
@@ -362,7 +351,7 @@ pub async fn upload_anonymous_message(
     );
 
     // Calculate the Number of chunks
-    let num_chunks = (payload.file_size as f64 / CHUNK_SIZE as f64).ceil() as i32;
+    let num_chunks = (payload.file_size as f64 / CHUNK_SIZE_ANONYMOUS as f64).ceil() as i32;
     println!("Number of chunks to upload: {}", num_chunks);
 
     // Create multipart upload
@@ -435,7 +424,7 @@ pub async fn upload_anonymous_message_finish_multipart(
     // Prepare the parts for completing the multipart upload
     let parts = payload.etags.iter().map(|p| {
         CompletedPart::builder()
-            .part_number((payload.etags.iter().position(|x| x == p).unwrap() as i32 + 1))
+            .part_number(payload.etags.iter().position(|x| x == p).unwrap() as i32 + 1)
             .e_tag(p.clone())
             .build()
     }).collect::<Vec<_>>();
