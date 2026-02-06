@@ -61,12 +61,12 @@ pub async fn anonymous_message_get_one_metadata_start(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<AnonymousGetMessageStart>,
-) -> (StatusCode, Json<AnonymousGetMessageResultStart>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(AnonymousGetMessageResultStart { result: "".to_string() }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
@@ -78,12 +78,12 @@ pub async fn anonymous_message_get_one_metadata_start(
         &state.db,
     ).expect("Failed to start login");
 
-    (
+    Ok((
         StatusCode::OK,
         Json(AnonymousGetMessageResultStart {
             result: URL_SAFE_NO_PAD.encode(server_login_start.serialize()),
         }),
-    )
+    ))
 }
 
 #[derive(Deserialize, Validate)]

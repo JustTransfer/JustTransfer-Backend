@@ -22,6 +22,7 @@ dependencies = [
  "serde",
  "sha2",
  "tokio",
+ "tower",
  "tower-http",
  "uuid",
  "validator",
@@ -1287,6 +1288,7 @@ dependencies = [
  "futures-task",
  "pin-project-lite",
  "pin-utils",
+ "slab",
 ]
 
 [[package]]
@@ -3044,8 +3046,10 @@ checksum = "d4e6559d53cc268e5031cd8429d05415bc4cb4aefc4aa5d6cc35fbf5b924a1f8"
 dependencies = [
  "bitflags",
  "bytes",
+ "futures-util",
  "http 1.4.0",
  "http-body 1.0.1",
+ "http-body-util",
  "pin-project-lite",
  "tower-layer",
  "tower-service",

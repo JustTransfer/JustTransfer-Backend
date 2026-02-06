@@ -5,7 +5,16 @@ use axum::{
     middleware::{self},
     routing::{get, post, put},
     Router,
+    error_handling::HandleErrorLayer,
+    BoxError,
+    http::StatusCode,
 };
+
+use http::{Response};
+use std::{any::Any};
+use axum::body::Body;
+use tower::ServiceBuilder;
+use tower_http::catch_panic::CatchPanicLayer;
 
 use JustTransfer::server::Server;
 use JustTransfer::*;
@@ -53,9 +62,32 @@ async fn main() {
         .route("/api/anonymous/message/{id}", get(api_handlers_anonymous::anonymous_message_get_download_url))
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
-        .layer(cors);
+        .layer(cors)
+        .layer(
+            ServiceBuilder::new()
+                // Handle panics and convert them to appropriate HTTP responses
+                .layer(CatchPanicLayer::custom(handle_panic))
+                // Handle timeout errors and convert them to appropriate HTTP responses
+                .layer(HandleErrorLayer::new(handle_timeout_error))
+                .timeout(std::time::Duration::from_secs(30))
+        );
 
     println!("Server running on {}", consts::URL);
     let listener = tokio::net::TcpListener::bind(consts::URL).await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+fn handle_panic(err: Box<dyn Any + Send + 'static>) -> Response<Body> {
+    Response::builder()
+        .status(StatusCode::INTERNAL_SERVER_ERROR)
+        .body(Body::empty())
+        .unwrap()
+}
+
+async fn handle_timeout_error(err: BoxError) -> StatusCode {
+    if err.is::<tower::timeout::error::Elapsed>() {
+            StatusCode::REQUEST_TIMEOUT
+    } else {
+            StatusCode::INTERNAL_SERVER_ERROR
+    }
 }
