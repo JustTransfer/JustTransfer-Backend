@@ -54,6 +54,7 @@ diesel::table! {
     users (id) {
         id -> Int4,
         username -> Text,
+        email -> Text,
         password_file -> Bytea,
         server_login -> Nullable<Bytea>,
         role -> Text,

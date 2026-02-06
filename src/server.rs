@@ -234,6 +234,7 @@ impl Server {
     pub fn server_registration_finish(
         client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
         username_param: &str,
+        email_param: &str,
         cpriv_enc: Vec<u8>,
         nonce_priv_enc: Vec<u8>,
         pub_enc: Vec<u8>,
@@ -262,6 +263,7 @@ impl Server {
         } else {
             let new_user = NewUser {
                 username: &username_param.to_string(),
+                email: &email_param.to_string(),
                 password_file: &password_file_param.serialize().to_vec(),
                 role: &"user".to_string(),
                 public_key_enc: &pub_enc.to_vec(),

@@ -128,6 +128,8 @@ pub async fn register_user_start(
 pub struct RegisterUserEnd {
     #[validate(custom(function = "validate_username"))]
     username: String,
+    #[validate(email)]
+    email: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -171,6 +173,7 @@ pub async fn register_user_end(
     let server_registration_finish = Server::server_registration_finish(
         req,
         &*payload.username,
+        &*payload.email,
         cpriv_enc,
         nonce_priv_enc,
         pub_enc,

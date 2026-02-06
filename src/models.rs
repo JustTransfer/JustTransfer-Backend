@@ -24,6 +24,7 @@ pub struct NewOpaqueSetting<'a> {
 pub struct User {
     pub id: i32,
     pub username: String,
+    pub email: String,
     pub password_file: Vec<u8>,
     pub server_login: Option<Vec<u8>>,
     pub role: String,
@@ -41,6 +42,7 @@ pub struct User {
 #[diesel(table_name = crate::schema::users)]
 pub struct NewUser<'a> {
     pub username: &'a String,
+    pub email: &'a String,
     pub password_file: &'a Vec<u8>,
     pub role: &'a String,
 
