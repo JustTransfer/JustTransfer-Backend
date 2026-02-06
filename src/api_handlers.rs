@@ -70,11 +70,14 @@ pub struct RootResponse {
 }
 
 // basic handler that responds with a static string
-pub async fn root() -> Json<RootResponse> {
+pub async fn root() -> Result<impl IntoResponse, StatusCode> {
 
-    Json(RootResponse {
-        result: format!("JustTransfer Server is running!!!"),
-    })
+    Ok((
+        StatusCode::OK,
+        Json(RootResponse {
+            result: "JustTransfer API is running".to_string(),
+        }),
+    ))
 }
 
 ///
@@ -97,12 +100,12 @@ pub struct RegisterUserStartResult {
 pub async fn register_user_start(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserStart>,
-) -> (StatusCode, Json<RegisterUserStartResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(RegisterUserStartResult { result: "".to_string() }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
@@ -112,12 +115,12 @@ pub async fn register_user_start(
         server_registration_start(&*payload.username, req, &state.db)
         .expect("Failed to start registration");
 
-    (
+    Ok((
         StatusCode::OK,
         Json(RegisterUserStartResult {
             result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
         }),
-    )
+    ))
 }
 
 
@@ -144,12 +147,12 @@ pub struct RegisterUserEnd {
 pub async fn register_user_end(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEnd>,
-) -> StatusCode {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return StatusCode::BAD_REQUEST;
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
@@ -178,8 +181,8 @@ pub async fn register_user_end(
     );
 
     match server_registration_finish {
-        Ok(_) => StatusCode::CREATED,
-        Err(_) => StatusCode::BAD_REQUEST,
+        Ok(_) => Ok(StatusCode::CREATED),
+        Err(_) => Err(StatusCode::BAD_REQUEST),
     }
 }
 
@@ -206,12 +209,12 @@ pub struct RegisterUserEndUpdate {
 pub async fn register_user_end_update(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
-) -> StatusCode {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return StatusCode::BAD_REQUEST;
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     // Decode the base64 encoded keys
@@ -239,8 +242,8 @@ pub async fn register_user_end_update(
     );
 
     match server_registration_finish {
-        Ok(_) => StatusCode::CREATED,
-        Err(_) => StatusCode::BAD_REQUEST,
+        Ok(_) => Ok(StatusCode::CREATED),
+        Err(_) => Err(StatusCode::BAD_REQUEST),
     }
 }
 
@@ -264,12 +267,12 @@ pub struct LoginStartResult {
 pub async fn login_user_start(
     State(state): State<AppState>,
     Json(payload): Json<LoginStart>,
-) -> (StatusCode, Json<LoginStartResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(LoginStartResult { result: "".to_string() }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
@@ -281,12 +284,12 @@ pub async fn login_user_start(
         &state.db,
     ).expect("Failed to start login");
 
-    (
+    Ok((
         StatusCode::OK,
         Json(LoginStartResult {
             result: URL_SAFE_NO_PAD.encode(server_login_start.serialize()),
         }),
-    )
+    ))
 }
 
 #[derive(Deserialize, Validate)]
@@ -311,21 +314,12 @@ pub struct LoginEndResult {
 pub async fn login_user_end(
     State(state): State<AppState>,
     Json(payload): Json<LoginEnd>,
-) -> (CookieJar, (StatusCode, Json<LoginEndResult>)) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (CookieJar::new(), (
-            StatusCode::BAD_REQUEST, Json(LoginEndResult {
-            pub_enc: "".to_string(),
-            cpriv_enc: "".to_string(),
-            nonce_priv_enc: "".to_string(),
-            pub_sign: "".to_string(),
-            cpriv_sign: "".to_string(),
-            nonce_priv_sign: "".to_string(),
-            auth_token: "".to_string(),
-        })));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
@@ -376,23 +370,9 @@ pub async fn login_user_end(
                 auth_token: token_clone,
             });
 
-            (jar, (StatusCode::OK, content))
+            Ok((jar, (StatusCode::OK, content)))
         }
-        Err(_) => (
-            CookieJar::new(),
-            (
-            StatusCode::BAD_REQUEST,
-            Json(LoginEndResult {
-                pub_enc: "".to_string(),
-                cpriv_enc: "".to_string(),
-                nonce_priv_enc: "".to_string(),
-                pub_sign: "".to_string(),
-                cpriv_sign: "".to_string(),
-                nonce_priv_sign: "".to_string(),
-                auth_token: "".to_string(),
-            }),
-            )
-        ),
+        Err(_) => Err(StatusCode::BAD_REQUEST),
     }
 }
 
@@ -404,7 +384,7 @@ pub struct Logout {
     mac: String,
 }
 
-pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> (StatusCode) {
+pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
@@ -439,22 +419,22 @@ pub struct GetPubKeyEncResult {
 pub async fn get_pub_key_enc(
     State(state): State<AppState>,
     Json(payload): Json<GetPubKeyEnc>,
-) -> (StatusCode, Json<GetPubKeyEncResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(GetPubKeyEncResult { pub_enc: "".to_string() }));
+        return Err(StatusCode::BAD_REQUEST);
     }
     
     let pub_enc = Server::get_pub_key_enc(&*payload.user_request_pub_key, &state.db);
 
     match pub_enc {
         Some(pub_enc) => {
-            (StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) }))
+            Ok((StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) })))
         }
         None => {
-            (StatusCode::NO_CONTENT, Json(GetPubKeyEncResult { pub_enc: "".to_string() }))
+            Ok((StatusCode::NO_CONTENT, Json(GetPubKeyEncResult { pub_enc: "".to_string() })))
         }
     }
 }
@@ -473,22 +453,22 @@ pub struct GetPubKeySignResult {
 pub async fn get_pub_key_sign(
     State(state): State<AppState>,
     Json(payload): Json<GetPubKeySign>,
-) -> (StatusCode, Json<GetPubKeySignResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(GetPubKeySignResult { pub_sign: "".to_string() }));
+        return Err(StatusCode::BAD_REQUEST);
     }
     
     let pub_sign = Server::get_pub_key_sign(&*payload.user_request_pub_key, &state.db);
 
     match pub_sign {
         Some(pub_sign) => {
-            (StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) }))
+            Ok((StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) })))
         }
         None => {
-            (StatusCode::NO_CONTENT, Json(GetPubKeySignResult { pub_sign: "".to_string() }))
+            Ok((StatusCode::NO_CONTENT, Json(GetPubKeySignResult { pub_sign: "".to_string() })))
         }
     }
 }
@@ -511,12 +491,12 @@ pub struct GetMessageResult {
 pub async fn get_messages(
     State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
-) -> (StatusCode, Json<GetMessageResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(GetMessageResult { messages: vec![] }));
+        return Err(StatusCode::BAD_REQUEST);
     }
     
     let messages = Server::get_messages(&*payload.username, &state.db);
@@ -549,10 +529,10 @@ pub async fn get_messages(
 
     match messages_encoded {
         Ok(messages_encoded) => {
-            (StatusCode::OK, Json(GetMessageResult { messages: messages_encoded }))
+            Ok((StatusCode::OK, Json(GetMessageResult { messages: messages_encoded })))
         }
         Err(_) => {
-            (StatusCode::NO_CONTENT, Json(GetMessageResult { messages: vec![] }))
+            Ok((StatusCode::NO_CONTENT, Json(GetMessageResult { messages: vec![] })))
         }
     }
 }
@@ -566,22 +546,18 @@ pub async fn get_one_message(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
-) -> (StatusCode, Json<GetOneMessageResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(GetOneMessageResult {
-            download_url: "".to_string(),
-        }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let message = Server::get_message(&*payload.username, id, &state.db);
 
     if message.is_err() {
-        return (StatusCode::BAD_REQUEST, Json(GetOneMessageResult {
-            download_url: "".to_string(),
-        }));
+        return Err(StatusCode::NOT_FOUND);
     }
 
     let message = message.unwrap();
@@ -599,7 +575,7 @@ pub async fn get_one_message(
         .uri()
         .to_string();
 
-    (StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url }))
+    Ok((StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url })))
 }
 
 ///
@@ -641,17 +617,12 @@ pub struct UploadMessageResult {
 pub async fn upload_message(
     State(state): State<AppState>,
     Json(payload): Json<UploadMessage>,
-) -> (StatusCode, Json<UploadMessageResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(UploadMessageResult {
-            upload_urls: vec![],
-            upload_id: "".to_string(),
-            message_file_id: Uuid::nil(),
-            chunk_size: 0,
-        }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let file_id = Uuid::new_v4();
@@ -672,12 +643,7 @@ pub async fn upload_message(
     );
 
     if send_result.is_err() {
-        return (StatusCode::BAD_REQUEST, Json(UploadMessageResult {
-            upload_urls: vec![],
-            upload_id: "".to_string(),
-            message_file_id: Uuid::nil(),
-            chunk_size: 0,
-        }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     // Calculate the Number of chunks
@@ -714,12 +680,12 @@ pub async fn upload_message(
         upload_urls.push(upload_url.clone());
     }
     
-    (StatusCode::CREATED, Json(UploadMessageResult {
+    Ok((StatusCode::CREATED, Json(UploadMessageResult {
         upload_urls: upload_urls,
         upload_id: upload_id,
         message_file_id: file_id,
         chunk_size: CHUNK_SIZE_CONNECTED,
-    }))
+    })))
 }
 
 #[derive(Deserialize, Validate)]
@@ -735,12 +701,12 @@ pub async fn upload_message_finish_multipart(
     Path(file_id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<UploadMessageFinishMultipart>,
-) -> StatusCode {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return StatusCode::BAD_REQUEST;
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     // Prepare the parts for completing the multipart upload
@@ -773,9 +739,9 @@ pub async fn upload_message_finish_multipart(
     );
 
     if update_signature_result.is_err() {
-        return StatusCode::BAD_REQUEST;
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
-    StatusCode::OK
+    Ok(StatusCode::OK)
 }

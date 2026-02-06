@@ -101,27 +101,12 @@ pub async fn anonymous_message_get_one_metadata(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<AnonymousGetMessage>,
-) -> (CookieJar, (StatusCode, Json<AnonymousGetMessageResult>)) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (CookieJar::new(), (
-            StatusCode::BAD_REQUEST, Json(AnonymousGetMessageResult {
-                message: AnonymousMessageMetadataEncoded {
-                    id: Uuid::nil(),
-                    cfilename: "".to_string(),
-                    nonce_filename: "".to_string(),
-                    file_id: Uuid::nil(),
-                    header: "".to_string(),
-                    max_downloads: 0,
-                    lifetime: 0,
-                    creation_time: chrono::Utc::now(),
-                    number_downloads: 0,
-                    file_size: 0,
-                    chunk_size: 0,
-                }
-            })));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
@@ -163,28 +148,10 @@ pub async fn anonymous_message_get_one_metadata(
                 },
             });
 
-            (jar, (StatusCode::OK, resp))
+            Ok((jar, (StatusCode::OK, resp)))
 
         }
-        Err(_) => (
-            CookieJar::new(), (
-                StatusCode::NO_CONTENT,
-                Json(AnonymousGetMessageResult {
-                    message: AnonymousMessageMetadataEncoded {
-                        id: Uuid::nil(),
-                        cfilename: "".to_string(),
-                        nonce_filename: "".to_string(),
-                        file_id: Uuid::nil(),
-                        header: "".to_string(),
-                        max_downloads: 0,
-                        lifetime: 0,
-                        creation_time: chrono::Utc::now(),
-                        number_downloads: 0,
-                        file_size: 0,
-                        chunk_size: 0,
-                    },
-                })),
-        ),
+        Err(_) => Err(StatusCode::BAD_REQUEST),
     }
 }
 
@@ -196,10 +163,8 @@ pub struct AnonymousGetMessageResultDownloadUrl {
 pub async fn anonymous_message_get_download_url(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-    //Json(payload): Json<AnonymousGetMessage>,
-) -> (StatusCode, Json<AnonymousGetMessageResultDownloadUrl>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
-    //
     let message = Server::anonymous_get_message(id, &state.db);
 
     match message {
@@ -219,18 +184,12 @@ pub async fn anonymous_message_get_download_url(
                 .uri()
                 .to_string();
 
-            (StatusCode::OK, Json(AnonymousGetMessageResultDownloadUrl {
+            Ok((StatusCode::OK, Json(AnonymousGetMessageResultDownloadUrl {
                 download_url: presigned_url,
-            }))
+            })))
 
         }
-        Err(_) => (
-            StatusCode::BAD_REQUEST,
-            Json(AnonymousGetMessageResultDownloadUrl {
-                download_url: "".to_string(),
-            }
-            ),
-        ),
+        Err(_) => Err(StatusCode::BAD_REQUEST),
     }
 }
 
@@ -254,15 +213,11 @@ pub struct AnonymousSendMessageResultStart {
 pub async fn anonymous_message_send_start(
     State(state): State<AppState>,
     Json(payload): Json<AnonymousSendMessageStart>,
-) -> (StatusCode, Json<AnonymousSendMessageResultStart>) {
+) -> Result<impl IntoResponse, StatusCode> {
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(AnonymousSendMessageResultStart {
-            id: Uuid::nil(),
-            result: "".to_string(),
-            chunk_size: CHUNK_SIZE_ANONYMOUS,
-        }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
@@ -275,13 +230,13 @@ pub async fn anonymous_message_send_start(
     anonymous_send_message_start(id, req, &state.db)
         .expect("Failed to start registration");
 
-    (
+    Ok((
         StatusCode::OK,
         Json(AnonymousSendMessageResultStart {
             id: id,
             result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
             chunk_size: CHUNK_SIZE_ANONYMOUS,
-        }),
+        })),
     )
 }
 
@@ -318,17 +273,12 @@ pub struct UploadAnonymousMessageFinishResult {
 pub async fn upload_anonymous_message(
     State(state): State<AppState>,
     Json(payload): Json<UploadAnonymousMessageFinish>,
-) -> (StatusCode, Json<UploadAnonymousMessageFinishResult>) {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
-            upload_urls: vec![],
-            transfer_id: Uuid::nil(),
-            upload_id: "".to_string(),
-            message_file_id: Uuid::nil(),
-        }));
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     // Decode the base64 encoded fields
@@ -387,19 +337,13 @@ pub async fn upload_anonymous_message(
 
     match send_result {
         Ok(_) =>
-            (StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
+            Ok((StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
                 upload_urls,
                 transfer_id: payload.id,
                 upload_id,
                 message_file_id,
-            })),
-        Err(_) =>
-            (StatusCode::BAD_REQUEST, Json(UploadAnonymousMessageFinishResult {
-                upload_urls: vec![],
-                transfer_id: Uuid::nil(),
-                upload_id: "".to_string(),
-                message_file_id: Uuid::nil(),
-            })),
+            }))),
+        Err(_) => Err(StatusCode::BAD_REQUEST),
     }
 }
 
@@ -414,12 +358,12 @@ pub async fn upload_anonymous_message_finish_multipart(
     Path(file_id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<UploadAnonymousMessageFinishMultipart>,
-) -> StatusCode {
+) -> Result<impl IntoResponse, StatusCode> {
 
     // Validate payload
     if let Err(e) = payload.validate() {
         println!("Validation error: {:?}", e);
-        return StatusCode::BAD_REQUEST;
+        return Err(StatusCode::BAD_REQUEST);
     }
 
     // Prepare the parts for completing the multipart upload
@@ -446,5 +390,5 @@ pub async fn upload_anonymous_message_finish_multipart(
         .expect("Failed to complete multipart upload");
 
     // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
-    StatusCode::OK
+    Ok((StatusCode::OK, Json(())))
 }
