@@ -14,11 +14,15 @@ use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use uuid::Uuid;
 
+use aws_sdk_s3::{Client, config::Region};
+use aws_sdk_s3::config::{Builder, Credentials};
+
 use crate::*;
 use crate::models::*;
 use crate::schema::messages::dsl::*;
 use crate::schema::users::dsl::*;
 use crate::schema::anonymousmessages::dsl::*;
+use crate::consts::*;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -32,7 +36,7 @@ impl CipherSuite for DefaultCipherSuite {
 pub struct Server {}
 
 impl Server {
-    pub fn new(pool: &r2d2::Pool<ConnectionManager<PgConnection>>) -> Result<Server, Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<api_handlers::AppState, Box<dyn std::error::Error>> {
 
         // Check if the environment variables exist
         for var in ENV_VARS {
@@ -42,23 +46,58 @@ impl Server {
                     format!("Environment variable {} not set", var),
                 )));
             }
+
+            // Set the corresponding constant
+            match var {
+                "POSTGRESQL_USERNAME" => {
+                    POSTGRESQL_USERNAME.set(std::env::var(var).unwrap())?;
+                }
+                "DATABASE_URL" => {
+                    DATABASE_URL.set(std::env::var(var).unwrap())?;
+                }
+                "MINIO_ROOT_USER" => {
+                    MINIO_ROOT_USER.set(std::env::var(var).unwrap())?;
+                }
+                "MINIO_ROOT_PASSWORD" => {
+                    MINIO_ROOT_PASSWORD.set(std::env::var(var).unwrap())?;
+                }
+                "MINIO_URL" => {
+                    MINIO_URL.set(std::env::var(var).unwrap())?;
+                }
+                "S3_BUCKET_NAME" => {
+                    S3_BUCKET_NAME.set(std::env::var(var).unwrap())?;
+                }
+                "S3_BUCKET_NAME_ANONYMOUS" => {
+                    S3_BUCKET_NAME_ANONYMOUS.set(std::env::var(var).unwrap())?;
+                }
+                "JWT_SECRET_KEY" => {
+                    JWT_SECRET_KEY.set(std::env::var(var).unwrap())?;
+                }
+                _ => {}
+            }
         }
 
-        // Initialize OPAQUE settings in DB if not present
-        let server = Server {
-            // Stateless server
+        let db_pool = Server::server_init_db()?;
+        let s3_client = Server::server_init_s3().await?;
+
+        let state = api_handlers::AppState {
+            db: db_pool.clone(),
+            s3: s3_client.clone(),
+            bucket_name: S3_BUCKET_NAME.get().unwrap().clone(),
+            bucket_name_anonymous: S3_BUCKET_NAME_ANONYMOUS.get().unwrap().clone(),
         };
 
-        Server::server_init_db(pool)?;
-
-        Ok(server)
+        Ok(state)
     }
 
-    pub fn server_init_db(
-        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn server_init_db() -> Result<(r2d2::Pool<ConnectionManager<PgConnection>>), Box<dyn std::error::Error>> {
 
         // TODO run migrations if needed
+
+        let manager = ConnectionManager::<PgConnection>::new(DATABASE_URL.get().unwrap());
+        let pool = r2d2::Pool::builder()
+            .build(manager)
+            .expect("Failed to create pool");
 
         use crate::schema::opaque_settings;
         let mut conn = pool.get().expect("Failed to get DB connection");
@@ -91,7 +130,59 @@ impl Server {
             server_setup
         };
 
-        Ok(())
+        Ok(pool)
+    }
+
+    pub async fn server_init_s3() -> Result<aws_sdk_s3::Client, Box<dyn std::error::Error>> {
+
+        // Init S3
+        let client_config = Builder::new()
+            .region(Region::new("eu-central-1"))
+            .credentials_provider(Credentials::new(MINIO_ROOT_USER.get().unwrap(), MINIO_ROOT_PASSWORD.get().unwrap(), None, None, "example"))
+            .endpoint_url(MINIO_URL.get().unwrap())
+            .force_path_style(true)
+            .behavior_version_latest()
+            .build();
+
+        let client_s3 = Client::from_conf(client_config);
+
+        // Test S3 connection
+        while let Err(e) = client_s3.list_buckets().send().await {
+            eprintln!("Failed to connect to S3: {}. Retrying in 2 seconds...", e);
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+
+        // List buckets
+        let mut buckets = client_s3.list_buckets().into_paginator().send();
+
+        println!("Buckets:");
+        while let Some(Ok(output)) = buckets.next().await {
+            for bucket in output.buckets() {
+                println!("- {}", bucket.name().unwrap_or_default());
+            }
+        }
+
+        let buckets = client_s3
+            .list_buckets()
+            .send()
+            .await?;
+
+        let has_bucket = |name: &str| {
+            buckets
+                .buckets()
+                .iter()
+                .any(|b| b.name().unwrap_or_default() == name)
+        };
+
+        if !has_bucket(&S3_BUCKET_NAME.get().unwrap()) {
+            client_s3.create_bucket().bucket(S3_BUCKET_NAME.get().unwrap()).send().await.expect("Unable to create S3 bucket");
+        }
+
+        if !has_bucket(&S3_BUCKET_NAME_ANONYMOUS.get().unwrap()) {
+            client_s3.create_bucket().bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap()).send().await.expect("Unable to create S3 anonymous bucket");
+        }
+
+        Ok(client_s3)
     }
 
     fn get_opaque_settings(
@@ -350,6 +441,22 @@ impl Server {
 
         Ok(())
     }*/
+
+    pub fn get_user(
+        username_param: &str,
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    ) -> Result<User, Box<dyn std::error::Error>> {
+        use crate::schema::users;
+
+        let mut conn = pool.get().expect("Failed to get DB connection");
+        let user = users::table
+            .filter(users::username.eq(username_param))
+            .first::<User>(&mut conn)
+            .optional()?
+            .ok_or("User not found")?;
+
+        Ok(user)
+    }
 
     pub fn get_pub_key_enc(
         username_pub_key: &str,

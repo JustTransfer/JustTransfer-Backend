@@ -1,8 +1,5 @@
 use libsodium_sys::*;
-
-/// Environment variable list
-pub const ENV_VARS: [&str; 1] = ["DATABASE_URL"];
-
+use once_cell::sync::OnceCell;
 
 /// Const for Server
 pub const URL: &str = "0.0.0.0:80";
@@ -13,7 +10,6 @@ pub const MAX_TIME_MARGIN: i64 = 2; // minutes
 /// Const for JWT
 pub const JWT_DURATION_MINUTES: i64 = 60;
 pub const AUTH_HEADER: &str = "auth-token";
-pub const SECRET_KEY: &str = "super_secret_key"; // TODO change to load from env
 
 
 /// Const for Anonymous Transfer
@@ -54,3 +50,28 @@ pub const SIGN_KEY_LEN_PUB: usize = crypto_sign_PUBLICKEYBYTES as usize;
 pub const SIGN_KEY_LEN_PRIV: usize = crypto_sign_SECRETKEYBYTES as usize;
 pub const SIGN_LEN_NONCE: usize = crypto_secretbox_NONCEBYTES as usize;
 pub const SIGN_LEN_SIGNATURE: usize = crypto_sign_BYTES  as usize;
+
+/// Environment variable list
+pub const ENV_VARS: [&str; 8] = [
+    "POSTGRESQL_USERNAME",
+    "DATABASE_URL",
+    "MINIO_ROOT_USER",
+    "MINIO_ROOT_PASSWORD",
+    "MINIO_URL",
+    "S3_BUCKET_NAME",
+    "S3_BUCKET_NAME_ANONYMOUS",
+    "JWT_SECRET_KEY"
+];
+
+/// Env variables once_cell key
+/*static EXPORT_KEY: OnceCell<[u8; 32]> = OnceCell::new(); // Déclaration globale
+EXPORT_KEY.set([42u8; 32]); // Set clé (0xAAAA...)
+let key_bytes = EXPORT_KEY.get().ok_or("export key not set")?;*/
+pub static POSTGRESQL_USERNAME: OnceCell<String> = OnceCell::new();
+pub static DATABASE_URL: OnceCell<String> = OnceCell::new();
+pub static MINIO_ROOT_USER: OnceCell<String> = OnceCell::new();
+pub static MINIO_ROOT_PASSWORD: OnceCell<String> = OnceCell::new();
+pub static MINIO_URL: OnceCell<String> = OnceCell::new();
+pub static S3_BUCKET_NAME: OnceCell<String> = OnceCell::new();
+pub static S3_BUCKET_NAME_ANONYMOUS: OnceCell<String> = OnceCell::new();
+pub static JWT_SECRET_KEY: OnceCell<String> = OnceCell::new();

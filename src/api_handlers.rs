@@ -13,8 +13,6 @@ use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
-use dotenvy::dotenv;
-use std::env;
 use aws_sdk_s3::Client;
 
 use aws_sdk_s3::presigning::PresigningConfig;
@@ -73,12 +71,9 @@ pub struct RootResponse {
 
 // basic handler that responds with a static string
 pub async fn root() -> Json<RootResponse> {
-    dotenv().ok();
-
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
 
     Json(RootResponse {
-        result: format!("JustTransfer Server is running. Database URL: {}", database_url),
+        result: format!("JustTransfer Server is running!!!"),
     })
 }
 
@@ -345,8 +340,12 @@ pub async fn login_user_end(
     match server_login_finish {
         Ok((pub_enc, cpriv_enc, nonce_priv_enc, pub_sign, cpriv_sign, nonce_priv_sign)) => {
 
+            // Get the user role from the database
+            let user = Server::get_user(&*payload.username, &state.db)
+                .expect("Failed to get user from database");
+
             // Generate JWT token
-            let token = create_jwt(&payload.username).expect("Failed to create JWT token");
+            let token = create_jwt(&payload.username, &user.role).expect("Failed to create JWT token");
             let token_clone = token.clone();
 
             // Create cookie (HttpOnly, Secure for production)

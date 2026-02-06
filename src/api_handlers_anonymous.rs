@@ -134,7 +134,8 @@ pub async fn anonymous_message_get_one_metadata(
         Ok(msg) => {
 
             // Create cookie jar
-            let token = create_jwt(&*msg.id.to_string()).expect("Failed to create JWT token");
+            let role = "anonymous";
+            let token = create_jwt(&*msg.id.to_string(), role).expect("Failed to create JWT token");
 
             // Create cookie
             let cookie = Cookie::build((AUTH_HEADER, token))

@@ -10,32 +10,34 @@ use crate::models::*;
 
 #[derive(Debug, Serialize, Deserialize)]
 struct Claims {
-    sub: String, // user id or username
+    username: String, // username
+    role: String, // user role
     exp: usize,  // expiration time as UNIX timestamp
 }
 
-pub fn create_jwt(user_id: &str) -> Result<String, Error> {
+pub fn create_jwt(user_id: &str, role: &str) -> Result<String, Error> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::minutes(JWT_DURATION_MINUTES))
         .expect("valid timestamp")
         .timestamp() as usize;
 
     let claims = Claims {
-        sub: user_id.to_owned(),
+        username: user_id.to_owned(),
+        role: role.to_owned(),
         exp: expiration,
     };
 
     encode(
         &Header::default(),
         &claims,
-        &EncodingKey::from_secret(SECRET_KEY.as_ref()),
+        &EncodingKey::from_secret(JWT_SECRET_KEY.get().unwrap().as_ref()),
     )
 }
 
 fn verify_jwt(token: &str) -> Result<TokenData<Claims>, Error> {
     decode::<Claims>(
         token,
-        &DecodingKey::from_secret(consts::SECRET_KEY.as_ref()),
+        &DecodingKey::from_secret(JWT_SECRET_KEY.get().unwrap().as_ref()),
         &Validation::default(),
     )
 }
