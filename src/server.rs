@@ -1,4 +1,4 @@
-use crate::consts::*;
+use std::collections::HashSet;
 use rand::rngs::OsRng;
 use opaque_ke::*;
 use opaque_ke::argon2::Argon2;
@@ -16,13 +16,14 @@ use uuid::Uuid;
 
 use aws_sdk_s3::{Client, config::Region};
 use aws_sdk_s3::config::{Builder, Credentials};
-
+use tracing::{info, warn};
 use crate::*;
 use crate::models::*;
 use crate::schema::messages::dsl::*;
 use crate::schema::users::dsl::*;
 use crate::schema::anonymousmessages::dsl::*;
 use crate::consts::*;
+use crate::error::ApiError;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -148,38 +149,45 @@ impl Server {
 
         // Test S3 connection
         while let Err(e) = client_s3.list_buckets().send().await {
-            eprintln!("Failed to connect to S3: {}. Retrying in 2 seconds...", e);
+            warn!("Error listing buckets: {}", e);
+            info!("Failed to connect to S3. Retrying in 2 seconds...");
             tokio::time::sleep(std::time::Duration::from_secs(2)).await;
         }
 
         // List buckets
         let mut buckets = client_s3.list_buckets().into_paginator().send();
 
-        println!("Buckets:");
-        while let Some(Ok(output)) = buckets.next().await {
-            for bucket in output.buckets() {
-                println!("- {}", bucket.name().unwrap_or_default());
+        // Collect existing bucket names into a HashSet for efficient lookup
+        let mut existing_buckets = HashSet::new();
+        while let Some(output) = buckets.try_next().await? {
+            existing_buckets.extend(
+                output
+                    .buckets()
+                    .iter()
+                    .filter_map(|b| b.name())
+                    .map(ToOwned::to_owned),
+            );
+        }
+
+        info!(buckets = ?existing_buckets, "Existing buckets");
+
+        // Define the required buckets
+        let required_buckets = [
+            S3_BUCKET_NAME.get().unwrap(),
+            S3_BUCKET_NAME_ANONYMOUS.get().unwrap(),
+        ];
+
+        // Create any missing buckets
+        for bucket_name in required_buckets {
+            if !existing_buckets.contains(bucket_name) {
+                &client_s3
+                    .create_bucket()
+                    .bucket(bucket_name)
+                    .send()
+                    .await?;
+
+                info!("Created bucket: {}", bucket_name);
             }
-        }
-
-        let buckets = client_s3
-            .list_buckets()
-            .send()
-            .await?;
-
-        let has_bucket = |name: &str| {
-            buckets
-                .buckets()
-                .iter()
-                .any(|b| b.name().unwrap_or_default() == name)
-        };
-
-        if !has_bucket(&S3_BUCKET_NAME.get().unwrap()) {
-            client_s3.create_bucket().bucket(S3_BUCKET_NAME.get().unwrap()).send().await.expect("Unable to create S3 bucket");
-        }
-
-        if !has_bucket(&S3_BUCKET_NAME_ANONYMOUS.get().unwrap()) {
-            client_s3.create_bucket().bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap()).send().await.expect("Unable to create S3 anonymous bucket");
         }
 
         Ok(client_s3)
@@ -463,31 +471,31 @@ impl Server {
     pub fn get_pub_key_enc(
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Option<[u8; ENC_KEY_LEN_PUB]> {
+    ) -> Result<[u8; ENC_KEY_LEN_PUB], Box<dyn std::error::Error>> {
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         let user = crate::schema::users::table
             .filter(crate::schema::users::username.eq(username_pub_key))
             .first::<User>(&mut conn)
-            .optional()
-            .ok()??;
+            .optional()?
+            .ok_or("User not found")?;
 
-        user.public_key_enc.as_slice().try_into().ok()
+        Ok(user.public_key_enc.as_slice().try_into()?)
     }
 
     pub fn get_pub_key_sign(
         username_pub_key: &str,
         pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    ) -> Option<[u8; SIGN_KEY_LEN_PUB]> {
+    ) -> Result<[u8; SIGN_KEY_LEN_PUB], Box<dyn std::error::Error>> {
         let mut conn = pool.get().expect("Failed to get DB connection");
 
         let user = crate::schema::users::table
             .filter(crate::schema::users::username.eq(username_pub_key))
             .first::<User>(&mut conn)
-            .optional()
-            .ok()??;
+            .optional()?
+            .ok_or("User not found")?;
 
-        user.public_key_sign.as_slice().try_into().ok()
+        Ok(user.public_key_sign.as_slice().try_into()?)
     }
 
     pub fn send_message(

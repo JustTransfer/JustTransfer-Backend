@@ -12,6 +12,7 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate, ValidationError};
+use tracing::{info, instrument};
 
 use aws_sdk_s3::Client;
 
@@ -21,6 +22,7 @@ use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use crate::api_handlers_auth::create_jwt;
 use crate::consts;
 use crate::models::*;
+use crate::error::*;
 
 // todo remove duplicate with main.rs
 #[derive(Clone)]
@@ -69,9 +71,8 @@ pub struct RootResponse {
     result: String,
 }
 
-// basic handler that responds with a static string
-pub async fn root() -> Result<impl IntoResponse, StatusCode> {
-
+#[instrument(err(Debug))]
+pub async fn root() -> Result<impl IntoResponse, ApiError> {
     Ok((
         StatusCode::OK,
         Json(RootResponse {
@@ -84,7 +85,7 @@ pub async fn root() -> Result<impl IntoResponse, StatusCode> {
 /// Registration
 ///
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserStart {
     #[validate(custom(function = "validate_username"))]
     username: String,
@@ -96,24 +97,25 @@ pub struct RegisterUserStart {
 pub struct RegisterUserStartResult {
     result: String,
 }
-
+#[instrument(skip(state), err(Debug))]
 pub async fn register_user_start(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserStart>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
-    let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_start)
+        .map_err(|_| ApiError::Base64)?;
+
+    let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
 
     let server_registration_start_result = Server::
         server_registration_start(&*payload.username, req, &state.db)
-        .expect("Failed to start registration");
+        .map_err(|_| ApiError::ServerError)?;
 
     Ok((
         StatusCode::OK,
@@ -124,7 +126,7 @@ pub async fn register_user_start(
 }
 
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEnd {
     #[validate(custom(function = "validate_username"))]
     username: String,
@@ -146,28 +148,42 @@ pub struct RegisterUserEnd {
     pub_sign: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn register_user_end(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEnd>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
-    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+    // Decode the base64 encoded client registration finish message
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_finish)
+        .map_err(|_| ApiError::Base64)?;
+
+    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
 
     // Decode the base64 encoded keys
-    let cpriv_enc = URL_SAFE_NO_PAD.decode(&payload.cpriv_enc).expect("Base64 decode failed");
-    let nonce_priv_enc = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_enc).expect("Base64 decode failed");
-    let pub_enc = URL_SAFE_NO_PAD.decode(&payload.pub_enc).expect("Base64 decode failed");
-
-    let cpriv_sign = URL_SAFE_NO_PAD.decode(&payload.cpriv_sign).expect("Base64 decode failed");
-    let nonce_priv_sign = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_sign).expect("Base64 decode failed");
-    let pub_sign = URL_SAFE_NO_PAD.decode(&payload.pub_sign).expect("Base64 decode failed");
+    let cpriv_enc = URL_SAFE_NO_PAD
+        .decode(&payload.cpriv_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let nonce_priv_enc = URL_SAFE_NO_PAD
+        .decode(&payload.nonce_priv_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let pub_enc = URL_SAFE_NO_PAD
+        .decode(&payload.pub_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let cpriv_sign = URL_SAFE_NO_PAD
+        .decode(&payload.cpriv_sign)
+        .map_err(|_| ApiError::Base64)?;
+    let nonce_priv_sign = URL_SAFE_NO_PAD
+        .decode(&payload.nonce_priv_sign)
+        .map_err(|_| ApiError::Base64)?;
+    let pub_sign = URL_SAFE_NO_PAD
+        .decode(&payload.pub_sign)
+        .map_err(|_| ApiError::Base64)?;
 
     
     let server_registration_finish = Server::server_registration_finish(
@@ -181,15 +197,12 @@ pub async fn register_user_end(
         nonce_priv_sign,
         pub_sign,
         &state.db,
-    );
+    ).map_err(|_| ApiError::ServerError)?;
 
-    match server_registration_finish {
-        Ok(_) => Ok(StatusCode::CREATED),
-        Err(_) => Err(StatusCode::BAD_REQUEST),
-    }
+    Ok(StatusCode::CREATED)
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEndUpdate {
     #[validate(custom(function = "validate_username"))]
     username: String,
@@ -209,28 +222,39 @@ pub struct RegisterUserEndUpdate {
     pub_sign: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn register_user_end_update(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     // Decode the base64 encoded keys
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish).expect("Base64 decode failed");
-    let client_registration_finish = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
-
-    let cpriv_enc = URL_SAFE_NO_PAD.decode(&payload.cpriv_enc).expect("Base64 decode failed");
-    let nonce_priv_enc = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_enc).expect("Base64 decode failed");
-    let pub_enc = URL_SAFE_NO_PAD.decode(&payload.pub_enc).expect("Base64 decode failed");
-
-    let cpriv_sign = URL_SAFE_NO_PAD.decode(&payload.cpriv_sign).expect("Base64 decode failed");
-    let nonce_priv_sign = URL_SAFE_NO_PAD.decode(&payload.nonce_priv_sign).expect("Base64 decode failed");
-    let pub_sign = URL_SAFE_NO_PAD.decode(&payload.pub_sign).expect("Base64 decode failed");
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_finish)
+        .map_err(|_| ApiError::Base64)?;
+    let client_registration_finish = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
+    let cpriv_enc = URL_SAFE_NO_PAD
+        .decode(&payload.cpriv_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let nonce_priv_enc = URL_SAFE_NO_PAD
+        .decode(&payload.nonce_priv_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let pub_enc = URL_SAFE_NO_PAD
+        .decode(&payload.pub_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let cpriv_sign = URL_SAFE_NO_PAD
+        .decode(&payload.cpriv_sign)
+        .map_err(|_| ApiError::Base64)?;
+    let nonce_priv_sign = URL_SAFE_NO_PAD
+        .decode(&payload.nonce_priv_sign)
+        .map_err(|_| ApiError::Base64)?;
+    let pub_sign = URL_SAFE_NO_PAD
+        .decode(&payload.pub_sign)
+        .map_err(|_| ApiError::Base64)?;
     
     let server_registration_finish = Server::server_registration_finish_update(
         client_registration_finish,
@@ -242,19 +266,16 @@ pub async fn register_user_end_update(
         nonce_priv_sign,
         pub_sign,
         &state.db,
-    );
+    ).map_err(|_| ApiError::ServerError)?;
 
-    match server_registration_finish {
-        Ok(_) => Ok(StatusCode::CREATED),
-        Err(_) => Err(StatusCode::BAD_REQUEST),
-    }
+    Ok(StatusCode::OK)
 }
 
 ///
 /// Login
 /// 
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct LoginStart {
     #[validate(custom(function = "validate_username"))]
     username: String,
@@ -267,25 +288,25 @@ pub struct LoginStartResult {
     result: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn login_user_start(
     State(state): State<AppState>,
     Json(payload): Json<LoginStart>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start).expect("Base64 decode failed");
-    let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start)
+        .map_err(|_| ApiError::Base64)?;
+    let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
     
     let server_login_start = Server::server_login_start(
         &*payload.username,
         req,
         &state.db,
-    ).expect("Failed to start login");
+    ).map_err(|_| ApiError::ServerError)?;
 
     Ok((
         StatusCode::OK,
@@ -295,7 +316,7 @@ pub async fn login_user_start(
     ))
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct LoginEnd {
     #[validate(custom(function = "validate_username"))]
     username: String,
@@ -314,86 +335,77 @@ pub struct LoginEndResult {
     auth_token: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn login_user_end(
     State(state): State<AppState>,
     Json(payload): Json<LoginEnd>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result).expect("Base64 decode failed");
-    let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes).expect("OPAQUE deserialization failed");
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_login_finish_result)
+        .map_err(|_| ApiError::Base64)?;
+    let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
     
     let server_login_finish = Server::server_login_finish(
         &*payload.username,
         req,
         &state.db,
-    );
+    ).map_err(|_| ApiError::ServerError)?;
 
-    match server_login_finish {
-        Ok((pub_enc, cpriv_enc, nonce_priv_enc, pub_sign, cpriv_sign, nonce_priv_sign)) => {
+    // Get the user role from the database
+    let user = Server::get_user(&*payload.username, &state.db)
+        .map_err(|_| ApiError::ServerError)?;
 
-            // Get the user role from the database
-            let user = Server::get_user(&*payload.username, &state.db)
-                .expect("Failed to get user from database");
+    // Generate JWT token
+    let token = create_jwt(&payload.username, &user.role)
+        .map_err(|_| ApiError::JWTError)?;
 
-            // Generate JWT token
-            let token = create_jwt(&payload.username, &user.role).expect("Failed to create JWT token");
-            let token_clone = token.clone();
+    // Create cookie (HttpOnly, Secure for production)
+    let cookie = Cookie::build((AUTH_HEADER, token.clone()))
+        .http_only(false)// TODO change
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .finish();
 
-            // Create cookie (HttpOnly, Secure for production)
-            let cookie = Cookie::build((AUTH_HEADER, token))
-                .http_only(false)// TODO change
-                .secure(true)
-                .same_site(SameSite::Strict)
-                .path("/")
-                .finish();
+    let jar = CookieJar::new().add(cookie);
 
-            let jar = CookieJar::new().add(cookie);
+    // Encode the keys to base64
+    let pub_enc = URL_SAFE_NO_PAD.encode(server_login_finish.0);
+    let cpriv_enc = URL_SAFE_NO_PAD.encode(server_login_finish.1);
+    let nonce_priv_enc = URL_SAFE_NO_PAD.encode(server_login_finish.2);
+    let pub_sign = URL_SAFE_NO_PAD.encode(server_login_finish.3);
+    let cpriv_sign = URL_SAFE_NO_PAD.encode(server_login_finish.4);
+    let nonce_priv_sign = URL_SAFE_NO_PAD.encode(server_login_finish.5);
 
-            // Encode the keys to base64
-            let pub_enc = URL_SAFE_NO_PAD.encode(pub_enc);
-            let cpriv_enc = URL_SAFE_NO_PAD.encode(cpriv_enc);
-            let nonce_priv_enc = URL_SAFE_NO_PAD.encode(nonce_priv_enc);
-            let pub_sign = URL_SAFE_NO_PAD.encode(pub_sign);
-            let cpriv_sign = URL_SAFE_NO_PAD.encode(cpriv_sign);
-            let nonce_priv_sign = URL_SAFE_NO_PAD.encode(nonce_priv_sign);
+    let content = Json(LoginEndResult {
+        pub_enc,
+        cpriv_enc,
+        nonce_priv_enc,
+        pub_sign,
+        cpriv_sign,
+        nonce_priv_sign,
+        auth_token: token,
+    });
 
-            let content = Json(LoginEndResult {
-                pub_enc,
-                cpriv_enc,
-                nonce_priv_enc,
-                pub_sign,
-                cpriv_sign,
-                nonce_priv_sign,
-                auth_token: token_clone,
-            });
-
-            Ok((jar, (StatusCode::OK, content)))
-        }
-        Err(_) => Err(StatusCode::BAD_REQUEST),
-    }
+    Ok((jar, (StatusCode::OK, content)))
 }
 
-/*#[derive(Deserialize, Validate)]
+/*#[derive(Deserialize, Validate, Debug)]
 pub struct Logout {
     #[validate(custom(function = "validate_username"))]
     username: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    mac: String,
 }
 
-pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> Result<impl IntoResponse, StatusCode> {
+#[instrument(skip(state), err(Debug))]
+pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return StatusCode::BAD_REQUEST;
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     let mut srv = state.srv;
     let logout_result = srv.logout(&*payload.username);
@@ -408,7 +420,7 @@ pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) 
 /// Get Public Keys
 ///
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct GetPubKeyEnc {
     #[validate(custom(function = "validate_username"))]
     user_request_pub_key: String,
@@ -419,30 +431,22 @@ pub struct GetPubKeyEncResult {
     pub_enc: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn get_pub_key_enc(
     State(state): State<AppState>,
     Json(payload): Json<GetPubKeyEnc>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let pub_enc = Server::get_pub_key_enc(&*payload.user_request_pub_key, &state.db);
+    let pub_enc = Server::get_pub_key_enc(&*payload.user_request_pub_key, &state.db)
+        .map_err(|_| ApiError::ServerNotFound)?;
 
-    match pub_enc {
-        Some(pub_enc) => {
-            Ok((StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) })))
-        }
-        None => {
-            Ok((StatusCode::NO_CONTENT, Json(GetPubKeyEncResult { pub_enc: "".to_string() })))
-        }
-    }
+    Ok((StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) })))
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct GetPubKeySign {
     #[validate(custom(function = "validate_username"))]
     user_request_pub_key: String,
@@ -453,34 +457,26 @@ pub struct GetPubKeySignResult {
     pub_sign: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn get_pub_key_sign(
     State(state): State<AppState>,
     Json(payload): Json<GetPubKeySign>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let pub_sign = Server::get_pub_key_sign(&*payload.user_request_pub_key, &state.db);
+    let pub_sign = Server::get_pub_key_sign(&*payload.user_request_pub_key, &state.db)
+        .map_err(|_| ApiError::ServerNotFound)?;
 
-    match pub_sign {
-        Some(pub_sign) => {
-            Ok((StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) })))
-        }
-        None => {
-            Ok((StatusCode::NO_CONTENT, Json(GetPubKeySignResult { pub_sign: "".to_string() })))
-        }
-    }
+    Ok((StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) })))
 }
 
 ///
 /// Download Messages
 ///
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct GetMessage {
     #[validate(custom(function = "validate_username"))]
     username: String, // TODO username should be derived from the cookie
@@ -491,53 +487,39 @@ pub struct GetMessageResult {
     messages: Vec<MessageWithUsernamesEncoded>,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn get_messages(
     State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let messages = Server::get_messages(&*payload.username, &state.db);
+    let messages = Server::get_messages(&*payload.username, &state.db)
+        .map_err(|_| ApiError::ServerError)?;
 
     // Convert the fields of each messages to base64
-    let messages_encoded = match messages {
-        Ok(msgs) => {
-            let msgs_encoded: Vec<MessageWithUsernamesEncoded> = msgs.into_iter().map(|m| {
-                MessageWithUsernamesEncoded {
-                    id: m.id,
-                    sender: m.sender,
-                    receiver: m.receiver,
-                    cfilename: URL_SAFE_NO_PAD.encode(m.cfilename),
-                    nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
-                    file_id: m.file_id,
-                    nonce_message: URL_SAFE_NO_PAD.encode(m.nonce_message),
-                    max_downloads: m.max_downloads,
-                    lifetime: m.lifetime,
-                    creation_time: m.creation_time,
-                    signature: URL_SAFE_NO_PAD.encode(m.signature.unwrap()), // Sever returns only messages with signature, so unwrap is safe
-                    number_downloads: m.number_downloads,
-                    file_size: m.file_size,
-                    chunk_size: m.chunk_size,
-                }
-            }).collect();
-            Ok(msgs_encoded)
+    let messages_encoded: Vec<MessageWithUsernamesEncoded> = messages.into_iter().map(|m| {
+        MessageWithUsernamesEncoded {
+            id: m.id,
+            sender: m.sender,
+            receiver: m.receiver,
+            cfilename: URL_SAFE_NO_PAD.encode(m.cfilename),
+            nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
+            file_id: m.file_id,
+            nonce_message: URL_SAFE_NO_PAD.encode(m.nonce_message),
+            max_downloads: m.max_downloads,
+            lifetime: m.lifetime,
+            creation_time: m.creation_time,
+            signature: URL_SAFE_NO_PAD.encode(m.signature.unwrap()), // Sever returns only messages with signature, so unwrap is safe
+            number_downloads: m.number_downloads,
+            file_size: m.file_size,
+            chunk_size: m.chunk_size,
         }
-        Err(e) => Err(e),
-    };
+    }).collect();
 
-    match messages_encoded {
-        Ok(messages_encoded) => {
-            Ok((StatusCode::OK, Json(GetMessageResult { messages: messages_encoded })))
-        }
-        Err(_) => {
-            Ok((StatusCode::NO_CONTENT, Json(GetMessageResult { messages: vec![] })))
-        }
-    }
+    Ok((StatusCode::OK, Json(GetMessageResult { messages: messages_encoded })))
 }
 
 #[derive(Serialize)]
@@ -545,25 +527,18 @@ pub struct GetOneMessageResult {
     download_url: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn get_one_message(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<GetMessage>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let message = Server::get_message(&*payload.username, id, &state.db);
-
-    if message.is_err() {
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    let message = message.unwrap();
+    let message = Server::get_message(&*payload.username, id, &state.db)
+            .map_err(|_| ApiError::ServerNotFound)?;
 
     // Generate pre-signed S3 download URL
     let presigned_url = state.s3
@@ -571,10 +546,11 @@ pub async fn get_one_message(
         .bucket(state.bucket_name)
         .key(message.file_id.to_string())
         .presigned(
-            PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
+            PresigningConfig::expires_in(Duration::from_secs(3600))
+                .map_err(|_| ApiError::ServerError)?,
         )
         .await
-        .expect("Failed to generate presigned URL")
+        .map_err(|_| ApiError::ServerError)?
         .uri()
         .to_string();
 
@@ -585,7 +561,7 @@ pub async fn get_one_message(
 /// Upload Messages
 ///
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessage {
     #[validate(custom(function = "validate_username"))]
     sender: String,
@@ -617,41 +593,38 @@ pub struct UploadMessageResult {
     chunk_size: i64,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn upload_message(
     State(state): State<AppState>,
     Json(payload): Json<UploadMessage>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     let file_id = Uuid::new_v4();
 
     let send_result = Server::send_message(
         &payload.sender,
         &payload.receiver,
-        URL_SAFE_NO_PAD.decode(&payload.cfilename).expect("Base64 decode failed"),
-        URL_SAFE_NO_PAD.decode(&payload.nonce_filename).expect("Base64 decode failed"),
+        URL_SAFE_NO_PAD.decode(&payload.cfilename)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
+            .map_err(|_| ApiError::Base64)?,
         file_id,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_message).expect("Base64 decode failed"),
+        URL_SAFE_NO_PAD.decode(&payload.nonce_message)
+            .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,
-        //URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed"),
+        //URL_SAFE_NO_PAD.decode(&payload.signature)
+        //    .map_err(|_| ApiError::Base64)?,
         payload.file_size,
         &state.db,
-    );
-
-    if send_result.is_err() {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    ).map_err(|_| ApiError::ServerError);
 
     // Calculate the Number of chunks
     let num_chunks = (payload.file_size as f64 / CHUNK_SIZE_CONNECTED as f64).ceil() as i32;
-    println!("Number of chunks to upload: {}", num_chunks);
 
     // Create multipart upload
     let create_multipart_upload_output = state.s3.create_multipart_upload()
@@ -659,9 +632,11 @@ pub async fn upload_message(
         .key(file_id.to_string())
         .send()
         .await
-        .expect("Failed to create multipart upload");
+        .map_err(|_| ApiError::ServerError)?;
 
-    let upload_id = create_multipart_upload_output.upload_id().expect("No upload ID returned").to_string();
+    let upload_id = create_multipart_upload_output.upload_id()
+        .ok_or(ApiError::ServerError)?
+        .to_string();
 
     // Generate pre-signed S3 upload URLs for each chunk
     let mut upload_urls: Vec<String> = Vec::new();
@@ -673,10 +648,11 @@ pub async fn upload_message(
             .part_number(part_number)
             .upload_id(upload_id.clone())
             .presigned(
-                PresigningConfig::expires_in(Duration::from_secs(3600)).expect("Invalid duration"),
+                PresigningConfig::expires_in(Duration::from_secs(3600))
+                    .map_err(|_| ApiError::ServerError)?,
             )
             .await
-            .expect("Failed to generate presigned URL")
+            .map_err(|_| ApiError::ServerError)?
             .uri()
             .to_string();
 
@@ -691,7 +667,7 @@ pub async fn upload_message(
     })))
 }
 
-#[derive(Deserialize, Validate)]
+#[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessageFinishMultipart {
     // TODO validate upload ID
     upload_id: String,
@@ -700,17 +676,15 @@ pub struct UploadMessageFinishMultipart {
     signature: String,
 }
 
+#[instrument(skip(state), err(Debug))]
 pub async fn upload_message_finish_multipart(
     Path(file_id): Path<Uuid>,
     State(state): State<AppState>,
     Json(payload): Json<UploadMessageFinishMultipart>,
-) -> Result<impl IntoResponse, StatusCode> {
+) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
-    if let Err(e) = payload.validate() {
-        println!("Validation error: {:?}", e);
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     // Prepare the parts for completing the multipart upload
     let parts = payload.etags.iter().map(|p| {
@@ -733,17 +707,14 @@ pub async fn upload_message_finish_multipart(
         .upload_id(payload.upload_id.clone())
         .send()
         .await
-        .expect("Failed to complete multipart upload");
+        .map_err(|_| ApiError::ServerError)?;
 
     let update_signature_result= Server::update_message_signature(
         file_id,
-        URL_SAFE_NO_PAD.decode(&payload.signature).expect("Base64 decode failed"),
+        URL_SAFE_NO_PAD.decode(&payload.signature)
+            .map_err(|_| ApiError::ServerError)?,
         &state.db,
-    );
-
-    if update_signature_result.is_err() {
-        return Err(StatusCode::BAD_REQUEST);
-    }
+    ).map_err(|_| ApiError::ServerError)?;
 
     // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
     Ok(StatusCode::OK)

@@ -21,6 +21,10 @@ use JustTransfer::*;
 
 #[tokio::main]
 async fn main() {
+
+    // Init logging
+    tracing_subscriber::fmt::init();
+
     // Initialize libsodium
     if unsafe { sodium_init() } == -1 {
         panic!("libsodium init failed");
@@ -72,7 +76,7 @@ async fn main() {
                 .timeout(std::time::Duration::from_secs(30))
         );
 
-    println!("Server running on {}", consts::URL);
+    tracing::info!("Server running on {}", consts::URL);
     let listener = tokio::net::TcpListener::bind(consts::URL).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
