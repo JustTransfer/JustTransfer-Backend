@@ -4,7 +4,7 @@ use diesel::r2d2::ConnectionManager;
 use validator::ValidationError;
 use crate::consts::{MAX_FILE_SIZE_ANONYMOUS, MAX_FILE_SIZE_CONNECTED, MAX_LENGTH_USERNAME, MAX_VALUE_INT, MIN_LENGTH_USERNAME};
 
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
+pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
 #[derive(Clone)]
 pub struct AppState {

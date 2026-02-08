@@ -16,7 +16,7 @@ use axum::body::Body;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
 
-use crate::server::Server;
+use crate::server::init::init_server;
 
 pub mod models;
 pub mod schema;
@@ -38,7 +38,7 @@ async fn main() {
     }
 
     // Init server
-    let state = Server::new().await.expect("Server initialization failed");
+    let state = init_server().await.expect("Server initialization failed");
 
     use tower_http::cors::{Any, CorsLayer};
     let cors = CorsLayer::new()

@@ -1,11 +1,8 @@
-use crate::server::{DefaultCipherSuite, Server};
 use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 
 use serde::{Deserialize, Serialize};
 
-
-use crate::consts::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use opaque_ke::*;
 use uuid::Uuid;
@@ -17,15 +14,17 @@ use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use tower::ServiceExt;
 use tracing::instrument;
 
+use crate::server;
+use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
 use crate::api_handlers::auth::create_jwt;
-use crate::consts;
+use crate::consts::*;
 use crate::error::ApiError;
 use crate::models::*;
 
 ///
 /// Root
-/// 
+///
 
 #[derive(Serialize)]
 pub struct RootResponse {
@@ -72,7 +71,7 @@ pub async fn anonymous_message_get_one_metadata_start(
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let server_login_start = Server::server_login_start_anonymous(
+    let server_login_start = server::anonymous::server_login_start_anonymous(
         id,
         req,
         &state.db,
@@ -112,7 +111,7 @@ pub async fn anonymous_message_get_one_metadata(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let message = Server::anonymous_get_message_metadata(id, req, &state.db)
+    let message = server::anonymous::anonymous_get_message_metadata(id, req, &state.db)
         .map_err(|_| ApiError::ServerError)?;
 
 
@@ -161,7 +160,7 @@ pub async fn anonymous_message_get_download_url(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let message = Server::anonymous_get_message(id, &state.db)
+    let message = server::anonymous::anonymous_get_message(id, &state.db)
         .map_err(|_| ApiError::ServerError)?;
 
     // Generate pre-signed S3 download URL
@@ -217,8 +216,8 @@ pub async fn anonymous_message_send_start(
     // Generate a unique id for the transfer
     let id = Uuid::new_v4();
 
-    let server_registration_start_result = Server::
-    anonymous_send_message_start(id, req, &state.db)
+    let server_registration_start_result =
+        server::anonymous::anonymous_send_message_start(id, req, &state.db)
         .map_err(|_| ApiError::ServerError)?;
 
     Ok((
@@ -278,7 +277,7 @@ pub async fn upload_anonymous_message(
 
     let message_file_id = Uuid::new_v4(); // Generate a new UUID for the message file
 
-    let send_result = Server::anonymous_send_message(
+    let send_result = server::anonymous::anonymous_send_message(
         req,
         payload.id,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)

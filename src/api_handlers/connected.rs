@@ -1,28 +1,22 @@
-use crate::server::{DefaultCipherSuite, Server};
 use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
-use diesel::r2d2::{self, ConnectionManager};
-use diesel::PgConnection;
 use serde::{Deserialize, Serialize};
 
-type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
-
-use crate::consts::*;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use opaque_ke::*;
 use uuid::Uuid;
-use validator::{Validate, ValidationError};
+use validator::{Validate};
 use tracing::{info, instrument};
-
-use aws_sdk_s3::Client;
 
 use aws_sdk_s3::presigning::PresigningConfig;
 use std::time::Duration;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 
+use crate::server;
+use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
 use crate::api_handlers::auth::create_jwt;
-use crate::consts;
+use crate::consts::*;
 use crate::models::*;
 use crate::error::*;
 
@@ -58,8 +52,8 @@ pub async fn register_user_start(
     let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let server_registration_start_result = Server::
-        server_registration_start(&*payload.username, req, &state.db)
+    let server_registration_start_result =
+        server::connected::server_registration_start(&*payload.username, req, &state.db)
         .map_err(|_| ApiError::ServerError)?;
 
     Ok((
@@ -131,7 +125,7 @@ pub async fn register_user_end(
         .map_err(|_| ApiError::Base64)?;
 
     
-    let server_registration_finish = Server::server_registration_finish(
+    let server_registration_finish = server::connected::server_registration_finish(
         req,
         &*payload.username,
         &*payload.email,
@@ -201,7 +195,7 @@ pub async fn register_user_end_update(
         .decode(&payload.pub_sign)
         .map_err(|_| ApiError::Base64)?;
     
-    let server_registration_finish = Server::server_registration_finish_update(
+    let server_registration_finish = server::connected::server_registration_finish_update(
         client_registration_finish,
         &*payload.username,
         cpriv_enc,
@@ -247,7 +241,7 @@ pub async fn login_user_start(
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
     
-    let server_login_start = Server::server_login_start(
+    let server_login_start = server::connected::server_login_start(
         &*payload.username,
         req,
         &state.db,
@@ -295,14 +289,14 @@ pub async fn login_user_end(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
     
-    let server_login_finish = Server::server_login_finish(
+    let server_login_finish = server::connected::server_login_finish(
         &*payload.username,
         req,
         &state.db,
     ).map_err(|_| ApiError::ServerError)?;
 
     // Get the user role from the database
-    let user = Server::get_user(&*payload.username, &state.db)
+    let user = server::connected::get_user(&*payload.username, &state.db)
         .map_err(|_| ApiError::ServerError)?;
 
     // Generate JWT token
@@ -385,7 +379,7 @@ pub async fn get_pub_key_enc(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let pub_enc = Server::get_pub_key_enc(&*payload.user_request_pub_key, &state.db)
+    let pub_enc = server::connected::get_pub_key_enc(&*payload.user_request_pub_key, &state.db)
         .map_err(|_| ApiError::ServerNotFound)?;
 
     Ok((StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) })))
@@ -411,7 +405,7 @@ pub async fn get_pub_key_sign(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let pub_sign = Server::get_pub_key_sign(&*payload.user_request_pub_key, &state.db)
+    let pub_sign = server::connected::get_pub_key_sign(&*payload.user_request_pub_key, &state.db)
         .map_err(|_| ApiError::ServerNotFound)?;
 
     Ok((StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) })))
@@ -441,7 +435,7 @@ pub async fn get_messages(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let messages = Server::get_messages(&*payload.username, &state.db)
+    let messages = server::connected::get_messages(&*payload.username, &state.db)
         .map_err(|_| ApiError::ServerError)?;
 
     // Convert the fields of each messages to base64
@@ -482,7 +476,7 @@ pub async fn get_one_message(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let message = Server::get_message(&*payload.username, id, &state.db)
+    let message = server::connected::get_message(&*payload.username, id, &state.db)
             .map_err(|_| ApiError::ServerNotFound)?;
 
     // Generate pre-signed S3 download URL
@@ -549,7 +543,7 @@ pub async fn upload_message(
 
     let file_id = Uuid::new_v4();
 
-    let send_result = Server::send_message(
+    let send_result = server::connected::send_message(
         &payload.sender,
         &payload.receiver,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
@@ -654,7 +648,7 @@ pub async fn upload_message_finish_multipart(
         .await
         .map_err(|_| ApiError::ServerError)?;
 
-    let update_signature_result= Server::update_message_signature(
+    let update_signature_result= server::connected::update_message_signature(
         file_id,
         URL_SAFE_NO_PAD.decode(&payload.signature)
             .map_err(|_| ApiError::ServerError)?,
