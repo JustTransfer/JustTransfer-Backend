@@ -7,10 +7,11 @@ use diesel::sql_types::Timestamptz;
 use diesel::dsl::{sql, now as sql_now};
 use rand::rngs::OsRng;
 use opaque_ke::*;
+use tracing::info;
 use uuid::Uuid;
 
 
-use crate::consts::{CHUNK_SIZE_ANONYMOUS, DUMMY_ANONYMOUS_MESSAGE_ID, DUMMY_PASSWORD_FILE, MAX_LIFETIME_TRANSFER_ANONYMOUS, MAX_TIME_MARGIN};
+use crate::consts::{CHUNK_SIZE_ANONYMOUS, DUMMY_ANONYMOUS_MESSAGE_ID, DUMMY_PASSWORD_FILE, MAX_LIFETIME_TRANSFER_ANONYMOUS, MAX_TIME_MARGIN, S3_BUCKET_NAME_ANONYMOUS};
 use crate::models::{AnonymousMessage, AnonymousMessageMetadata, Message, NewAnonymousMessage};
 use crate::schema::anonymousmessages::dsl::anonymousmessages;
 use crate::schema::messages::dsl::messages;
@@ -20,38 +21,39 @@ use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
 ///
 /// Anonymous Messages
 ///
-
-// TODO process only message belonging to the user, not all messages
-// TODO change to connect to S3 and delete from there
-fn delete_invalid_anonymous_messages(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
+async fn delete_invalid_anonymous_message(
+    pool: &DbPool,
+    s3: &aws_sdk_s3::Client,
+    id_param: Uuid,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::anonymousmessages;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
 
-    // Get message with max downloads
-    let messages_to_delete: Vec<AnonymousMessage> = anonymousmessages
-        .filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads))
-        .load(&mut conn)?;
+    // Check if the message is expired or has reached max downloads
+    let message_opt = anonymousmessages
+        .filter(anonymousmessages::id.eq(id_param))
+        .filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads).or(
+            sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
+        ))
+        .first::<AnonymousMessage>(&mut conn)
+        .optional()?;
 
-    // Delete files from S3
-    // TODO
+    if let Some(message) = message_opt {
 
-    // Delete from DB
-    diesel::delete(anonymousmessages.filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads)))
-        .execute(&mut conn)?;
+        info!("Deleting expired/max downloaded anonymous message with id: {}", message.id);
 
-    // Get expired messages
-    let expiry = sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')");
-    let expired_messages: Vec<Message> = messages
-        .filter(expiry.clone().le(sql_now))
-        .load(&mut conn)?;
+        // Delete file from S3
+        s3.delete_object()
+            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+            .key(message.file_id.to_string())
+            .send()
+            .await?;
 
-    // Delete files from S3
-    // TODO
-
-    // Delete from DB
-    diesel::delete(messages.filter(expiry.le(sql_now)))
-        .execute(&mut conn)?;
+        // Delete from DB
+        diesel::delete(anonymousmessages.filter(anonymousmessages::id.eq(id_param)))
+            .execute(&mut conn)?;
+    }
 
     Ok(())
 }
@@ -135,15 +137,17 @@ pub fn anonymous_send_message(
     Ok(())
 }
 
-pub fn server_login_start_anonymous(
+pub async fn server_login_start_anonymous(
     id_param: Uuid,
     client_login_start_result: CredentialRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<CredentialResponse<DefaultCipherSuite>,
-    Box<dyn std::error::Error>,
-> {
+    s3: &aws_sdk_s3::Client,
+) -> Result<CredentialResponse<DefaultCipherSuite>, Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::anonymousmessages;
     let mut conn = pool.get().expect("Failed to get DB connection");
+
+    // Delete invalid messages
+    delete_invalid_anonymous_message(pool, s3, id_param).await?;
 
     let annonymous_message_opt = anonymousmessages::table
         .filter(anonymousmessages::id.eq(id_param))
@@ -166,7 +170,7 @@ pub fn server_login_start_anonymous(
     };
 
     let mut server_rng = OsRng;
-    let server_opaque = get_opaque_settings(pool)?;
+    let server_opaque = get_opaque_settings(pool).map_err(|e| e.to_string())?;
     let server_login_start_result = ServerLogin::start(
         &mut server_rng,
         &server_opaque,
@@ -194,11 +198,12 @@ pub fn server_login_start_anonymous(
     Ok(server_login_start_result.message)
 }
 
-pub fn anonymous_get_message_metadata(
+pub async fn anonymous_get_message_metadata(
     id_param: Uuid,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<AnonymousMessageMetadata, Box<dyn std::error::Error>> {
+    s3: &aws_sdk_s3::Client,
+) -> Result<AnonymousMessageMetadata, Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::anonymousmessages;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -228,9 +233,6 @@ pub fn anonymous_get_message_metadata(
             ServerLoginParameters::default(),
         ).map_err(|e| e.to_string())?;
 
-    // Delete invalid messages
-    delete_invalid_anonymous_messages(pool)?;
-
     let messages_get = anonymousmessages::table
         .filter(anonymousmessages::id.eq(id_param))
         .select((
@@ -253,16 +255,17 @@ pub fn anonymous_get_message_metadata(
     Ok(messages_get)
 }
 
-pub fn anonymous_get_message(
+pub async fn anonymous_get_message(
     id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
 ) -> Result<AnonymousMessage, Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::anonymousmessages;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
 
     // Delete invalid messages
-    delete_invalid_anonymous_messages(pool).unwrap();
+    delete_invalid_anonymous_message(pool, s3, id_param).await?;
 
     // Get the message
     let anonymousmessage = anonymousmessages

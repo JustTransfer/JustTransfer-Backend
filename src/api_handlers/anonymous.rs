@@ -75,7 +75,10 @@ pub async fn anonymous_message_get_one_metadata_start(
         id,
         req,
         &state.db,
-    ).map_err(|_| ApiError::ServerError)?;
+        &state.s3,
+    )
+        .await
+        .map_err(|_| ApiError::ServerError)?;
 
     Ok((
         StatusCode::OK,
@@ -111,7 +114,8 @@ pub async fn anonymous_message_get_one_metadata(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let message = server::anonymous::anonymous_get_message_metadata(id, req, &state.db)
+    let message = server::anonymous::anonymous_get_message_metadata(id, req, &state.db, &state.s3)
+        .await
         .map_err(|_| ApiError::ServerError)?;
 
 
@@ -160,7 +164,8 @@ pub async fn anonymous_message_get_download_url(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let message = server::anonymous::anonymous_get_message(id, &state.db)
+    let message = server::anonymous::anonymous_get_message(id, &state.db, &state.s3)
+        .await
         .map_err(|_| ApiError::ServerError)?;
 
     // Generate pre-signed S3 download URL

@@ -7,6 +7,7 @@ use diesel::sql_types::Timestamptz;
 use diesel::dsl::{sql, now as sql_now};
 use rand::rngs::OsRng;
 use opaque_ke::*;
+use tracing::log::info;
 use uuid::Uuid;
 
 
@@ -18,6 +19,10 @@ use crate::schema::users::dsl::users;
 use crate::schema::users::*;
 use crate::api_handlers::misc::DbPool;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
+
+///
+/// Register
+///
 
 pub fn server_registration_start(
     username_param: &str,
@@ -132,6 +137,10 @@ pub fn server_registration_finish_update(
 
     Ok(())
 }
+
+///
+/// Login
+///
 
 pub fn server_login_start(
     username_param: &str,
@@ -262,6 +271,10 @@ pub fn server_login_finish(
     Ok(())
 }*/
 
+///
+/// Users
+///
+
 pub fn get_user(
     username_param: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -307,6 +320,10 @@ pub fn get_pub_key_sign(
 
     Ok(user.public_key_sign.as_slice().try_into()?)
 }
+
+///
+/// Messages
+///
 
 pub fn send_message(
     sender: &str,
@@ -398,49 +415,75 @@ pub fn update_message_signature(
     Ok(())
 }
 
-// TODO process only message belonging to the user, not all messages
-// TODO change to connect to S3 and delete from there
-fn delete_invalid_messages(pool: &DbPool) -> Result<(), Box<dyn std::error::Error>> {
+async fn delete_invalid_messages_for_user(
+    pool: &DbPool,
+    s3: &aws_sdk_s3::Client,
+    username_param: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
     let mut conn = pool.get().expect("Failed to get DB connection");
 
-    // Get message with max downloads
-    let messages_to_delete: Vec<Message> = messages
-        .filter(crate::schema::messages::number_downloads.ge(crate::schema::messages::max_downloads))
-        .load(&mut conn)?;
+    // Get messages that belong to the user and are invalid
+    let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
 
-    // Delete files from S3
-    // TODO
+    use crate::schema::users;
+    use crate::schema::messages;
 
-    // Delete from DB
-    diesel::delete(messages.filter(crate::schema::messages::number_downloads.ge(crate::schema::messages::max_downloads)))
-        .execute(&mut conn)?;
+    let messages_to_delete = messages
+        .inner_join(sender.on(messages::sender_id.eq(sender.field(users::id))))
+        .inner_join(receiver.on(messages::receiver_id.eq(receiver.field(users::id))))
+        .filter(receiver.field(users::username).eq(username_param))
+        .filter(messages::number_downloads.ge(messages::max_downloads).or(
+            sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
+        ))
+        .select(messages::all_columns)
+        .load::<Message>(&mut conn)?;
 
-    // Get expired messages
-    let expiry = sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')");
-    let expired_messages: Vec<Message> = messages
-        .filter(expiry.clone().le(sql_now))
-        .load(&mut conn)?;
+    // Delete files from S3 if there are any
+    if !messages_to_delete.is_empty() {
 
-    // Delete files from S3
-    // TODO
+        // Collect the object identifiers for S3 deletion
+        let mut delete_object_ids: Vec<aws_sdk_s3::types::ObjectIdentifier> = vec![];
+        for message in &messages_to_delete {
+            delete_object_ids.push(
+                aws_sdk_s3::types::ObjectIdentifier::builder()
+                    .key(message.file_id.to_string())
+                    .build()?
+            );
+        }
 
-    // Delete from DB
-    diesel::delete(messages.filter(expiry.le(sql_now)))
-        .execute(&mut conn)?;
+        s3.delete_objects()
+            .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+            .delete(
+                aws_sdk_s3::types::Delete::builder()
+                    .set_objects(Some(delete_object_ids))
+                    .build()?
+            )
+            .send()
+            .await?;
+
+        // Delete from DB
+        let message_ids_to_delete: Vec<i32> = messages_to_delete.iter().map(|m| m.id).collect();
+        diesel::delete(messages.filter(messages::id.eq_any(message_ids_to_delete)))
+            .execute(&mut conn)?;
+
+        info!("Deleted {} invalid messages for user {}", messages_to_delete.len(), username_param);
+    }
 
     Ok(())
 }
 
-pub fn get_messages(
+pub async fn get_messages(
     username_param: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<Vec<MessageWithUsernames>, Box<dyn std::error::Error>> {
+    s3: &aws_sdk_s3::Client,
+) -> Result<Vec<MessageWithUsernames>, Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::users;
     use crate::schema::messages;
     let mut conn = pool.get().expect("Failed to get DB connection");
 
     // Delete invalid messages
-    delete_invalid_messages(pool)?;
+    delete_invalid_messages_for_user(pool, s3, username_param).await?;
 
     let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
 
@@ -473,17 +516,18 @@ pub fn get_messages(
     Ok(messages_get)
 }
 
-pub fn get_message(
+pub async fn get_message(
     username_param: &str,
     message_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
 ) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::users;
     use crate::schema::messages;
     let mut conn = pool.get().expect("Failed to get DB connection");
 
     // Delete invalid messages
-    delete_invalid_messages(pool).unwrap();
+    delete_invalid_messages_for_user(pool, s3, username_param).await?;
 
     // Get the message
     let mut message = messages

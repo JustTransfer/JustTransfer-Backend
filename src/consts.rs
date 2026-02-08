@@ -83,6 +83,6 @@ pub static DATABASE_URL: OnceCell<String> = OnceCell::new();
 pub static MINIO_ROOT_USER: OnceCell<String> = OnceCell::new();
 pub static MINIO_ROOT_PASSWORD: OnceCell<String> = OnceCell::new();
 pub static MINIO_URL: OnceCell<String> = OnceCell::new();
-pub static S3_BUCKET_NAME: OnceCell<String> = OnceCell::new();
+pub static S3_BUCKET_NAME_CONNECTED: OnceCell<String> = OnceCell::new();
 pub static S3_BUCKET_NAME_ANONYMOUS: OnceCell<String> = OnceCell::new();
 pub static JWT_SECRET_KEY: OnceCell<String> = OnceCell::new();

@@ -435,7 +435,8 @@ pub async fn get_messages(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let messages = server::connected::get_messages(&*payload.username, &state.db)
+    let messages = server::connected::get_messages(&*payload.username, &state.db, &state.s3)
+        .await
         .map_err(|_| ApiError::ServerError)?;
 
     // Convert the fields of each messages to base64
@@ -476,8 +477,9 @@ pub async fn get_one_message(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let message = server::connected::get_message(&*payload.username, id, &state.db)
-            .map_err(|_| ApiError::ServerNotFound)?;
+    let message = server::connected::get_message(&*payload.username, id, &state.db, &state.s3)
+        .await
+        .map_err(|_| ApiError::ServerNotFound)?;
 
     // Generate pre-signed S3 download URL
     let presigned_url = state.s3

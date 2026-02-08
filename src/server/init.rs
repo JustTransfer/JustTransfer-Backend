@@ -6,11 +6,13 @@ use chrono::Utc;
 use diesel::{r2d2, OptionalExtension, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
+use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use rand::rngs::OsRng;
 use opaque_ke::argon2::Argon2;
 use opaque_ke::{CipherSuite, ServerSetup};
 use tracing::{info, warn};
 use uuid::Uuid;
+
 use crate::api_handlers;
 use crate::consts::*;
 use crate::models::*;
@@ -52,7 +54,7 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, Box<dyn std::
                 MINIO_URL.set(std::env::var(var).unwrap())?;
             }
             "S3_BUCKET_NAME" => {
-                S3_BUCKET_NAME.set(std::env::var(var).unwrap())?;
+                S3_BUCKET_NAME_CONNECTED.set(std::env::var(var).unwrap())?;
             }
             "S3_BUCKET_NAME_ANONYMOUS" => {
                 S3_BUCKET_NAME_ANONYMOUS.set(std::env::var(var).unwrap())?;
@@ -70,7 +72,7 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, Box<dyn std::
     let state = api_handlers::misc::AppState {
         db: db_pool.clone(),
         s3: s3_client.clone(),
-        bucket_name: S3_BUCKET_NAME.get().unwrap().clone(),
+        bucket_name: S3_BUCKET_NAME_CONNECTED.get().unwrap().clone(),
         bucket_name_anonymous: S3_BUCKET_NAME_ANONYMOUS.get().unwrap().clone(),
     };
 
@@ -85,8 +87,6 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, Box<dyn std::
 
 fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Box<dyn std::error::Error>> {
 
-    // TODO run migrations if needed
-
     let manager = ConnectionManager::<PgConnection>::new(DATABASE_URL.get().unwrap());
     let pool = r2d2::Pool::builder()
         .build(manager)
@@ -94,6 +94,12 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Box<d
 
     use crate::schema::opaque_settings;
     let mut conn = pool.get().expect("Failed to get DB connection");
+
+    // Run migrations
+    pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
+    conn.run_pending_migrations(MIGRATIONS)
+        .expect("Failed to run database migrations");
+    info!("Database migrations ran successfully");
 
     // Try to load OPAQUE settings from DB
     let setting: Option<OpaqueSetting> = opaque_settings::table
@@ -165,7 +171,7 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, Box<dyn std::error::Erro
 
     // Define the required buckets
     let required_buckets = [
-        S3_BUCKET_NAME.get().unwrap(),
+        S3_BUCKET_NAME_CONNECTED.get().unwrap(),
         S3_BUCKET_NAME_ANONYMOUS.get().unwrap(),
     ];
 
