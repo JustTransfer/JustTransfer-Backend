@@ -16,33 +16,30 @@ use std::time::Duration;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use tower::ServiceExt;
 use tracing::instrument;
-use crate::api_handlers::{AppState};
-use crate::api_handlers_auth::{create_jwt};
+
+use crate::api_handlers::misc::*;
+use crate::api_handlers::auth::create_jwt;
 use crate::consts;
 use crate::error::ApiError;
 use crate::models::*;
 
 ///
-/// Anonymous messages
-///
+/// Root
+/// 
 
-fn validate_int_param(value: i32) -> Result<(), ValidationError> {
-    if value < 0 {
-        return Err(ValidationError::new("invalid_value"));
-    }
-
-    if value > MAX_VALUE_INT {
-        return Err(ValidationError::new("value_too_large"));
-    }
-
-    Ok(())
+#[derive(Serialize)]
+pub struct RootResponse {
+    result: String,
 }
 
-fn validate_file_size_anonymous(size: i64) -> Result<(), ValidationError> {
-    if size == 0 || size > MAX_FILE_SIZE_ANONYMOUS {
-        return Err(ValidationError::new("invalid_file_size"));
-    }
-    Ok(())
+#[instrument(err(Debug))]
+pub async fn root() -> Result<impl IntoResponse, ApiError> {
+    Ok((
+        StatusCode::OK,
+        Json(RootResponse {
+            result: "JustTransfer API is running".to_string(),
+        }),
+    ))
 }
 
 ///

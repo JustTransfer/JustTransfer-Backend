@@ -16,8 +16,15 @@ use axum::body::Body;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
 
-use JustTransfer::server::Server;
-use JustTransfer::*;
+use crate::server::Server;
+
+pub mod models;
+pub mod schema;
+pub mod consts;
+pub mod server;
+pub mod error;
+pub mod api_handlers;
+mod tests;
 
 #[tokio::main]
 async fn main() {
@@ -41,29 +48,28 @@ async fn main() {
 
     // build our application with a route
     let app = Router::new()
+        .route("/api/register/update", post(api_handlers::connected::register_user_end_update))// TODO check if needs auth
         //.route("/api/logout", post(api_handlers::logout))
-        .route("/api/pubkey/enc", post(api_handlers::get_pub_key_enc))
-        .route("/api/pubkey/sign", post(api_handlers::get_pub_key_sign))
-        .route("/api/messages", post(api_handlers::get_messages))
-        .route("/api/message/{id}", post(api_handlers::get_one_message))
-        .route("/api/message", post(api_handlers::upload_message))
-        .route("/api/message/uploadfinish/{file_id}", post(api_handlers::upload_message_finish_multipart))
-        //.route("/api/anonymous/message/{id}/content", post(api_handlers::anonymous_message_get_content))
-        .layer(middleware::from_fn(api_handlers_auth::jwt_auth))
+        .route("/api/pubkey/enc", post(api_handlers::connected::get_pub_key_enc))
+        .route("/api/pubkey/sign", post(api_handlers::connected::get_pub_key_sign))
+        .route("/api/messages", post(api_handlers::connected::get_messages))
+        .route("/api/message/{id}", post(api_handlers::connected::get_one_message))
+        .route("/api/message", post(api_handlers::connected::upload_message))
+        .route("/api/message/uploadfinish/{file_id}", post(api_handlers::connected::upload_message_finish_multipart))
+        .layer(middleware::from_fn(api_handlers::auth::jwt_auth))
         // Apply JWT auth middleware to all routes defined before this line
 
-        .route("/api", get(api_handlers::root))
-        .route("/api/register/start", post(api_handlers::register_user_start))
-        .route("/api/register/end", post(api_handlers::register_user_end))
-        .route("/api/register/update", post(api_handlers::register_user_end_update))// TODO check if needs auth
-        .route("/api/login/start", post(api_handlers::login_user_start))
-        .route("/api/login/end", post(api_handlers::login_user_end))
-        .route("/api/anonymous/message/start", post(api_handlers_anonymous::anonymous_message_send_start))
-        .route("/api/anonymous/message", post(api_handlers_anonymous::upload_anonymous_message))
-        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers_anonymous::upload_anonymous_message_finish_multipart))
-        .route("/api/anonymous/message/{id}/start", post(api_handlers_anonymous::anonymous_message_get_one_metadata_start))
-        .route("/api/anonymous/message/{id}", post(api_handlers_anonymous::anonymous_message_get_one_metadata))
-        .route("/api/anonymous/message/{id}", get(api_handlers_anonymous::anonymous_message_get_download_url))
+        .route("/api", get(api_handlers::anonymous::root))
+        .route("/api/register/start", post(api_handlers::connected::register_user_start))
+        .route("/api/register/end", post(api_handlers::connected::register_user_end))
+        .route("/api/login/start", post(api_handlers::connected::login_user_start))
+        .route("/api/login/end", post(api_handlers::connected::login_user_end))
+        .route("/api/anonymous/message/start", post(api_handlers::anonymous::anonymous_message_send_start))
+        .route("/api/anonymous/message", post(api_handlers::anonymous::upload_anonymous_message))
+        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::anonymous::upload_anonymous_message_finish_multipart))
+        .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous::anonymous_message_get_one_metadata_start))
+        .route("/api/anonymous/message/{id}", post(api_handlers::anonymous::anonymous_message_get_one_metadata))
+        .route("/api/anonymous/message/{id}", get(api_handlers::anonymous::anonymous_message_get_download_url))
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)

@@ -37,7 +37,7 @@ impl CipherSuite for DefaultCipherSuite {
 pub struct Server {}
 
 impl Server {
-    pub async fn new() -> Result<api_handlers::AppState, Box<dyn std::error::Error>> {
+    pub async fn new() -> Result<api_handlers::misc::AppState, Box<dyn std::error::Error>> {
 
         // Check if the environment variables exist
         for var in ENV_VARS {
@@ -81,12 +81,18 @@ impl Server {
         let db_pool = Server::server_init_db()?;
         let s3_client = Server::server_init_s3().await?;
 
-        let state = api_handlers::AppState {
+        let state = api_handlers::misc::AppState {
             db: db_pool.clone(),
             s3: s3_client.clone(),
             bucket_name: S3_BUCKET_NAME.get().unwrap().clone(),
             bucket_name_anonymous: S3_BUCKET_NAME_ANONYMOUS.get().unwrap().clone(),
         };
+
+        Self::generate_dummy_user(&db_pool).await
+            .expect("Failed to generate dummy user");
+
+        Self::generate_dummy_anonymous_transfer(&db_pool).await
+            .expect("Failed to generate dummy anonymous transfer");
 
         Ok(state)
     }
@@ -180,7 +186,7 @@ impl Server {
         // Create any missing buckets
         for bucket_name in required_buckets {
             if !existing_buckets.contains(bucket_name) {
-                &client_s3
+                client_s3
                     .create_bucket()
                     .bucket(bucket_name)
                     .send()
@@ -219,6 +225,92 @@ impl Server {
             })?;
 
         Ok(server_opaque)
+    }
+
+    pub async fn generate_dummy_user(
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>
+    ) -> Result<(), Box<dyn std::error::Error>> {
+
+        use crate::schema::users;
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Check if the dummy user already exists
+        let existing_user = users::table
+            .filter(users::username.eq(DUMMY_USERNAME))
+            .first::<User>(&mut conn)
+            .optional()?;
+
+        if existing_user.is_none() {
+            let new_user = NewUser {
+                username: &DUMMY_USERNAME.to_string(),
+                email: &DUMMY_EMAIL.to_string(),
+                password_file: &DUMMY_PASSWORD_FILE.to_vec(),
+                role: &DUMMY_ROLE.to_string(),
+                public_key_enc: &vec![0; ENC_KEY_LEN_PUB],
+                nonce_enc: &vec![0; SYM_LEN_NONCE],
+                cipher_private_key_enc: &vec![0; ENC_KEY_LEN_PRIV],
+                public_key_sign: &vec![0; SIGN_KEY_LEN_PUB],
+                nonce_sign: &vec![0; SIGN_LEN_NONCE],
+                cipher_private_key_sign: &vec![0; SIGN_KEY_LEN_PRIV],
+            };
+
+            diesel::insert_into(users::table)
+                .values(&new_user)
+                .returning(User::as_returning())
+                .get_result(&mut conn)
+                .expect("Error saving dummy user");
+        }
+
+        // Get the id of the dummy user
+        let dummy_id = users::table
+            .filter(users::username.eq(DUMMY_USERNAME))
+            .select(users::id)
+            .first::<i32>(&mut conn)
+            .expect("Error getting dummy user id");
+
+        DUMMY_ID.set(dummy_id)
+            .map_err(|_| "Failed to set DUMMY_ID")?;
+
+        Ok(())
+    }
+
+    pub async fn generate_dummy_anonymous_transfer(
+        pool: &r2d2::Pool<ConnectionManager<PgConnection>>
+    ) -> Result<(), Box<dyn std::error::Error>> {
+
+        use crate::schema::anonymousmessages;
+        let mut conn = pool.get().expect("Failed to get DB connection");
+
+        // Check if the dummy anonymous transfer already exists
+        let existing_message = anonymousmessages::table
+            .filter(anonymousmessages::id.eq(DUMMY_ANONYMOUS_MESSAGE_ID))
+            .first::<AnonymousMessage>(&mut conn)
+            .optional()?;
+
+        if existing_message.is_none() {
+            let new_message = NewAnonymousMessage {
+                id: &DUMMY_ANONYMOUS_MESSAGE_ID,
+                password_file: &DUMMY_PASSWORD_FILE.to_vec(),
+                cfilename: &vec![0; 16],
+                nonce_filename: &vec![0; SYM_LEN_NONCE],
+                file_id: &Uuid::new_v4(),
+                header: &vec![0; 16],
+                max_downloads: &0,
+                lifetime: &0,
+                creation_time: &Utc::now(),
+                number_downloads: &0,
+                file_size: &0,
+                chunk_size: &CHUNK_SIZE_ANONYMOUS,
+            };
+
+            diesel::insert_into(anonymousmessages::table)
+                .values(&new_message)
+                .returning(AnonymousMessage::as_returning())
+                .get_result(&mut conn)
+                .expect("Error saving dummy anonymous transfer");
+        }
+
+        Ok(())
     }
 
     pub fn server_registration_start(
@@ -345,17 +437,24 @@ impl Server {
         use crate::schema::users;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
-        let user = users::table
+        let user_opt = users::table
             .filter(users::username.eq(username_param))
             .first::<User>(&mut conn)
-            .optional()?
-            .ok_or("User not found")?;
+            .optional()?;
 
-        let password_file_bytes = user.password_file.clone();
+        // Extract the password file from the user if it exists, otherwise use None
+        let password_file_param = if let Some(user) = &user_opt {
+            let password_file_bytes = &user.password_file;
 
-        let password_file_param =
-            ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
-                .map_err(|e| e.to_string())?;
+            Some(
+                ServerRegistration::<DefaultCipherSuite>::deserialize(password_file_bytes)?
+            )
+        } else {
+            // Deserialize a dummy password file to prevent user enumeration
+            ServerRegistration::<DefaultCipherSuite>::deserialize(&DUMMY_PASSWORD_FILE)?;
+
+            None
+        };
 
         let server_opaque = Server::get_opaque_settings(pool)?;
 
@@ -363,21 +462,26 @@ impl Server {
         let server_login_start_result = ServerLogin::start(
             &mut server_rng,
             &server_opaque,
-            Some(password_file_param),
+            password_file_param,
             client_login_start_result,
             username_param.as_bytes(),
             ServerLoginParameters::default(),
         )
             .map_err(|e| e.to_string())?;
 
-        // Store the state of ServerLogin in the DB
-        let user = diesel::update(users.find(user.id))
+        // Use the dummy user id if the user does not exist to prevent user enumeration
+        let user_id = if let Some(user) = &user_opt {
+            user.id
+        } else {
+            DUMMY_ID.get().unwrap().to_owned()
+        };
+
+        diesel::update(users.find(user_id))
             .set(users::server_login.eq(Some(
                 server_login_start_result.state.serialize().to_vec(),
             )))
             .returning(User::as_returning())
-            .get_result(&mut conn)
-            .unwrap();
+            .get_result(&mut conn)?;
 
         Ok(server_login_start_result.message)
     }
@@ -832,32 +936,46 @@ impl Server {
         use crate::schema::anonymousmessages;
         let mut conn = pool.get().expect("Failed to get DB connection");
 
-        let annonymous_message = anonymousmessages::table
+        let annonymous_message_opt = anonymousmessages::table
             .filter(anonymousmessages::id.eq(id_param))
             .first::<AnonymousMessage>(&mut conn)
-            .optional()?
-            .ok_or("User not found")?;
+            .optional()?;
 
-        let password_file_bytes = annonymous_message.password_file.clone();
+        let password_file_param = if let Some(annonymous_message) = &annonymous_message_opt {
+            let password_file_bytes = annonymous_message.password_file.clone();
 
-        let password_file_param =
-            ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
+            Some(
+                ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
+                    .map_err(|e| e.to_string())?
+            )
+        } else {
+            // Deserialize a dummy password file to prevent user enumeration
+            ServerRegistration::<DefaultCipherSuite>::deserialize(&DUMMY_PASSWORD_FILE)
                 .map_err(|e| e.to_string())?;
+
+            None
+        };
 
         let mut server_rng = OsRng;
         let server_opaque = Server::get_opaque_settings(pool)?;
         let server_login_start_result = ServerLogin::start(
             &mut server_rng,
             &server_opaque,
-            Some(password_file_param),
+            password_file_param,
             client_login_start_result,
             id_param.as_bytes(),
             ServerLoginParameters::default(),
         )
             .map_err(|e| e.to_string())?;
 
-        // Save the ServerLogin state in DB
-        let updated_rows = diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
+        // Use dummy id if the message does not exist to prevent user enumeration
+        let anonymous_message_id = if annonymous_message_opt.is_some() {
+            id_param
+        } else {
+            DUMMY_ANONYMOUS_MESSAGE_ID
+        };
+
+        diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(anonymous_message_id)))
             .set(anonymousmessages::server_login.eq(Some(
                 server_login_start_result.state.serialize().to_vec(),
             )))
