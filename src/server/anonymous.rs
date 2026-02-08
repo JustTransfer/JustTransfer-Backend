@@ -1,4 +1,6 @@
 use std::io;
+use aws_sdk_s3::presigning::PresigningConfig;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use chrono::{Duration, Utc};
 use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
@@ -16,6 +18,7 @@ use crate::models::{AnonymousMessage, AnonymousMessageMetadata, Message, NewAnon
 use crate::schema::anonymousmessages::dsl::anonymousmessages;
 use crate::schema::messages::dsl::messages;
 use crate::api_handlers::misc::DbPool;
+use crate::error::ApiError;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
 
 ///
@@ -76,19 +79,20 @@ pub fn anonymous_send_message_start(
     Ok(server_registration_start_result.message)
 }
 
-pub fn anonymous_send_message(
+pub async fn anonymous_send_message(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     id_transfer: Uuid,
     filename_param: Vec<u8>,
     nonce_filename_param: Vec<u8>,
-    message_id_param: Uuid,
+    file_id_param: Uuid,
     header_param: Vec<u8>,
     max_downloads_param: i32,
     lifetime_param: i32,
     creation_time_param: chrono::DateTime<Utc>,
     file_size_param: i64,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    s3: &aws_sdk_s3::Client,
+) -> Result<(Vec<String>, String), Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::anonymousmessages;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -118,7 +122,7 @@ pub fn anonymous_send_message(
         password_file: &password_file_param.serialize().to_vec(),
         cfilename: &filename_param,
         nonce_filename: &nonce_filename_param,
-        file_id: &message_id_param,
+        file_id: &file_id_param,
         header: &header_param,
         max_downloads: &max_downloads_param,
         lifetime: &lifetime_param,
@@ -133,6 +137,79 @@ pub fn anonymous_send_message(
         .returning(AnonymousMessage::as_returning())
         .get_result(&mut conn)
         .expect("Error saving new message");
+
+    // Calculate the Number of chunks
+    let num_chunks = (file_size_param as f64 / CHUNK_SIZE_ANONYMOUS as f64).ceil() as i32;
+
+    // Create multipart upload
+    let create_multipart_upload_output = s3.create_multipart_upload()
+        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .key(file_id_param.to_string())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let upload_id = create_multipart_upload_output
+        .upload_id()
+        .ok_or("Failed to get upload ID")?
+        .to_string();
+
+    // Generate pre-signed S3 upload URLs for each chunk
+    let mut upload_urls: Vec<String> = Vec::new();
+
+    for part_number in 1..=num_chunks {
+        let upload_url = s3.upload_part()
+            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+            .key(file_id_param.to_string())
+            .part_number(part_number)
+            .upload_id(upload_id.clone())
+            .presigned(
+                PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
+                    .map_err(|e| e.to_string())?
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .uri()
+            .to_string();
+
+        upload_urls.push(upload_url.clone());
+    }
+
+    Ok((upload_urls, upload_id))
+}
+
+pub async fn anonymous_send_message_end(
+    file_id_param: Uuid,
+    upload_id_param: String,
+    etags_param: Vec<String>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+    // Prepare the parts for completing the multipart upload
+    let parts = etags_param.iter().map(|p| {
+        CompletedPart::builder()
+            .part_number(etags_param.iter().position(|x| x == p).unwrap() as i32 + 1)
+            .e_tag(p.clone())
+            .build()
+    }).collect::<Vec<_>>();
+
+    // Complete multipart upload
+    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
+        .set_parts(Some(parts))
+        .build();
+
+    let _complete_multipart_upload_res = s3
+        .complete_multipart_upload()
+        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .key(file_id_param.to_string())
+        .multipart_upload(completed_multipart_upload)
+        .upload_id(upload_id_param)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
 
     Ok(())
 }
@@ -259,7 +336,7 @@ pub async fn anonymous_get_message(
     id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<AnonymousMessage, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::anonymousmessages;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -280,5 +357,20 @@ pub async fn anonymous_get_message(
         .execute(&mut conn)
         .expect("Error updating message");
 
-    Ok(anonymousmessage)
+    // Generate a presigned URL for the file in S3
+    // Generate pre-signed S3 download URL
+    let presigned_url = s3
+        .get_object()
+        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .key(anonymousmessage.file_id.to_string())
+        .presigned(
+            PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
+                .map_err(|e| e.to_string())?
+        )
+        .await
+        .map_err(|e| e.to_string())?
+        .uri()
+        .to_string();
+
+    Ok(presigned_url)
 }

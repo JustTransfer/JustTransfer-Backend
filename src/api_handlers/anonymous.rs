@@ -164,23 +164,9 @@ pub async fn anonymous_message_get_download_url(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let message = server::anonymous::anonymous_get_message(id, &state.db, &state.s3)
+    let presigned_url = server::anonymous::anonymous_get_message(id, &state.db, &state.s3)
         .await
         .map_err(|_| ApiError::ServerError)?;
-
-    // Generate pre-signed S3 download URL
-    let presigned_url = state.s3
-        .get_object()
-        .bucket(state.bucket_name_anonymous)
-        .key(message.file_id.to_string())
-        .presigned(
-            PresigningConfig::expires_in(Duration::from_secs(3600))
-                .map_err(|_| ApiError::ServerError)?,
-        )
-        .await
-        .map_err(|_| ApiError::ServerError)?
-        .uri()
-        .to_string();
 
     Ok((StatusCode::OK, Json(AnonymousGetMessageResultDownloadUrl {
         download_url: presigned_url,
@@ -280,16 +266,16 @@ pub async fn upload_anonymous_message(
     let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let message_file_id = Uuid::new_v4(); // Generate a new UUID for the message file
+    let file_id = Uuid::new_v4(); // Generate a new UUID for the message file
 
-    let send_result = server::anonymous::anonymous_send_message(
+    let (upload_urls, upload_id) = server::anonymous::anonymous_send_message(
         req,
         payload.id,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
             .map_err(|_| ApiError::Base64)?,
-        message_file_id,
+        file_id,
         URL_SAFE_NO_PAD.decode(&payload.header)
             .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
@@ -297,50 +283,16 @@ pub async fn upload_anonymous_message(
         payload.creation_time,
         payload.file_size,
         &state.db,
-    ).map_err(|_| ApiError::ServerError)?;
-
-    // Calculate the Number of chunks
-    let num_chunks = (payload.file_size as f64 / CHUNK_SIZE_ANONYMOUS as f64).ceil() as i32;
-
-    // Create multipart upload
-    let create_multipart_upload_output = state.s3.create_multipart_upload()
-        .bucket(state.bucket_name_anonymous.clone())
-        .key(message_file_id.to_string())
-        .send()
+        &state.s3,
+    )
         .await
         .map_err(|_| ApiError::ServerError)?;
-
-    let upload_id = create_multipart_upload_output
-        .upload_id()
-        .ok_or(ApiError::ServerError)?
-        .to_string();
-
-    // Generate pre-signed S3 upload URLs for each chunk
-    let mut upload_urls: Vec<String> = Vec::new();
-
-    for part_number in 1..=num_chunks {
-        let upload_url = state.s3.upload_part()
-            .bucket(state.bucket_name_anonymous.clone())
-            .key(message_file_id.to_string())
-            .part_number(part_number)
-            .upload_id(upload_id.clone())
-            .presigned(
-                PresigningConfig::expires_in(Duration::from_secs(3600))
-                    .map_err(|_| ApiError::ServerError)?,
-            )
-            .await
-            .map_err(|_| ApiError::ServerError)?
-            .uri()
-            .to_string();
-
-        upload_urls.push(upload_url.clone());
-    }
 
     Ok((StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
         upload_urls,
         transfer_id: payload.id,
         upload_id,
-        message_file_id,
+        message_file_id: file_id,
     })))
 }
 
@@ -360,30 +312,16 @@ pub async fn upload_anonymous_message_finish_multipart(
 
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
-
-    // Prepare the parts for completing the multipart upload
-    let parts = payload.etags.iter().map(|p| {
-        CompletedPart::builder()
-            .part_number(payload.etags.iter().position(|x| x == p).unwrap() as i32 + 1)
-            .e_tag(p.clone())
-            .build()
-    }).collect::<Vec<_>>();
-
-    // Complete multipart upload
-    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
-        .set_parts(Some(parts))
-        .build();
-
-    let _complete_multipart_upload_res = state.s3
-        .complete_multipart_upload()
-        .bucket(state.bucket_name_anonymous.clone())
-        .key(file_id.to_string())
-        .multipart_upload(completed_multipart_upload)
-        .upload_id(payload.upload_id.clone())
-        .send()
+    
+    server::anonymous::anonymous_send_message_end(
+        file_id,
+        payload.upload_id,
+        payload.etags,
+        &state.db,
+        &state.s3,
+    )
         .await
         .map_err(|_| ApiError::ServerError)?;
-
-    // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
+    
     Ok((StatusCode::OK, Json(())))
 }
