@@ -1,4 +1,7 @@
 use std::io;
+use aws_sdk_s3::presigning::PresigningConfig;
+use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
 use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
@@ -18,6 +21,7 @@ use crate::schema::messages::dsl::messages;
 use crate::schema::users::dsl::users;
 use crate::schema::users::*;
 use crate::api_handlers::misc::DbPool;
+use crate::error::ApiError;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
 
 ///
@@ -325,12 +329,12 @@ pub fn get_pub_key_sign(
 /// Messages
 ///
 
-pub fn send_message(
+pub async fn send_message(
     sender: &str,
     receiver: &str,
     filename_param: Vec<u8>,
     nonce_filename_param: Vec<u8>,
-    message_id_param: Uuid,
+    file_id_param: Uuid,
     nonce_message_param: Vec<u8>,
     max_downloads_param: i32,
     lifetime_param: i32,
@@ -338,7 +342,8 @@ pub fn send_message(
     //signature_param: Vec<u8>,
     file_size_param: i64,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    s3: &aws_sdk_s3::Client,
+) -> Result<(Vec<String>, String), Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::users;
     use crate::schema::messages;
 
@@ -378,7 +383,7 @@ pub fn send_message(
         receiver_id: &receiver.id,
         cfilename: &filename_param,
         nonce_filename: &nonce_filename_param,
-        file_id: &message_id_param,
+        file_id: &file_id_param,
         nonce_message: &nonce_message_param,
         max_downloads: &max_downloads_param,
         lifetime: &lifetime_param,
@@ -394,6 +399,76 @@ pub fn send_message(
         .returning(Message::as_returning())
         .get_result(&mut conn)
         .expect("Error saving new message");
+
+    // Calculate the Number of chunks
+    let num_chunks = (file_size_param as f64 / CHUNK_SIZE_CONNECTED as f64).ceil() as i32;
+
+    // Create multipart upload
+    let create_multipart_upload_output = s3.create_multipart_upload()
+        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+        .key(file_id_param.to_string())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let upload_id = create_multipart_upload_output.upload_id()
+        .ok_or("Failed to get upload ID from S3 response")?
+        .to_string();
+
+    // Generate pre-signed S3 upload URLs for each chunk
+    let mut upload_urls: Vec<String> = Vec::new();
+
+    for part_number in 1..=num_chunks {
+        let upload_url = s3.upload_part()
+            .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+            .key(file_id_param.to_string())
+            .part_number(part_number)
+            .upload_id(upload_id.clone())
+            .presigned(
+                PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
+                    .map_err(|e| e.to_string())?
+            )
+            .await
+            .map_err(|e| e.to_string())?
+            .uri()
+            .to_string();
+
+        upload_urls.push(upload_url.clone());
+    }
+
+    Ok((upload_urls, upload_id))
+}
+
+pub async fn send_message_finish_multipart(
+    file_id_param: Uuid,
+    upload_id_param: String,
+    etags_param: Vec<String>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+
+    // Prepare the parts for completing the multipart upload
+    let parts = etags_param.iter().map(|p| {
+        CompletedPart::builder()
+            .part_number(etags_param.iter().position(|x| x == p).unwrap() as i32 + 1)
+            .e_tag(p.clone())
+            .build()
+    }).collect::<Vec<_>>();
+
+    // Complete multipart upload
+    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
+        .set_parts(Some(parts))
+        .build();
+
+    let _complete_multipart_upload_res = s3
+        .complete_multipart_upload()
+        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+        .key(file_id_param.to_string())
+        .multipart_upload(completed_multipart_upload)
+        .upload_id(upload_id_param.clone())
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
 
     Ok(())
 }
@@ -521,7 +596,7 @@ pub async fn get_message(
     message_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<Message, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::users;
     use crate::schema::messages;
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -555,5 +630,19 @@ pub async fn get_message(
         .execute(&mut conn)
         .expect("Error updating message");
 
-    Ok(message)
+    // Generate pre-signed S3 download URL
+    let presigned_url = s3
+        .get_object()
+        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+        .key(message.file_id.to_string())
+        .presigned(
+            PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
+                .map_err(|e| e.to_string())?
+        )
+        .await
+        .map_err(|e| e.to_string())?
+        .uri()
+        .to_string();
+
+    Ok(presigned_url)
 }

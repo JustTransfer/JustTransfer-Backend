@@ -8,10 +8,6 @@ use uuid::Uuid;
 use validator::{Validate};
 use tracing::{info, instrument};
 
-use aws_sdk_s3::presigning::PresigningConfig;
-use std::time::Duration;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-
 use crate::server;
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
@@ -334,6 +330,7 @@ pub async fn login_user_end(
     Ok((jar, (StatusCode::OK, content)))
 }
 
+// TODO uncomment it
 /*#[derive(Deserialize, Validate, Debug)]
 pub struct Logout {
     #[validate(custom(function = "validate_username"))]
@@ -477,23 +474,9 @@ pub async fn get_one_message(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let message = server::connected::get_message(&*payload.username, id, &state.db, &state.s3)
+    let presigned_url = server::connected::get_message(&*payload.username, id, &state.db, &state.s3)
         .await
         .map_err(|_| ApiError::ServerNotFound)?;
-
-    // Generate pre-signed S3 download URL
-    let presigned_url = state.s3
-        .get_object()
-        .bucket(state.bucket_name)
-        .key(message.file_id.to_string())
-        .presigned(
-            PresigningConfig::expires_in(Duration::from_secs(3600))
-                .map_err(|_| ApiError::ServerError)?,
-        )
-        .await
-        .map_err(|_| ApiError::ServerError)?
-        .uri()
-        .to_string();
 
     Ok((StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url })))
 }
@@ -545,7 +528,7 @@ pub async fn upload_message(
 
     let file_id = Uuid::new_v4();
 
-    let send_result = server::connected::send_message(
+    let (upload_urls, upload_id) = server::connected::send_message(
         &payload.sender,
         &payload.receiver,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
@@ -562,43 +545,10 @@ pub async fn upload_message(
         //    .map_err(|_| ApiError::Base64)?,
         payload.file_size,
         &state.db,
-    ).map_err(|_| ApiError::ServerError);
-
-    // Calculate the Number of chunks
-    let num_chunks = (payload.file_size as f64 / CHUNK_SIZE_CONNECTED as f64).ceil() as i32;
-
-    // Create multipart upload
-    let create_multipart_upload_output = state.s3.create_multipart_upload()
-        .bucket(state.bucket_name.clone())
-        .key(file_id.to_string())
-        .send()
+        &state.s3,
+    )
         .await
         .map_err(|_| ApiError::ServerError)?;
-
-    let upload_id = create_multipart_upload_output.upload_id()
-        .ok_or(ApiError::ServerError)?
-        .to_string();
-
-    // Generate pre-signed S3 upload URLs for each chunk
-    let mut upload_urls: Vec<String> = Vec::new();
-
-    for part_number in 1..=num_chunks {
-        let upload_url = state.s3.upload_part()
-            .bucket(state.bucket_name.clone())
-            .key(file_id.to_string())
-            .part_number(part_number)
-            .upload_id(upload_id.clone())
-            .presigned(
-                PresigningConfig::expires_in(Duration::from_secs(3600))
-                    .map_err(|_| ApiError::ServerError)?,
-            )
-            .await
-            .map_err(|_| ApiError::ServerError)?
-            .uri()
-            .to_string();
-
-        upload_urls.push(upload_url.clone());
-    }
     
     Ok((StatusCode::CREATED, Json(UploadMessageResult {
         upload_urls: upload_urls,
@@ -627,30 +577,17 @@ pub async fn upload_message_finish_multipart(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    // Prepare the parts for completing the multipart upload
-    let parts = payload.etags.iter().map(|p| {
-        CompletedPart::builder()
-            .part_number(payload.etags.iter().position(|x| x == p).unwrap() as i32 + 1)
-            .e_tag(p.clone())
-            .build()
-    }).collect::<Vec<_>>();
-
-    // Complete multipart upload
-    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
-        .set_parts(Some(parts))
-        .build();
-
-    let _complete_multipart_upload_res = state.s3
-        .complete_multipart_upload()
-        .bucket(state.bucket_name.clone())
-        .key(file_id.to_string())
-        .multipart_upload(completed_multipart_upload)
-        .upload_id(payload.upload_id.clone())
-        .send()
+    server::connected::send_message_finish_multipart(
+        file_id,
+        payload.upload_id,
+        payload.etags,
+        &state.db,
+        &state.s3,
+    )
         .await
         .map_err(|_| ApiError::ServerError)?;
 
-    let update_signature_result= server::connected::update_message_signature(
+    server::connected::update_message_signature(
         file_id,
         URL_SAFE_NO_PAD.decode(&payload.signature)
             .map_err(|_| ApiError::ServerError)?,
