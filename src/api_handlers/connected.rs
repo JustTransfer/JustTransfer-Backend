@@ -1,4 +1,4 @@
-use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json};
+use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Extension, Json};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 
@@ -8,10 +8,10 @@ use uuid::Uuid;
 use validator::{Validate};
 use tracing::{info, instrument};
 
-use crate::server;
+use crate::{api_handlers, server};
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
-use crate::api_handlers::auth::create_jwt;
+use crate::api_handlers::auth::{create_jwt, Claims};
 use crate::consts::*;
 use crate::models::*;
 use crate::error::*;
@@ -140,7 +140,7 @@ pub async fn register_user_end(
 #[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEndUpdate {
     #[validate(custom(function = "validate_username"))]
-    username: String,
+    username: String, // TODO get username from JWT
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -301,7 +301,7 @@ pub async fn login_user_end(
 
     // Create cookie (HttpOnly, Secure for production)
     let cookie = Cookie::build((AUTH_HEADER, token.clone()))
-        .http_only(false)// TODO change
+        .http_only(true)
         .secure(true)
         .same_site(SameSite::Strict)
         .path("/")
@@ -412,12 +412,6 @@ pub async fn get_pub_key_sign(
 /// Download Messages
 ///
 
-#[derive(Deserialize, Validate, Debug)]
-pub struct GetMessage {
-    #[validate(custom(function = "validate_username"))]
-    username: String, // TODO username should be derived from the cookie
-}
-
 #[derive(Serialize)]
 pub struct GetMessageResult {
     messages: Vec<MessageWithUsernamesEncoded>,
@@ -425,14 +419,11 @@ pub struct GetMessageResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_messages(
+    Extension(claims_jwt): Extension<Claims>,
     State(state): State<AppState>,
-    Json(payload): Json<GetMessage>,
 ) -> Result<impl IntoResponse, ApiError> {
-
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let messages = server::connected::get_messages(&*payload.username, &state.db, &state.s3)
+    let messages = server::connected::get_messages(&*claims_jwt.username, &state.db, &state.s3)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -466,15 +457,12 @@ pub struct GetOneMessageResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_one_message(
+    Extension(claims_jwt): Extension<Claims>,
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-    Json(payload): Json<GetMessage>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
-
-    let presigned_url = server::connected::get_message(&*payload.username, id, &state.db, &state.s3)
+    let presigned_url = server::connected::get_message(&*claims_jwt.username, id, &state.db, &state.s3)
         .await
         .map_err(|_| ApiError::ServerNotFound)?;
 
@@ -487,8 +475,6 @@ pub async fn get_one_message(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessage {
-    #[validate(custom(function = "validate_username"))]
-    sender: String,
     #[validate(custom(function = "validate_username"))]
     receiver: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -519,6 +505,7 @@ pub struct UploadMessageResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_message(
+    Extension(claims_jwt): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<UploadMessage>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -529,7 +516,7 @@ pub async fn upload_message(
     let file_id = Uuid::new_v4();
 
     let (upload_urls, upload_id) = server::connected::send_message(
-        &payload.sender,
+        &claims_jwt.username,
         &payload.receiver,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,

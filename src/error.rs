@@ -8,6 +8,8 @@ pub enum ApiError {
     JWTError,
     ServerError,
     ServerNotFound,
+    Unauthorized,
+    Forbidden,
 }
 
 impl IntoResponse for ApiError {
@@ -19,6 +21,8 @@ impl IntoResponse for ApiError {
             ApiError::JWTError => StatusCode::INTERNAL_SERVER_ERROR,
             ApiError::ServerError => StatusCode::INTERNAL_SERVER_ERROR,
             ApiError::ServerNotFound => StatusCode::NOT_FOUND,
+            ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
+            ApiError::Forbidden => StatusCode::FORBIDDEN,
         };
 
         status.into_response()

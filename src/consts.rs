@@ -20,6 +20,7 @@ pub const DUMMY_ANONYMOUS_MESSAGE_ID: Uuid = Uuid::from_u128(0x12345678123456781
 
 /// Const for JWT
 pub const JWT_DURATION_MINUTES: i64 = 60;
+pub const AUTH_HEADER_ANONYMOUS: &str = "anonymous-auth-token";
 pub const AUTH_HEADER: &str = "auth-token";
 
 

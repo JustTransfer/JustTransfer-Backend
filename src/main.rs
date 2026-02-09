@@ -56,7 +56,7 @@ async fn main() {
         .route("/api/message/{id}", post(api_handlers::connected::get_one_message))
         .route("/api/message", post(api_handlers::connected::upload_message))
         .route("/api/message/uploadfinish/{file_id}", post(api_handlers::connected::upload_message_finish_multipart))
-        .layer(middleware::from_fn(api_handlers::auth::jwt_auth))
+        .layer(middleware::from_fn(api_handlers::auth::jwt_auth_connected))
         // Apply JWT auth middleware to all routes defined before this line
 
         .route("/api", get(api_handlers::anonymous::root))
@@ -69,7 +69,11 @@ async fn main() {
         .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::anonymous::upload_anonymous_message_finish_multipart))
         .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous::anonymous_message_get_one_metadata_start))
         .route("/api/anonymous/message/{id}", post(api_handlers::anonymous::anonymous_message_get_one_metadata))
-        .route("/api/anonymous/message/{id}", get(api_handlers::anonymous::anonymous_message_get_download_url))
+        .route(
+            "/api/anonymous/message/{id}", 
+            get(api_handlers::anonymous::anonymous_message_get_download_url)
+                .layer(middleware::from_fn(api_handlers::auth::jwt_auth_anonymous))
+        )
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)

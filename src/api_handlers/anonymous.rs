@@ -1,4 +1,4 @@
-use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler};
+use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler, Extension};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 
 use serde::{Deserialize, Serialize};
@@ -17,7 +17,7 @@ use tracing::instrument;
 use crate::server;
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
-use crate::api_handlers::auth::create_jwt;
+use crate::api_handlers::auth::{create_jwt, Claims};
 use crate::consts::*;
 use crate::error::ApiError;
 use crate::models::*;
@@ -125,7 +125,9 @@ pub async fn anonymous_message_get_one_metadata(
         .map_err(|_| ApiError::JWTError)?;
 
     // Create cookie
-    let cookie = Cookie::build((AUTH_HEADER, token))
+    // The cookie name is "{AUTH_HEADER_ANONYMOUS}_{message_id}" to avoid cookie name conflicts
+    let cookie_name = format!("{}_{}", AUTH_HEADER_ANONYMOUS, message.id);
+    let cookie = Cookie::build((cookie_name, token))
         .http_only(true)
         .secure(true)
         .same_site(SameSite::Strict)
@@ -223,7 +225,7 @@ pub async fn anonymous_message_send_start(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadAnonymousMessageFinish {
-    // TODO validate Uuid
+    // TODO validate UUID
     id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
@@ -312,7 +314,7 @@ pub async fn upload_anonymous_message_finish_multipart(
 
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
-    
+
     server::anonymous::anonymous_send_message_end(
         file_id,
         payload.upload_id,
@@ -322,6 +324,6 @@ pub async fn upload_anonymous_message_finish_multipart(
     )
         .await
         .map_err(|_| ApiError::ServerError)?;
-    
+
     Ok((StatusCode::OK, Json(())))
 }
