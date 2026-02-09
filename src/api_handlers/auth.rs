@@ -2,20 +2,102 @@ use axum::{http::StatusCode, response::Response, RequestExt};
 use serde::{Deserialize, Serialize};
 use axum::extract::{Request, Path};
 use axum::middleware::Next;
+use chrono::Utc;
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 
 use crate::consts::*;
-use crate::consts;
+use crate::{api_handlers, consts};
 use crate::models::*;
+use crate::error::*;
+
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Role {
+    User,
+    Premium,
+    Admin,
+    Anonymous,
+}
+
+impl TryFrom<&str> for Role {
+    type Error = ();
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "user" => Ok(Role::User),
+            "premium" => Ok(Role::Premium),
+            "admin" => Ok(Role::Admin),
+            "anonymous" => Ok(Role::Anonymous),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Role {
+    pub fn max_lifetime(&self) -> i32 {
+        match self {
+            Role::User => MAX_LIFETIME_CONNECTED,
+            Role::Premium => MAX_LIFETIME_CONNECTED_PREMIUM,
+            Role::Admin => MAX_LIFETIME_CONNECTED_PREMIUM,
+            Role::Anonymous => MAX_LIFETIME_ANONYMOUS,
+        }
+    }
+
+    pub fn max_file_size(&self) -> i64 {
+        match self {
+            Role::User => MAX_FILE_SIZE_CONNECTED,
+            Role::Premium => MAX_FILE_SIZE_CONNECTED_PREMIUM,
+            Role::Admin => MAX_FILE_SIZE_CONNECTED_PREMIUM,
+            Role::Anonymous => MAX_FILE_SIZE_ANONYMOUS,
+        }
+    }
+
+    pub fn max_downloads(&self) -> i32 {
+        match self {
+            Role::User => MAX_DOWNLOADS_CONNECTED,
+            Role::Premium => MAX_DOWNLOADS_CONNECTED_PREMIUM,
+            Role::Admin => MAX_DOWNLOADS_CONNECTED_PREMIUM,
+            Role::Anonymous => MAX_DOWNLOADS_ANONYMOUS,
+        }
+    }
+}
+
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub username: String, // username
-    pub role: String, // user role
+    pub username: String,
+    pub role: Role,
     pub exp: usize,  // expiration time as UNIX timestamp
 }
 
-pub fn create_jwt(user_id: &str, role: &str) -> Result<String, Error> {
+impl Claims {
+    pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i32, file_size: i64, max_downloads: i32) -> Result<(), ApiError> {
+        
+        // Creation time
+        let now = Utc::now();
+        if creation_time > now + chrono::Duration::minutes(MAX_TIME_MARGIN) || creation_time < now - chrono::Duration::minutes(MAX_TIME_MARGIN) {
+            return Err(ApiError::Forbidden);
+        }
+        
+        // Lifetime
+        if lifetime < 1 || lifetime > self.role.max_lifetime() {
+            return Err(ApiError::Forbidden);
+        }
+
+        // File size
+        if file_size > self.role.max_file_size() {
+            return Err(ApiError::Forbidden);
+        }
+
+        // Max downloads
+        if max_downloads > self.role.max_downloads() {
+            return Err(ApiError::Forbidden);
+        }
+
+        Ok(())
+    }
+}
+
+pub fn create_jwt(user_id: &str, role: Role) -> Result<String, Error> {
     let expiration = chrono::Utc::now()
         .checked_add_signed(chrono::Duration::minutes(JWT_DURATION_MINUTES))
         .expect("valid timestamp")
@@ -23,7 +105,7 @@ pub fn create_jwt(user_id: &str, role: &str) -> Result<String, Error> {
 
     let claims = Claims {
         username: user_id.to_owned(),
-        role: role.to_owned(),
+        role: role,
         exp: expiration,
     };
 

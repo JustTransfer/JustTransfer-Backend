@@ -15,8 +15,9 @@ CREATE TABLE roles
 -- Fill the roles table with initial data
 INSERT INTO roles (role)
 VALUES ('user'),
-       ('premium_user'),
-       ('admin');
+       ('premium'),
+       ('admin'),
+       ('anonymous');
 
 -- Table users
 CREATE TABLE users

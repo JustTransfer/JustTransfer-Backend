@@ -48,7 +48,7 @@ async fn main() {
 
     // build our application with a route
     let app = Router::new()
-        .route("/api/register/update", post(api_handlers::connected::register_user_end_update))// TODO check if needs auth
+        .route("/api/register/update", post(api_handlers::connected::register_user_end_update))
         //.route("/api/logout", post(api_handlers::logout))
         .route("/api/pubkey/enc", post(api_handlers::connected::get_pub_key_enc))
         .route("/api/pubkey/sign", post(api_handlers::connected::get_pub_key_sign))
@@ -70,7 +70,7 @@ async fn main() {
         .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous::anonymous_message_get_one_metadata_start))
         .route("/api/anonymous/message/{id}", post(api_handlers::anonymous::anonymous_message_get_one_metadata))
         .route(
-            "/api/anonymous/message/{id}", 
+            "/api/anonymous/message/{id}",
             get(api_handlers::anonymous::anonymous_message_get_download_url)
                 .layer(middleware::from_fn(api_handlers::auth::jwt_auth_anonymous))
         )

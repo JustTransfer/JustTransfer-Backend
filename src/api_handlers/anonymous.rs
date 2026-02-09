@@ -1,3 +1,4 @@
+use std::io;
 use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler, Extension};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 
@@ -11,9 +12,12 @@ use validator::{Validate, ValidationError};
 use aws_sdk_s3::presigning::PresigningConfig;
 use std::time::Duration;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use chrono::Utc;
+use tokio::net::unix::pid_t;
 use tower::ServiceExt;
-use tracing::instrument;
+use tracing::{info, instrument};
 
+use crate::api_handlers::auth;
 use crate::server;
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
@@ -29,6 +33,15 @@ use crate::models::*;
 #[derive(Serialize)]
 pub struct RootResponse {
     result: String,
+    max_lifetime_anonymous: i32,
+    max_file_size_anonymous: i64,
+    max_downloads_anonymous: i32,
+    max_lifetime_connected: i32,
+    max_file_size_connected: i64,
+    max_downloads_connected: i32,
+    max_lifetime_connected_premium: i32,
+    max_file_size_connected_premium: i64,
+    max_downloads_connected_premium: i32,
 }
 
 #[instrument(err(Debug))]
@@ -37,6 +50,15 @@ pub async fn root() -> Result<impl IntoResponse, ApiError> {
         StatusCode::OK,
         Json(RootResponse {
             result: "JustTransfer API is running".to_string(),
+            max_lifetime_anonymous: MAX_LIFETIME_ANONYMOUS,
+            max_file_size_anonymous: MAX_FILE_SIZE_ANONYMOUS,
+            max_downloads_anonymous: MAX_DOWNLOADS_ANONYMOUS,
+            max_lifetime_connected: MAX_LIFETIME_CONNECTED,
+            max_file_size_connected: MAX_FILE_SIZE_CONNECTED,
+            max_downloads_connected: MAX_DOWNLOADS_CONNECTED,
+            max_lifetime_connected_premium: MAX_LIFETIME_CONNECTED_PREMIUM,
+            max_file_size_connected_premium: MAX_FILE_SIZE_CONNECTED_PREMIUM,
+            max_downloads_connected_premium: MAX_DOWNLOADS_CONNECTED_PREMIUM,
         }),
     ))
 }
@@ -120,8 +142,7 @@ pub async fn anonymous_message_get_one_metadata(
 
 
     // Create cookie jar
-    let role = "anonymous";
-    let token = create_jwt(&*message.id.to_string(), role)
+    let token = create_jwt(&*message.id.to_string(), auth::Role::Anonymous)
         .map_err(|_| ApiError::JWTError)?;
 
     // Create cookie
@@ -255,12 +276,22 @@ pub struct UploadAnonymousMessageFinishResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_anonymous_message(
+    Extension(claims_jwt): Extension<Claims>, // TODO problem no cookie
     State(state): State<AppState>,
     Json(payload): Json<UploadAnonymousMessageFinish>,
 ) -> Result<impl IntoResponse, ApiError> {
 
+    info!("lllllll");
+
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    info!("Payload validated");
+
+    // Authorize the upload based on the user role and the provided parameters
+    claims_jwt.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+
+    info!("Claims validated");
 
     // Decode the base64 encoded fields
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
@@ -289,6 +320,8 @@ pub async fn upload_anonymous_message(
     )
         .await
         .map_err(|_| ApiError::ServerError)?;
+
+    info!("UploadUrls validated");
 
     Ok((StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
         upload_urls,

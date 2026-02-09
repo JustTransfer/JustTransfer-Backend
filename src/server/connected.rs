@@ -349,23 +349,6 @@ pub async fn send_message(
 
     let mut conn = pool.get().expect("Failed to get DB connection");
 
-    // Check if the creation time is correct
-    let now = Utc::now();
-    if creation_time_param > now + Duration::minutes(MAX_TIME_MARGIN) || creation_time_param < now - Duration::minutes(MAX_TIME_MARGIN) {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
-            "Creation time is not correct",
-        )));
-    }
-
-    // Check if the lifetime is correct
-    if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_TRANSFER_CONNECTED {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
-            "Lifetime is not correct",
-        )));
-    }
-
     let sender = users::table
         .filter(users::username.eq(sender))
         .first::<User>(&mut conn)

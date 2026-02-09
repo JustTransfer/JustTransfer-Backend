@@ -1,8 +1,10 @@
+use std::io;
 use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Extension, Json};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
+use chrono::{Duration, Utc};
 use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate};
@@ -139,8 +141,8 @@ pub async fn register_user_end(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEndUpdate {
-    #[validate(custom(function = "validate_username"))]
-    username: String, // TODO get username from JWT
+    //#[validate(custom(function = "validate_username"))]
+    //username: String, // TODO get username from JWT
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -159,6 +161,7 @@ pub struct RegisterUserEndUpdate {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn register_user_end_update(
+    Extension(claims_jwt): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -193,7 +196,7 @@ pub async fn register_user_end_update(
     
     let server_registration_finish = server::connected::server_registration_finish_update(
         client_registration_finish,
-        &*payload.username,
+        &*claims_jwt.username,
         cpriv_enc,
         nonce_priv_enc,
         pub_enc,
@@ -295,8 +298,12 @@ pub async fn login_user_end(
     let user = server::connected::get_user(&*payload.username, &state.db)
         .map_err(|_| ApiError::ServerError)?;
 
+    // Get the role enum from the string
+    let role = api_handlers::auth::Role::try_from(user.role.as_str())
+        .map_err(|_| ApiError::ServerError)?;
+
     // Generate JWT token
-    let token = create_jwt(&payload.username, &user.role)
+    let token = create_jwt(&payload.username, role)
         .map_err(|_| ApiError::JWTError)?;
 
     // Create cookie (HttpOnly, Secure for production)
@@ -514,6 +521,9 @@ pub async fn upload_message(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     let file_id = Uuid::new_v4();
+
+    // Authorize the upload based on the user role and the provided parameters
+    claims_jwt.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
 
     let (upload_urls, upload_id) = server::connected::send_message(
         &claims_jwt.username,

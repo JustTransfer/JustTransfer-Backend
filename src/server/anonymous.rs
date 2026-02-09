@@ -13,7 +13,7 @@ use tracing::info;
 use uuid::Uuid;
 
 
-use crate::consts::{CHUNK_SIZE_ANONYMOUS, DUMMY_ANONYMOUS_MESSAGE_ID, DUMMY_PASSWORD_FILE, MAX_LIFETIME_TRANSFER_ANONYMOUS, MAX_TIME_MARGIN, S3_BUCKET_NAME_ANONYMOUS};
+use crate::consts::*;
 use crate::models::{AnonymousMessage, AnonymousMessageMetadata, Message, NewAnonymousMessage};
 use crate::schema::anonymousmessages::dsl::anonymousmessages;
 use crate::schema::messages::dsl::messages;
@@ -96,23 +96,6 @@ pub async fn anonymous_send_message(
     use crate::schema::anonymousmessages;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
-
-    // Check if the creation time is correct
-    let now = Utc::now();
-    if creation_time_param > now + Duration::minutes(MAX_TIME_MARGIN) || creation_time_param < now - Duration::minutes(MAX_TIME_MARGIN) {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
-            "Creation time is not correct",
-        )));
-    }
-
-    // Check if the lifetime is correct
-    if lifetime_param < 1 || lifetime_param > MAX_LIFETIME_TRANSFER_ANONYMOUS {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
-            "Lifetime is not correct",
-        )));
-    }
 
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
