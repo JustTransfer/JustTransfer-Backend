@@ -17,8 +17,8 @@ use tokio::net::unix::pid_t;
 use tower::ServiceExt;
 use tracing::{info, instrument};
 
-use crate::api_handlers::auth;
-use crate::server;
+use crate::api_handlers::*;
+use crate::{api_handlers, server};
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
 use crate::api_handlers::auth::{create_jwt, Claims};
@@ -140,22 +140,8 @@ pub async fn anonymous_message_get_one_metadata(
         .await
         .map_err(|_| ApiError::ServerError)?;
 
-
     // Create cookie jar
-    let token = create_jwt(&*message.id.to_string(), auth::Role::Anonymous)
-        .map_err(|_| ApiError::JWTError)?;
-
-    // Create cookie
-    // The cookie name is "{AUTH_HEADER_ANONYMOUS}_{message_id}" to avoid cookie name conflicts
-    let cookie_name = format!("{}_{}", AUTH_HEADER_ANONYMOUS, message.id);
-    let cookie = Cookie::build((cookie_name, token))
-        .http_only(true)
-        .secure(true)
-        .same_site(SameSite::Strict)
-        .path("/")
-        .finish();
-
-    let jar = CookieJar::new().add(cookie);
+    let jar = api_handlers::auth::create_anonymous_cookie(&message.id)?;
 
     let resp = Json(AnonymousGetMessageResult {
         message: AnonymousMessageMetadataEncoded {
@@ -276,22 +262,16 @@ pub struct UploadAnonymousMessageFinishResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_anonymous_message(
-    Extension(claims_jwt): Extension<Claims>, // TODO problem no cookie
+    Extension(claims_jwt): Extension<Claims>, // TODO problem no cookie -> refactor cookie creation and create if after successful upload
     State(state): State<AppState>,
     Json(payload): Json<UploadAnonymousMessageFinish>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    info!("lllllll");
-
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    info!("Payload validated");
-
     // Authorize the upload based on the user role and the provided parameters
     claims_jwt.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
-
-    info!("Claims validated");
 
     // Decode the base64 encoded fields
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
@@ -320,8 +300,6 @@ pub async fn upload_anonymous_message(
     )
         .await
         .map_err(|_| ApiError::ServerError)?;
-
-    info!("UploadUrls validated");
 
     Ok((StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
         upload_urls,

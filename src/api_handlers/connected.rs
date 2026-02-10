@@ -270,7 +270,6 @@ pub struct LoginEndResult {
     pub_sign: String,
     cpriv_sign: String,
     nonce_priv_sign: String,
-    auth_token: String,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -303,18 +302,7 @@ pub async fn login_user_end(
         .map_err(|_| ApiError::ServerError)?;
 
     // Generate JWT token
-    let token = create_jwt(&payload.username, role)
-        .map_err(|_| ApiError::JWTError)?;
-
-    // Create cookie (HttpOnly, Secure for production)
-    let cookie = Cookie::build((AUTH_HEADER, token.clone()))
-        .http_only(true)
-        .secure(true)
-        .same_site(SameSite::Strict)
-        .path("/")
-        .finish();
-
-    let jar = CookieJar::new().add(cookie);
+    let jar = api_handlers::auth::create_connected_cookie(&user.username, role)?;
 
     // Encode the keys to base64
     let pub_enc = URL_SAFE_NO_PAD.encode(server_login_finish.0);
@@ -331,7 +319,6 @@ pub async fn login_user_end(
         pub_sign,
         cpriv_sign,
         nonce_priv_sign,
-        auth_token: token,
     });
 
     Ok((jar, (StatusCode::OK, content)))

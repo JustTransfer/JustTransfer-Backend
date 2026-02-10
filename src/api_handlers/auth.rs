@@ -2,11 +2,15 @@ use axum::{http::StatusCode, response::Response, RequestExt};
 use serde::{Deserialize, Serialize};
 use axum::extract::{Request, Path};
 use axum::middleware::Next;
+use axum_extra::extract::cookie::{Cookie, SameSite};
+use axum_extra::extract::CookieJar;
 use chrono::Utc;
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
+use uuid::Uuid;
 
 use crate::consts::*;
 use crate::{api_handlers, consts};
+use crate::api_handlers::auth;
 use crate::models::*;
 use crate::error::*;
 
@@ -95,6 +99,42 @@ impl Claims {
 
         Ok(())
     }
+}
+
+pub fn create_anonymous_cookie (message_id: &Uuid) -> Result<CookieJar, ApiError> {
+
+    let token = create_jwt(&*message_id.to_string(), auth::Role::Anonymous)
+        .map_err(|_| ApiError::JWTError)?;
+
+    let cookie_name = format!("{}_{}", AUTH_HEADER_ANONYMOUS, message_id);
+    let cookie = Cookie::build((cookie_name, token))
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .finish();
+
+    let jar = CookieJar::new().add(cookie);
+
+    Ok(jar)
+}
+
+pub fn create_connected_cookie (username: &String, role: Role) -> Result<CookieJar, ApiError> {
+
+    let token = create_jwt(&username, role)
+        .map_err(|_| ApiError::JWTError)?;
+
+    // Create cookie (HttpOnly, Secure for production)
+    let cookie = Cookie::build((AUTH_HEADER, token.clone()))
+        .http_only(true)
+        .secure(true)
+        .same_site(SameSite::Strict)
+        .path("/")
+        .finish();
+
+    let jar = CookieJar::new().add(cookie);
+
+    Ok(jar)
 }
 
 pub fn create_jwt(user_id: &str, role: Role) -> Result<String, Error> {
