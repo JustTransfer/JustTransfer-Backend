@@ -262,7 +262,6 @@ pub struct UploadAnonymousMessageFinishResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_anonymous_message(
-    Extension(claims_jwt): Extension<Claims>, // TODO problem no cookie -> refactor cookie creation and create if after successful upload
     State(state): State<AppState>,
     Json(payload): Json<UploadAnonymousMessageFinish>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -270,8 +269,16 @@ pub async fn upload_anonymous_message(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
+    // Create JWT token
+    let jar = api_handlers::auth::create_anonymous_cookie(&payload.id)?;
+    let claims = Claims {
+        username: payload.id.to_string(),
+        role: auth::Role::Anonymous,
+        exp: 0, // Not used in this case to validate the following
+    };
+
     // Authorize the upload based on the user role and the provided parameters
-    claims_jwt.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+    claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
 
     // Decode the base64 encoded fields
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
@@ -301,12 +308,16 @@ pub async fn upload_anonymous_message(
         .await
         .map_err(|_| ApiError::ServerError)?;
 
-    Ok((StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
+    Ok((
+        jar,
+        (
+        StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
         upload_urls,
         transfer_id: payload.id,
         upload_id,
         message_file_id: file_id,
     })))
+    )
 }
 
 #[derive(Deserialize, Validate, Debug)]

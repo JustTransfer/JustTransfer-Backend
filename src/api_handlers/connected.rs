@@ -136,7 +136,10 @@ pub async fn register_user_end(
         &state.db,
     ).map_err(|_| ApiError::ServerError)?;
 
-    Ok(StatusCode::CREATED)
+    // Create JWT token for the new user
+    let jar = api_handlers::auth::create_connected_cookie(&payload.username, api_handlers::auth::Role::User)?;
+
+    Ok((jar, StatusCode::CREATED))
 }
 
 #[derive(Deserialize, Validate, Debug)]
