@@ -258,12 +258,12 @@ pub async fn server_login_start_anonymous(
     Ok(server_login_start_result.message)
 }
 
-pub async fn anonymous_get_message_metadata(
+pub async fn server_login_end_anonymous(
     id_param: Uuid,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<AnonymousMessageMetadata, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use crate::schema::anonymousmessages;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -292,6 +292,19 @@ pub async fn anonymous_get_message_metadata(
             client_login_finish_result,
             ServerLoginParameters::default(),
         ).map_err(|e| e.to_string())?;
+
+
+    Ok(())
+}
+
+pub async fn anonymous_get_message_metadata(
+    id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<AnonymousMessageMetadata, Box<dyn std::error::Error + Send + Sync>> {
+    use crate::schema::anonymousmessages;
+
+    let mut conn = pool.get().expect("Failed to get DB connection");
 
     let messages_get = anonymousmessages::table
         .filter(anonymousmessages::id.eq(id_param))

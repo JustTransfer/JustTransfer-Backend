@@ -67,8 +67,13 @@ async fn main() {
         .route("/api/anonymous/message/start", post(api_handlers::anonymous::anonymous_message_send_start))
         .route("/api/anonymous/message", post(api_handlers::anonymous::upload_anonymous_message))
         .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::anonymous::upload_anonymous_message_finish_multipart))
-        .route("/api/anonymous/message/{id}/start", post(api_handlers::anonymous::anonymous_message_get_one_metadata_start))
-        .route("/api/anonymous/message/{id}", post(api_handlers::anonymous::anonymous_message_get_one_metadata))
+        .route("/api/anonymous/message/{id}/login/start", post(api_handlers::anonymous::anonymous_message_login_start))
+        .route("/api/anonymous/message/{id}/login/end", post(api_handlers::anonymous::anonymous_message_login_end))
+        .route(
+            "/api/anonymous/message/{id}/metadata",
+            post(api_handlers::anonymous::anonymous_message_get_one_metadata)
+                .layer(middleware::from_fn(api_handlers::auth::jwt_auth_anonymous))
+        )
         .route(
             "/api/anonymous/message/{id}",
             get(api_handlers::anonymous::anonymous_message_get_download_url)

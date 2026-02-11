@@ -68,27 +68,27 @@ pub async fn root() -> Result<impl IntoResponse, ApiError> {
 ///
 
 #[derive(Deserialize, Validate, Debug)]
-pub struct AnonymousGetMessageStart {
+pub struct AnonymousLoginStart {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    client_registration_start: String,
+    client_login_start: String,
 }
 
 #[derive(Serialize)]
-pub struct AnonymousGetMessageResultStart {
+pub struct AnonymousLoginStartResult {
     result: String,
 }
 
 #[instrument(skip(state), err(Debug))]
-pub async fn anonymous_message_get_one_metadata_start(
+pub async fn anonymous_message_login_start(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-    Json(payload): Json<AnonymousGetMessageStart>,
+    Json(payload): Json<AnonymousLoginStart>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start)
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_start)
         .map_err(|_| ApiError::Base64)?;
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
@@ -104,16 +104,41 @@ pub async fn anonymous_message_get_one_metadata_start(
 
     Ok((
         StatusCode::OK,
-        Json(AnonymousGetMessageResultStart {
+        Json(AnonymousLoginStartResult {
             result: URL_SAFE_NO_PAD.encode(server_login_start.serialize()),
         }),
     ))
 }
 
 #[derive(Deserialize, Validate, Debug)]
-pub struct AnonymousGetMessage {
+pub struct AnonymousLoginEnd {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_login_finish_result: String,
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn anonymous_message_login_end(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(payload): Json<AnonymousLoginEnd>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result)
+        .map_err(|_| ApiError::Base64)?;
+    let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
+
+    server::anonymous::server_login_end_anonymous(id, req, &state.db, &state.s3)
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+
+    // Create cookie jar
+    let jar = api_handlers::auth::create_anonymous_cookie(&id)?;
+
+    Ok((jar, (StatusCode::OK, Json(()))))
 }
 
 #[derive(Serialize)]
@@ -125,23 +150,11 @@ pub struct AnonymousGetMessageResult {
 pub async fn anonymous_message_get_one_metadata(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-    Json(payload): Json<AnonymousGetMessage>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
-
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result)
-        .map_err(|_| ApiError::Base64)?;
-    let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
-        .map_err(|_| ApiError::Opaque)?;
-
-    let message = server::anonymous::anonymous_get_message_metadata(id, req, &state.db, &state.s3)
+    let message = server::anonymous::anonymous_get_message_metadata(id, &state.db, &state.s3)
         .await
         .map_err(|_| ApiError::ServerError)?;
-
-    // Create cookie jar
-    let jar = api_handlers::auth::create_anonymous_cookie(&message.id)?;
 
     let resp = Json(AnonymousGetMessageResult {
         message: AnonymousMessageMetadataEncoded {
@@ -159,7 +172,7 @@ pub async fn anonymous_message_get_one_metadata(
         },
     });
 
-    Ok((jar, (StatusCode::OK, resp)))
+    Ok((StatusCode::OK, resp))
 }
 
 #[derive(Serialize)]
