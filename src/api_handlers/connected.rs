@@ -30,11 +30,18 @@ pub struct UserInfoResult {
 }
 #[instrument(skip(state), err(Debug))]
 pub async fn get_user_info(
+    Extension(claims_jwt): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
+    let user_info = server::connected::get_user(&*claims_jwt.username, &state.db)
+        .map_err(|_| ApiError::ServerNotFound)?;
 
-    Ok(())
+    Ok((StatusCode::OK, Json(UserInfoResult {
+        username: user_info.username,
+        email: user_info.email,
+        role: user_info.role,
+    })))
 }
 
 ///
