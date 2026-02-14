@@ -7,6 +7,7 @@ use axum_extra::extract::CookieJar;
 use chrono::Utc;
 use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 use uuid::Uuid;
+use std::fmt;
 
 use crate::consts::*;
 use crate::{api_handlers, consts};
@@ -33,6 +34,18 @@ impl TryFrom<&str> for Role {
             "anonymous" => Ok(Role::Anonymous),
             _ => Err(()),
         }
+    }
+}
+
+impl fmt::Display for Role {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let s = match self {
+            Role::User => "user",
+            Role::Premium => "premium",
+            Role::Admin => "admin",
+            Role::Anonymous => "anonymous",
+        };
+        write!(f, "{s}")
     }
 }
 
@@ -93,7 +106,7 @@ impl Claims {
         }
 
         // Max downloads
-        if max_downloads > self.role.max_downloads() {
+        if max_downloads < 1 || max_downloads > self.role.max_downloads() {
             return Err(ApiError::Forbidden);
         }
 

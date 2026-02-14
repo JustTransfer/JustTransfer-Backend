@@ -45,7 +45,7 @@ pub struct RootResponse {
 }
 
 #[instrument(err(Debug))]
-pub async fn root() -> Result<impl IntoResponse, ApiError> {
+pub async fn config() -> Result<impl IntoResponse, ApiError> {
     Ok((
         StatusCode::OK,
         Json(RootResponse {

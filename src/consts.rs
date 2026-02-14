@@ -29,8 +29,8 @@ pub const AUTH_HEADER: &str = "auth-token";
 
 
 /// Const for Anonymous Transfer
-pub const MAX_LIFETIME_ANONYMOUS: i32 = 7; // days
-pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 40 * 1024 * 1024 * 1024; // 40 GB
+pub const MAX_LIFETIME_ANONYMOUS: i32 = 3; // days
+pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 500 * 1024 * 1024; // 500 MB
 pub const CHUNK_SIZE_ANONYMOUS: i64 = 10 * 1024 * 1024; // 10 MB
 pub const MAX_DOWNLOADS_ANONYMOUS: i32 = 3;
 

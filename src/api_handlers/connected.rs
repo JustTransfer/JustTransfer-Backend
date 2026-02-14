@@ -19,6 +19,25 @@ use crate::models::*;
 use crate::error::*;
 
 ///
+/// User Info
+///
+
+#[derive(Serialize)]
+pub struct UserInfoResult {
+    username: String,
+    email: String,
+    role: String,
+}
+#[instrument(skip(state), err(Debug))]
+pub async fn get_user_info(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+
+    Ok(())
+}
+
+///
 /// Registration
 ///
 
@@ -85,6 +104,11 @@ pub struct RegisterUserEnd {
     pub_sign: String,
 }
 
+#[derive(Serialize)]
+pub struct RegisterEndResult {
+    role: String,
+}
+
 #[instrument(skip(state), err(Debug))]
 pub async fn register_user_end(
     State(state): State<AppState>,
@@ -139,7 +163,11 @@ pub async fn register_user_end(
     // Create JWT token for the new user
     let jar = api_handlers::auth::create_connected_cookie(&payload.username, api_handlers::auth::Role::User)?;
 
-    Ok((jar, StatusCode::CREATED))
+    let content = Json(RegisterEndResult {
+        role: api_handlers::auth::Role::User.to_string(),
+    });
+
+    Ok((jar, (StatusCode::OK, content)))
 }
 
 #[derive(Deserialize, Validate, Debug)]
@@ -273,6 +301,7 @@ pub struct LoginEndResult {
     pub_sign: String,
     cpriv_sign: String,
     nonce_priv_sign: String,
+    role: String,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -322,6 +351,7 @@ pub async fn login_user_end(
         pub_sign,
         cpriv_sign,
         nonce_priv_sign,
+        role: user.role,
     });
 
     Ok((jar, (StatusCode::OK, content)))

@@ -48,6 +48,7 @@ async fn main() {
 
     // build our application with a route
     let app = Router::new()
+        .route("/api/user", get(api_handlers::connected::get_user_info))
         .route("/api/register/update", post(api_handlers::connected::register_user_end_update))
         //.route("/api/logout", post(api_handlers::logout))
         .route("/api/pubkey/enc", post(api_handlers::connected::get_pub_key_enc))
@@ -59,7 +60,7 @@ async fn main() {
         .layer(middleware::from_fn(api_handlers::auth::jwt_auth_connected))
         // Apply JWT auth middleware to all routes defined before this line
 
-        .route("/api", get(api_handlers::anonymous::root))
+        .route("/api/config", get(api_handlers::anonymous::config))
         .route("/api/register/start", post(api_handlers::connected::register_user_start))
         .route("/api/register/end", post(api_handlers::connected::register_user_end))
         .route("/api/login/start", post(api_handlers::connected::login_user_start))
