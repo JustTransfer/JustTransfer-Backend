@@ -22,6 +22,7 @@ dependencies = [
  "rand",
  "serde",
  "sha2",
+ "thiserror",
  "tokio",
  "tower",
  "tower-http",

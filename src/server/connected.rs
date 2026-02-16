@@ -21,7 +21,7 @@ use crate::schema::messages::dsl::messages;
 use crate::schema::users::dsl::users;
 use crate::schema::users::*;
 use crate::api_handlers::misc::DbPool;
-use crate::error::ApiError;
+use crate::error::{ApiError, ServerError};
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
 
 ///
@@ -32,16 +32,17 @@ pub fn server_registration_start(
     username_param: &str,
     client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<RegistrationResponse<DefaultCipherSuite>, Box<dyn std::error::Error>> {
+) -> Result<RegistrationResponse<DefaultCipherSuite>, ServerError> {
 
-    let server_opaque = get_opaque_settings(pool)?;
+    let server_opaque = get_opaque_settings(pool)
+        .map_err(|_| ServerError::Internal)?;
 
     let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
         &server_opaque,
         client_registration_start_result,
         username_param.as_bytes(),
     )
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(server_registration_start_result.message)
 }
@@ -57,45 +58,53 @@ pub fn server_registration_finish(
     nonce_priv_sign: Vec<u8>,
     pub_sign: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().expect("Failed to get DB connection");
 
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
+    // Check if username is already taken
     let user: Option<User> = users::table
         .filter(users::username.eq(username_param))
         .first::<User>(&mut conn)
         .optional()?;
 
-    // TODO also check if email already exists
     if user.is_some() {
         // User already exists
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::AddrInUse,
-            "User already exists",
-        )));
-    } else {
-        let new_user = NewUser {
-            username: &username_param.to_string(),
-            email: &email_param.to_string(),
-            password_file: &password_file_param.serialize().to_vec(),
-            role: &"user".to_string(),
-            public_key_enc: &pub_enc.to_vec(),
-            nonce_enc: &nonce_priv_enc.to_vec(),
-            cipher_private_key_enc: &cpriv_enc,
-            public_key_sign: &pub_sign.to_vec(),
-            nonce_sign: &nonce_priv_sign.to_vec(),
-            cipher_private_key_sign: &cpriv_sign,
-        };
+        return Err(ServerError::UsernameTaken);
+    }
 
-        diesel::insert_into(users::table)
+    // Check if email is already used
+    let user_email: Option<User> = users::table
+        .filter(users::email.eq(email_param))
+        .first::<User>(&mut conn)
+        .optional()?;
+
+    if user_email.is_some() {
+        // Email already used
+        return Err(ServerError::EmailTaken);
+    }
+
+    let new_user = NewUser {
+        username: &username_param.to_string(),
+        email: &email_param.to_string(),
+        password_file: &password_file_param.serialize().to_vec(),
+        role: &"user".to_string(),
+        public_key_enc: &pub_enc.to_vec(),
+        nonce_enc: &nonce_priv_enc.to_vec(),
+        cipher_private_key_enc: &cpriv_enc,
+        public_key_sign: &pub_sign.to_vec(),
+        nonce_sign: &nonce_priv_sign.to_vec(),
+        cipher_private_key_sign: &cpriv_sign,
+    };
+
+    diesel::insert_into(users::table)
             .values(&new_user)
             .returning(User::as_returning())
             .get_result(&mut conn)
             .expect("Error saving new post");
-    }
 
     Ok(())
 }
@@ -110,7 +119,7 @@ pub fn server_registration_finish_update(
     nonce2: Vec<u8>,
     pub2: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -124,7 +133,7 @@ pub fn server_registration_finish_update(
         .select(users::id)
         .first::<i32>(&mut conn)
         .optional()?
-        .ok_or("User not found")?;
+        .ok_or(ServerError::Internal)?;
 
     let user = diesel::update(users.find(user_id))
         .set((
@@ -151,9 +160,7 @@ pub fn server_login_start(
     username_param: &str,
     client_login_start_result: CredentialRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<CredentialResponse<DefaultCipherSuite>,
-    Box<dyn std::error::Error>,
-> {
+) -> Result<CredentialResponse<DefaultCipherSuite>, ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -167,16 +174,19 @@ pub fn server_login_start(
         let password_file_bytes = &user.password_file;
 
         Some(
-            ServerRegistration::<DefaultCipherSuite>::deserialize(password_file_bytes)?
+            ServerRegistration::<DefaultCipherSuite>::deserialize(password_file_bytes)
+                .map_err(|_| ServerError::Internal)?,
         )
     } else {
         // Deserialize a dummy password file to prevent user enumeration
-        ServerRegistration::<DefaultCipherSuite>::deserialize(&DUMMY_PASSWORD_FILE)?;
+        ServerRegistration::<DefaultCipherSuite>::deserialize(&DUMMY_PASSWORD_FILE)
+            .map_err(|_| ServerError::Internal)?;
 
         None
     };
 
-    let server_opaque = get_opaque_settings(pool)?;
+    let server_opaque = get_opaque_settings(pool)
+        .map_err(|_| ServerError::Internal)?;
 
     let mut server_rng = OsRng;
     let server_login_start_result = ServerLogin::start(
@@ -187,7 +197,7 @@ pub fn server_login_start(
         username_param.as_bytes(),
         ServerLoginParameters::default(),
     )
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| ServerError::Internal)?;
 
     // Use the dummy user id if the user does not exist to prevent user enumeration
     let user_id = if let Some(user) = &user_opt {
@@ -219,7 +229,7 @@ pub fn server_login_finish(
         Vec<u8>,
         [u8; SYM_LEN_NONCE],
     ),
-    Box<dyn std::error::Error>,
+    ServerError
 > {
     use crate::schema::users;
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -232,8 +242,8 @@ pub fn server_login_finish(
             .select(users::server_login)
             .first::<Option<Vec<u8>>>(&mut conn)
             .optional()?
-            .ok_or("User not found")?
-            .ok_or("No login in progress for this user")?;
+            .ok_or(ServerError::Internal)?
+            .ok_or(ServerError::Internal)?;
 
         diesel::update(users.filter(users::username.eq(username_param)))
             .set(users::server_login.eq::<Option<Vec<u8>>>(None))
@@ -241,19 +251,19 @@ pub fn server_login_finish(
             .expect("Error updating anonymous message");
 
         ServerLogin::deserialize(&server_login_state_bytes)
-            .map_err(|e| e.to_string())?
+            .map_err(|_| ServerError::Internal)?
     };
 
     let server_login_finish_result = server_login_start_result.finish(
         client_login_finish_result,
         ServerLoginParameters::default(),
-    ).map_err(|e| e.to_string())?;
+    ).map_err(|_| ServerError::Internal)?;
 
     let user = users::table
         .filter(users::username.eq(username_param))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or("User not found")?;
+        .ok_or(ServerError::Internal)?;
 
     Ok((
         user.public_key_enc.as_slice().try_into().unwrap(),
@@ -269,7 +279,7 @@ pub fn server_login_finish(
 /*pub fn logout(
     &mut self,
     username_param: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), ServerError> {
 
     self.disconnect_user(username_param)?;
 
@@ -283,7 +293,7 @@ pub fn server_login_finish(
 pub fn get_user(
     username_param: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<User, Box<dyn std::error::Error>> {
+) -> Result<User, ServerError> {
     use crate::schema::users;
 
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -291,7 +301,7 @@ pub fn get_user(
         .filter(users::username.eq(username_param))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or("User not found")?;
+        .ok_or(ServerError::Internal)?;
 
     Ok(user)
 }
@@ -299,14 +309,14 @@ pub fn get_user(
 pub fn get_pub_key_enc(
     username_pub_key: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<[u8; ENC_KEY_LEN_PUB], Box<dyn std::error::Error>> {
+) -> Result<[u8; ENC_KEY_LEN_PUB], ServerError> {
     let mut conn = pool.get().expect("Failed to get DB connection");
 
     let user = crate::schema::users::table
         .filter(crate::schema::users::username.eq(username_pub_key))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or("User not found")?;
+        .ok_or(ServerError::Internal)?;
 
     Ok(user.public_key_enc.as_slice().try_into()?)
 }
@@ -314,14 +324,14 @@ pub fn get_pub_key_enc(
 pub fn get_pub_key_sign(
     username_pub_key: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<[u8; SIGN_KEY_LEN_PUB], Box<dyn std::error::Error>> {
+) -> Result<[u8; SIGN_KEY_LEN_PUB], ServerError> {
     let mut conn = pool.get().expect("Failed to get DB connection");
 
     let user = crate::schema::users::table
         .filter(crate::schema::users::username.eq(username_pub_key))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or("User not found")?;
+        .ok_or(ServerError::Internal)?;
 
     Ok(user.public_key_sign.as_slice().try_into()?)
 }
@@ -344,7 +354,7 @@ pub async fn send_message(
     file_size_param: i64,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<(Vec<String>, String), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(Vec<String>, String), ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
 
@@ -354,13 +364,13 @@ pub async fn send_message(
         .filter(users::username.eq(sender))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or("Sender not found")?;
+        .ok_or(ServerError::Internal)?;
 
     let receiver = users::table
         .filter(users::username.eq(receiver))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or("Receiver not found")?;
+        .ok_or(ServerError::Internal)?;
 
     let new_message = NewMessage {
         sender_id: &sender.id,
@@ -393,10 +403,10 @@ pub async fn send_message(
         .key(file_id_param.to_string())
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| ServerError::Internal)?;
 
     let upload_id = create_multipart_upload_output.upload_id()
-        .ok_or("Failed to get upload ID from S3 response")?
+        .ok_or(ServerError::Internal)?
         .to_string();
 
     // Generate pre-signed S3 upload URLs for each chunk
@@ -410,10 +420,10 @@ pub async fn send_message(
             .upload_id(upload_id.clone())
             .presigned(
                 PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
-                    .map_err(|e| e.to_string())?
+                    .map_err(|_| ServerError::Internal)?
             )
             .await
-            .map_err(|e| e.to_string())?
+            .map_err(|_| ServerError::Internal)?
             .uri()
             .to_string();
 
@@ -429,7 +439,7 @@ pub async fn send_message_finish_multipart(
     etags_param: Vec<String>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), ServerError> {
 
     // Prepare the parts for completing the multipart upload
     let parts = etags_param.iter().map(|p| {
@@ -452,7 +462,7 @@ pub async fn send_message_finish_multipart(
         .upload_id(upload_id_param.clone())
         .send()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
@@ -461,7 +471,7 @@ pub fn update_message_signature(
     file_id_param: Uuid,
     signature_param: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), ServerError> {
 
     use crate::schema::messages;
 
@@ -478,7 +488,7 @@ async fn delete_invalid_messages_for_user(
     pool: &DbPool,
     s3: &aws_sdk_s3::Client,
     username_param: &str,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<(), ServerError> {
 
     let mut conn = pool.get().expect("Failed to get DB connection");
 
@@ -516,10 +526,12 @@ async fn delete_invalid_messages_for_user(
             .delete(
                 aws_sdk_s3::types::Delete::builder()
                     .set_objects(Some(delete_object_ids))
-                    .build()?
+                    .build()
+                    .map_err(|_| ServerError::Internal)?
             )
             .send()
-            .await?;
+            .await
+            .map_err(|e| ServerError::Internal)?;
 
         // Delete from DB
         let message_ids_to_delete: Vec<i32> = messages_to_delete.iter().map(|m| m.id).collect();
@@ -536,10 +548,10 @@ pub async fn get_messages(
     username_param: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<Vec<MessageWithUsernames>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<Vec<MessageWithUsernames>, ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().expect("Failed to get DB connection"); // TODO map it to ServerError
 
     // Delete invalid messages
     delete_invalid_messages_for_user(pool, s3, username_param).await?;
@@ -570,7 +582,7 @@ pub async fn get_messages(
         .order_by(messages::creation_time.desc())
         .load::<MessageWithUsernames>(&mut conn)
         .optional()?
-        .ok_or("No messages found")?;
+        .ok_or(ServerError::Internal)?;
 
     Ok(messages_get)
 }
@@ -580,7 +592,7 @@ pub async fn get_message(
     message_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<String, ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
     let mut conn = pool.get().expect("Failed to get DB connection");
@@ -593,7 +605,7 @@ pub async fn get_message(
         .filter(messages::file_id.eq(message_id_param))
         .first::<Message>(&mut conn)
         .optional()?
-        .ok_or("Message not found")?;
+        .ok_or(ServerError::Internal)?;
 
     // Check if the message belongs to the user
     if message.receiver_id != users
@@ -601,11 +613,8 @@ pub async fn get_message(
         .select(users::id)
         .first::<i32>(&mut conn)
         .optional()?
-        .ok_or("User not found")? {
-        return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
-            "Message does not belong to the user",
-        )));
+        .ok_or(ServerError::Unauthorized)? {
+        return Err(ServerError::Unauthorized);
     }
 
     // Increment the message download count
@@ -621,10 +630,10 @@ pub async fn get_message(
         .key(message.file_id.to_string())
         .presigned(
             PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
-                .map_err(|e| e.to_string())?
+                .map_err(|_| ServerError::Internal)?,
         )
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|_| ServerError::Internal)?
         .uri()
         .to_string();
 

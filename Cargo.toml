@@ -35,3 +35,4 @@ aws-sdk-s3 = "1.122.0"
 base64 = "0.22.1"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.43", features = ["serde"] }
+thiserror = "2"

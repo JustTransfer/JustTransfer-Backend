@@ -165,16 +165,6 @@ pub async fn register_user_end(
         nonce_priv_sign,
         pub_sign,
         &state.db,
-    ).map_err(
-        // Check the error type if the user already exists
-        |e| {
-            if let Some(io_err) = e.downcast_ref::<io::Error>() {
-                if io_err.kind() == io::ErrorKind::AddrInUse {
-                    return ApiError::Conflict;
-                }
-            }
-            ApiError::ServerError
-        }
     )?;
 
     // Create JWT token for the new user
@@ -467,9 +457,8 @@ pub async fn get_messages(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
     
-    let messages = server::connected::get_messages(&*claims_jwt.username, &state.db, &state.s3)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+    let messages: Vec<MessageWithUsernames> = server::connected::get_messages(&*claims_jwt.username, &state.db, &state.s3)
+        .await?;
 
     // Convert the fields of each messages to base64
     let messages_encoded: Vec<MessageWithUsernamesEncoded> = messages.into_iter().map(|m| {
@@ -507,8 +496,7 @@ pub async fn get_one_message(
 ) -> Result<impl IntoResponse, ApiError> {
 
     let presigned_url = server::connected::get_message(&*claims_jwt.username, id, &state.db, &state.s3)
-        .await
-        .map_err(|_| ApiError::ServerNotFound)?;
+        .await?;
 
     Ok((StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url })))
 }
@@ -581,8 +569,7 @@ pub async fn upload_message(
         &state.db,
         &state.s3,
     )
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
     
     Ok((StatusCode::CREATED, Json(UploadMessageResult {
         upload_urls: upload_urls,
@@ -618,8 +605,7 @@ pub async fn upload_message_finish_multipart(
         &state.db,
         &state.s3,
     )
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
 
     server::connected::update_message_signature(
         file_id,
