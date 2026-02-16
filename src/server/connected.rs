@@ -72,7 +72,7 @@ pub fn server_registration_finish(
     if user.is_some() {
         // User already exists
         return Err(Box::new(io::Error::new(
-            io::ErrorKind::Other,
+            io::ErrorKind::AddrInUse,
             "User already exists",
         )));
     } else {

@@ -24,7 +24,7 @@ CREATE TABLE users
 (
     id                      SERIAL PRIMARY KEY,
     username                TEXT  NOT NULL UNIQUE,
-    email                   TEXT  NOT NULL UNIQUE,
+    email                   TEXT  NOT NULL,
     password_file           BYTEA NOT NULL,
     server_login            BYTEA,
     role                    TEXT  NOT NULL REFERENCES roles (role) ON DELETE RESTRICT,

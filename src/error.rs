@@ -10,6 +10,7 @@ pub enum ApiError {
     ServerNotFound,
     Unauthorized,
     Forbidden,
+    Conflict,
 }
 
 impl IntoResponse for ApiError {
@@ -23,6 +24,7 @@ impl IntoResponse for ApiError {
             ApiError::ServerNotFound => StatusCode::NOT_FOUND,
             ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
             ApiError::Forbidden => StatusCode::FORBIDDEN,
+            ApiError::Conflict => StatusCode::CONFLICT,
         };
 
         status.into_response()

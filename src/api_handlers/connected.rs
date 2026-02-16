@@ -165,7 +165,17 @@ pub async fn register_user_end(
         nonce_priv_sign,
         pub_sign,
         &state.db,
-    ).map_err(|_| ApiError::ServerError)?;
+    ).map_err(
+        // Check the error type if the user already exists
+        |e| {
+            if let Some(io_err) = e.downcast_ref::<io::Error>() {
+                if io_err.kind() == io::ErrorKind::AddrInUse {
+                    return ApiError::Conflict;
+                }
+            }
+            ApiError::ServerError
+        }
+    )?;
 
     // Create JWT token for the new user
     let jar = api_handlers::auth::create_connected_cookie(&payload.username, api_handlers::auth::Role::User)?;
