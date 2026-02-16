@@ -31,7 +31,7 @@ async fn delete_invalid_anonymous_message(
 ) -> Result<(), ServerError> {
     use crate::schema::anonymousmessages;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the message is expired or has reached max downloads
     let message_opt = anonymousmessages
@@ -97,7 +97,7 @@ pub async fn anonymous_send_message(
 ) -> Result<(Vec<String>, String), ServerError> {
     use crate::schema::anonymousmessages;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
@@ -205,7 +205,7 @@ pub async fn server_login_start_anonymous(
     s3: &aws_sdk_s3::Client,
 ) -> Result<CredentialResponse<DefaultCipherSuite>, ServerError> {
     use crate::schema::anonymousmessages;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
     delete_invalid_anonymous_message(pool, s3, id_param).await?;
@@ -267,7 +267,7 @@ pub async fn server_login_end_anonymous(
 ) -> Result<(), ServerError> {
     use crate::schema::anonymousmessages;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Load the ServerLogin state from the DB
     let server_login_start_result = {
@@ -305,7 +305,7 @@ pub async fn anonymous_get_message_metadata(
 ) -> Result<AnonymousMessageMetadata, ServerError> {
     use crate::schema::anonymousmessages;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let messages_get = anonymousmessages::table
         .filter(anonymousmessages::id.eq(id_param))
@@ -336,7 +336,7 @@ pub async fn anonymous_get_message(
 ) -> Result<String, ServerError> {
     use crate::schema::anonymousmessages;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
     delete_invalid_anonymous_message(pool, s3, id_param).await?;

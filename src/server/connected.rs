@@ -60,11 +60,12 @@ pub fn server_registration_finish(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
+    // TODO change it to check if postgres returns an error -> unique constraint
     // Check if username is already taken
     let user: Option<User> = users::table
         .filter(users::username.eq(username_param))
@@ -121,7 +122,7 @@ pub fn server_registration_finish_update(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
@@ -162,7 +163,7 @@ pub fn server_login_start(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<CredentialResponse<DefaultCipherSuite>, ServerError> {
     use crate::schema::users;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let user_opt = users::table
         .filter(users::username.eq(username_param))
@@ -232,7 +233,7 @@ pub fn server_login_finish(
     ServerError
 > {
     use crate::schema::users;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
 
     // Load the ServerLogin state from the DB
@@ -296,7 +297,7 @@ pub fn get_user(
 ) -> Result<User, ServerError> {
     use crate::schema::users;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
     let user = users::table
         .filter(users::username.eq(username_param))
         .first::<User>(&mut conn)
@@ -310,7 +311,7 @@ pub fn get_pub_key_enc(
     username_pub_key: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<[u8; ENC_KEY_LEN_PUB], ServerError> {
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let user = crate::schema::users::table
         .filter(crate::schema::users::username.eq(username_pub_key))
@@ -325,7 +326,7 @@ pub fn get_pub_key_sign(
     username_pub_key: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<[u8; SIGN_KEY_LEN_PUB], ServerError> {
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let user = crate::schema::users::table
         .filter(crate::schema::users::username.eq(username_pub_key))
@@ -358,7 +359,7 @@ pub async fn send_message(
     use crate::schema::users;
     use crate::schema::messages;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let sender = users::table
         .filter(users::username.eq(sender))
@@ -475,7 +476,7 @@ pub fn update_message_signature(
 
     use crate::schema::messages;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
     let updated_rows = diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
         .set(messages::signature.eq(Some(signature_param)))
         .execute(&mut conn)
@@ -490,7 +491,7 @@ async fn delete_invalid_messages_for_user(
     username_param: &str,
 ) -> Result<(), ServerError> {
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Get messages that belong to the user and are invalid
     let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
@@ -551,7 +552,7 @@ pub async fn get_messages(
 ) -> Result<Vec<MessageWithUsernames>, ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
-    let mut conn = pool.get().expect("Failed to get DB connection"); // TODO map it to ServerError
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
     delete_invalid_messages_for_user(pool, s3, username_param).await?;
@@ -595,7 +596,7 @@ pub async fn get_message(
 ) -> Result<String, ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
     delete_invalid_messages_for_user(pool, s3, username_param).await?;
