@@ -69,6 +69,7 @@ pub fn server_registration_finish(
         .first::<User>(&mut conn)
         .optional()?;
 
+    // TODO also check if email already exists
     if user.is_some() {
         // User already exists
         return Err(Box::new(io::Error::new(
