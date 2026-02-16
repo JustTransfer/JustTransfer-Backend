@@ -8,6 +8,7 @@ use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use diesel::dsl::{sql, now as sql_now};
+use diesel::result::{DatabaseErrorKind, Error as DieselError};
 use rand::rngs::OsRng;
 use opaque_ke::*;
 use tracing::log::info;
@@ -65,29 +66,6 @@ pub fn server_registration_finish(
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
-    // TODO change it to check if postgres returns an error -> unique constraint
-    // Check if username is already taken
-    let user: Option<User> = users::table
-        .filter(users::username.eq(username_param))
-        .first::<User>(&mut conn)
-        .optional()?;
-
-    if user.is_some() {
-        // User already exists
-        return Err(ServerError::UsernameTaken);
-    }
-
-    // Check if email is already used
-    let user_email: Option<User> = users::table
-        .filter(users::email.eq(email_param))
-        .first::<User>(&mut conn)
-        .optional()?;
-
-    if user_email.is_some() {
-        // Email already used
-        return Err(ServerError::EmailTaken);
-    }
-
     let new_user = NewUser {
         username: &username_param.to_string(),
         email: &email_param.to_string(),
@@ -101,13 +79,27 @@ pub fn server_registration_finish(
         cipher_private_key_sign: &cpriv_sign,
     };
 
-    diesel::insert_into(users::table)
-            .values(&new_user)
-            .returning(User::as_returning())
-            .get_result(&mut conn)
-            .expect("Error saving new post");
+    let result = diesel::insert_into(users::table)
+        .values(&new_user)
+        .execute(&mut conn);
 
-    Ok(())
+    match result {
+        Ok(_) => Ok(()),
+
+        Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info)) => {
+            let msg = info.constraint_name().unwrap_or("");
+
+            if msg.contains("username") {
+                Err(ServerError::UsernameTaken)
+            } else if msg.contains("email") {
+                Err(ServerError::EmailTaken)
+            } else {
+                Err(ServerError::Internal)
+            }
+        }
+
+        Err(_) => Err(ServerError::Internal),
+    }
 }
 
 pub fn server_registration_finish_update(
