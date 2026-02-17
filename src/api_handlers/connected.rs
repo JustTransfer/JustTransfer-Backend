@@ -390,12 +390,6 @@ pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) 
 /// Get Public Keys
 ///
 
-#[derive(Deserialize, Validate, Debug)]
-pub struct GetPubKeyEnc {
-    #[validate(custom(function = "validate_username"))]
-    user_request_pub_key: String,
-}
-
 #[derive(Serialize)]
 pub struct GetPubKeyEncResult {
     pub_enc: String,
@@ -403,23 +397,17 @@ pub struct GetPubKeyEncResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_pub_key_enc(
+    Path(username): Path<String>,
     State(state): State<AppState>,
-    Json(payload): Json<GetPubKeyEnc>,
 ) -> Result<impl IntoResponse, ApiError> {
-
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
     
-    let pub_enc = server::connected::get_pub_key_enc(&*payload.user_request_pub_key, &state.db)
+    // Validate the username
+    validate_username(&username).map_err(|_| ApiError::InputValidation)?;
+    
+    let pub_enc = server::connected::get_pub_key_enc(&*username, &state.db)
         .map_err(|_| ApiError::ServerNotFound)?;
 
     Ok((StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) })))
-}
-
-#[derive(Deserialize, Validate, Debug)]
-pub struct GetPubKeySign {
-    #[validate(custom(function = "validate_username"))]
-    user_request_pub_key: String,
 }
 
 #[derive(Serialize)]
@@ -429,14 +417,14 @@ pub struct GetPubKeySignResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_pub_key_sign(
+    Path(username): Path<String>,
     State(state): State<AppState>,
-    Json(payload): Json<GetPubKeySign>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
+    // Validate the username
+    validate_username(&username).map_err(|_|  ApiError::InputValidation)?;
     
-    let pub_sign = server::connected::get_pub_key_sign(&*payload.user_request_pub_key, &state.db)
+    let pub_sign = server::connected::get_pub_key_sign(&*username, &state.db)
         .map_err(|_| ApiError::ServerNotFound)?;
 
     Ok((StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) })))
