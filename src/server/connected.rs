@@ -580,6 +580,42 @@ pub async fn get_messages(
     Ok(messages_get)
 }
 
+pub async fn get_messages_sent(
+    username_param: &str,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<Vec<MessageSentWithUsernames>, ServerError> {
+    use crate::schema::users;
+    use crate::schema::messages;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete invalid messages
+    delete_invalid_messages_for_user(pool, s3, username_param).await?;
+
+    let (sender, receiver) = diesel::alias!(schema::users as sender, schema::users as receiver);
+
+    let messages_get = messages::table
+        .inner_join(sender.on(messages::sender_id.eq(sender.field(users::id))))
+        .inner_join(receiver.on(messages::receiver_id.eq(receiver.field(users::id))))
+        .filter(sender.field(users::username).eq(username_param))
+        .filter(messages::signature.is_not_null()) // Only get messages with signature
+        .select((
+            messages::id,
+            sender.field(users::username),
+            receiver.field(users::username),
+            messages::max_downloads,
+            messages::lifetime,
+            messages::creation_time,
+            messages::file_size,
+        ))
+        .order_by(messages::creation_time.desc())
+        .load::<MessageSentWithUsernames>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    Ok(messages_get)
+}
+
 pub async fn get_message(
     username_param: &str,
     message_id_param: Uuid,

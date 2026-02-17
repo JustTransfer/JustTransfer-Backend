@@ -400,7 +400,7 @@ pub async fn get_pub_key_enc(
     Path(username): Path<String>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
-    
+
     // Validate the username
     validate_username(&username).map_err(|_| ApiError::InputValidation)?;
     
@@ -423,7 +423,7 @@ pub async fn get_pub_key_sign(
 
     // Validate the username
     validate_username(&username).map_err(|_|  ApiError::InputValidation)?;
-    
+
     let pub_sign = server::connected::get_pub_key_sign(&*username, &state.db)
         .map_err(|_| ApiError::ServerNotFound)?;
 
@@ -469,6 +469,23 @@ pub async fn get_messages(
     }).collect();
 
     Ok((StatusCode::OK, Json(GetMessageResult { messages: messages_encoded })))
+}
+
+#[derive(Serialize)]
+pub struct GetMessageSentResult {
+    messages: Vec<MessageSentWithUsernames>,
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn get_messages_sent(
+    Extension(claims_jwt): Extension<Claims>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    let messages: Vec<MessageSentWithUsernames> = server::connected::get_messages_sent(&*claims_jwt.username, &state.db, &state.s3)
+        .await?;
+
+    Ok((StatusCode::OK, Json(GetMessageSentResult { messages: messages })))
 }
 
 #[derive(Serialize)]

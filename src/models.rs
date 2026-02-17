@@ -96,6 +96,17 @@ pub struct NewMessage<'a> {
 }
 
 #[derive(Queryable, Serialize)]
+pub struct MessageSentWithUsernames {
+    pub id: i32,
+    pub sender: String,
+    pub receiver: String,
+    pub max_downloads: i32,
+    pub lifetime: i32,
+    pub creation_time: chrono::DateTime<Utc>,
+    pub file_size: i64,
+}
+
+#[derive(Queryable, Serialize)]
 pub struct MessageWithUsernames {
     pub id: i32,
     pub sender: String,
