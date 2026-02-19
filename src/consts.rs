@@ -6,7 +6,7 @@ use uuid::Uuid;
 /// Const for Server
 pub const URL: &str = "0.0.0.0:80";
 pub const MAX_BODY_SIZE: usize = 100 * 1024 * 1024 * 1024; // 100 GB
-pub const MAX_TIME_MARGIN: i64 = 2; // minutes
+pub const MAX_TIME_MARGIN: i64 = 1; // minute
 
 
 /// Const for Dummy User
@@ -29,6 +29,7 @@ pub const AUTH_HEADER: &str = "auth-token";
 
 
 /// Const for Anonymous Transfer
+pub const MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT: i32 = 200;
 pub const MAX_LIFETIME_ANONYMOUS: i32 = 3; // days
 pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 500 * 1024 * 1024; // 500 MB
 pub const CHUNK_SIZE_ANONYMOUS: i64 = 10 * 1024 * 1024; // 10 MB
@@ -36,6 +37,7 @@ pub const MAX_DOWNLOADS_ANONYMOUS: i32 = 3;
 
 
 /// Const for Connected Transfer
+pub const MAX_NUMBER_CONNECTED_TRANSFERS_PER_MONTH: i32 = 2;
 pub const CHUNK_SIZE_CONNECTED: i64 = 10 * 1024 * 1024; // 10 MB
 pub const MAX_LIFETIME_CONNECTED: i32 = 7; // days
 pub const MAX_FILE_SIZE_CONNECTED: i64 = 1 * 1024 * 1024 * 1024; // 1 GB
@@ -43,6 +45,7 @@ pub const MAX_DOWNLOADS_CONNECTED: i32 = 5;
 
 
 /// Const for Premium Connected Transfer
+pub const MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_PER_MONTH: i32 = 10;
 pub const MAX_LIFETIME_CONNECTED_PREMIUM: i32 = 30; // days
 pub const MAX_FILE_SIZE_CONNECTED_PREMIUM: i64 = 20 * 1024 * 1024 * 1024 * 1024; // 20 GB
 pub const MAX_DOWNLOADS_CONNECTED_PREMIUM: i32 = 10;
@@ -88,9 +91,6 @@ pub const ENV_VARS: [&str; 8] = [
 ];
 
 /// Env variables once_cell key
-/*static EXPORT_KEY: OnceCell<[u8; 32]> = OnceCell::new(); // Déclaration globale
-EXPORT_KEY.set([42u8; 32]); // Set clé (0xAAAA...)
-let key_bytes = EXPORT_KEY.get().ok_or("export key not set")?;*/
 pub static POSTGRESQL_USERNAME: OnceCell<String> = OnceCell::new();
 pub static DATABASE_URL: OnceCell<String> = OnceCell::new();
 pub static MINIO_ROOT_USER: OnceCell<String> = OnceCell::new();
