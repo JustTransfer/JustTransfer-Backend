@@ -27,6 +27,7 @@ pub struct UserInfoResult {
     username: String,
     email: String,
     role: String,
+    number_transfers: i64,
 }
 #[instrument(skip(state), err(Debug))]
 pub async fn get_user_info(
@@ -34,13 +35,13 @@ pub async fn get_user_info(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let user_info = server::connected::get_user(&*claims_jwt.username, &state.db)
-        .map_err(|_| ApiError::ServerNotFound)?;
+    let user_info = server::connected::get_user(&*claims_jwt.username, &state.db)?;
 
     Ok((StatusCode::OK, Json(UserInfoResult {
         username: user_info.username,
         email: user_info.email,
         role: user_info.role,
+        number_transfers: user_info.number_transfers,
     })))
 }
 
@@ -77,8 +78,7 @@ pub async fn register_user_start(
         .map_err(|_| ApiError::Opaque)?;
 
     let server_registration_start_result =
-        server::connected::server_registration_start(&*payload.username, req, &state.db)
-        .map_err(|_| ApiError::ServerError)?;
+        server::connected::server_registration_start(&*payload.username, req, &state.db)?;
 
     Ok((
         StatusCode::OK,
@@ -242,7 +242,7 @@ pub async fn register_user_end_update(
         nonce_priv_sign,
         pub_sign,
         &state.db,
-    ).map_err(|_| ApiError::ServerError)?;
+    )?;
 
     Ok(StatusCode::OK)
 }
@@ -282,7 +282,7 @@ pub async fn login_user_start(
         &*payload.username,
         req,
         &state.db,
-    ).map_err(|_| ApiError::ServerError)?;
+    )?;
 
     Ok((
         StatusCode::OK,
@@ -330,11 +330,10 @@ pub async fn login_user_end(
         &*payload.username,
         req,
         &state.db,
-    ).map_err(|_| ApiError::ServerError)?;
+    )?;
 
     // Get the user role from the database
-    let user = server::connected::get_user(&*payload.username, &state.db)
-        .map_err(|_| ApiError::ServerError)?;
+    let user = server::connected::get_user(&*payload.username, &state.db)?;
 
     // Get the role enum from the string
     let role = api_handlers::auth::Role::try_from(user.role.as_str())
@@ -404,8 +403,7 @@ pub async fn get_pub_key_enc(
     // Validate the username
     validate_username(&username).map_err(|_| ApiError::InputValidation)?;
     
-    let pub_enc = server::connected::get_pub_key_enc(&*username, &state.db)
-        .map_err(|_| ApiError::ServerNotFound)?;
+    let pub_enc = server::connected::get_pub_key_enc(&*username, &state.db)?;
 
     Ok((StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) })))
 }
@@ -424,8 +422,7 @@ pub async fn get_pub_key_sign(
     // Validate the username
     validate_username(&username).map_err(|_|  ApiError::InputValidation)?;
 
-    let pub_sign = server::connected::get_pub_key_sign(&*username, &state.db)
-        .map_err(|_| ApiError::ServerNotFound)?;
+    let pub_sign = server::connected::get_pub_key_sign(&*username, &state.db)?;
 
     Ok((StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) })))
 }
@@ -617,7 +614,7 @@ pub async fn upload_message_finish_multipart(
         URL_SAFE_NO_PAD.decode(&payload.signature)
             .map_err(|_| ApiError::ServerError)?,
         &state.db,
-    ).map_err(|_| ApiError::ServerError)?;
+    )?;
 
     // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
     Ok(StatusCode::OK)

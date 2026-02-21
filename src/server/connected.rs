@@ -17,13 +17,13 @@ use uuid::Uuid;
 
 use crate::consts::*;
 use crate::models::*;
-use crate::schema;
+use crate::{api_handlers, schema};
 use crate::schema::messages::dsl::messages;
 use crate::schema::users::dsl::users;
 use crate::schema::users::*;
 use crate::api_handlers::misc::DbPool;
 use crate::error::{ApiError, ServerError};
-use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
+use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_connected};
 
 ///
 /// Register
@@ -241,7 +241,7 @@ pub fn server_login_finish(
         diesel::update(users.filter(users::username.eq(username_param)))
             .set(users::server_login.eq::<Option<Vec<u8>>>(None))
             .execute(&mut conn)
-            .expect("Error updating anonymous message");
+            .map_err(|_| ServerError::Internal)?;
 
         ServerLogin::deserialize(&server_login_state_bytes)
             .map_err(|_| ServerError::Internal)?
@@ -286,7 +286,7 @@ pub fn server_login_finish(
 pub fn get_user(
     username_param: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<User, ServerError> {
+) -> Result<InfoUser, ServerError> {
     use crate::schema::users;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -295,8 +295,21 @@ pub fn get_user(
         .first::<User>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
+    
+    use crate::schema::messages;
+    let number_transfers = messages
+        .filter(messages::sender_id.eq(user.id))
+        .count()
+        .get_result::<i64>(&mut conn)?;
+    
 
-    Ok(user)
+    Ok(InfoUser {
+        id: user.id,
+        username: user.username,
+        email: user.email,
+        role: user.role,
+        number_transfers: number_transfers,
+    })
 }
 
 pub fn get_pub_key_enc(
@@ -381,11 +394,40 @@ pub async fn send_message(
         chunk_size: &CHUNK_SIZE_CONNECTED,
     };
 
-    diesel::insert_into(messages::table)
-        .values(&new_message)
-        .returning(Message::as_returning())
-        .get_result(&mut conn)
-        .expect("Error saving new message");
+    conn.transaction::<_, ServerError, _>(|conn| {
+
+        // Get the sender role and lock the sender
+        let sender_role = users::table
+            .filter(users::id.eq(sender.id))
+            .for_update()
+            .select(users::role)
+            .first::<String>(conn)?;
+
+        // Enforce max sent messages limit
+        let sent_messages_count = messages::table
+            .filter(messages::sender_id.eq(sender.id))
+            .count()
+            .get_result::<i64>(conn)?;
+
+        // Convert DB string into Role enum
+        let user_role = crate::api_handlers::auth::Role::try_from(sender_role.as_str())
+            .map_err(|_| ServerError::Internal)?;
+
+        // Enforce limit
+        if let Some(max) = user_role.max_messages() {
+            if sent_messages_count >= max {
+                return Err(ServerError::Unauthorized);
+            }
+        }
+
+        // Insert the new message into the database
+        diesel::insert_into(messages::table)
+            .values(&new_message)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(())
+    })?;
 
     // Calculate the Number of chunks
     let num_chunks = (file_size_param as f64 / CHUNK_SIZE_CONNECTED as f64).ceil() as i32;
@@ -457,6 +499,9 @@ pub async fn send_message_finish_multipart(
         .await
         .map_err(|_| ServerError::Internal)?;
 
+    // Check if the file size match the one store in DB
+    delete_invalid_file_size_connected(pool, s3, &file_id_param).await?;
+
     Ok(())
 }
 
@@ -472,7 +517,7 @@ pub fn update_message_signature(
     let updated_rows = diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
         .set(messages::signature.eq(Some(signature_param)))
         .execute(&mut conn)
-        .expect("Error updating message");
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
@@ -650,7 +695,7 @@ pub async fn get_message(
     let updated_rows = diesel::update(messages.filter(messages::id.eq(message.id)))
         .set(messages::number_downloads.eq(messages::number_downloads + 1))
         .execute(&mut conn)
-        .expect("Error updating message");
+        .map_err(|_| ServerError::Internal)?;
 
     // Generate pre-signed S3 download URL
     let presigned_url = s3

@@ -10,12 +10,15 @@ use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
 use rand::rngs::OsRng;
 use opaque_ke::argon2::Argon2;
 use opaque_ke::{CipherSuite, ServerSetup};
-use tracing::{info, warn};
+use tracing::{info, warn, error};
 use uuid::Uuid;
 
 use crate::api_handlers;
 use crate::consts::*;
+use crate::error::ServerError;
 use crate::models::*;
+use crate::schema::messages::dsl::messages;
+use crate::schema::anonymousmessages::dsl::anonymousmessages;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -25,42 +28,48 @@ impl CipherSuite for DefaultCipherSuite {
     type Ksf = Argon2<'static>;
 }
 
-pub async fn init_server() -> Result<api_handlers::misc::AppState, Box<dyn std::error::Error>> {
+pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> {
 
     // Check if the environment variables exist
     for var in ENV_VARS {
         if std::env::var(var).is_err() {
-            return Err(Box::new(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Environment variable {} not set", var),
-            )));
+            error!("Environment variable {} is not set", var);
+            return Err(ServerError::Internal);
         }
 
         // Set the corresponding constant
         match var {
             "POSTGRESQL_USERNAME" => {
-                POSTGRESQL_USERNAME.set(std::env::var(var).unwrap())?;
+                POSTGRESQL_USERNAME.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             "DATABASE_URL" => {
-                DATABASE_URL.set(std::env::var(var).unwrap())?;
+                DATABASE_URL.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             "MINIO_ROOT_USER" => {
-                MINIO_ROOT_USER.set(std::env::var(var).unwrap())?;
+                MINIO_ROOT_USER.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             "MINIO_ROOT_PASSWORD" => {
-                MINIO_ROOT_PASSWORD.set(std::env::var(var).unwrap())?;
+                MINIO_ROOT_PASSWORD.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             "MINIO_URL" => {
-                MINIO_URL.set(std::env::var(var).unwrap())?;
+                MINIO_URL.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             "S3_BUCKET_NAME" => {
-                S3_BUCKET_NAME_CONNECTED.set(std::env::var(var).unwrap())?;
+                S3_BUCKET_NAME_CONNECTED.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             "S3_BUCKET_NAME_ANONYMOUS" => {
-                S3_BUCKET_NAME_ANONYMOUS.set(std::env::var(var).unwrap())?;
+                S3_BUCKET_NAME_ANONYMOUS.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             "JWT_SECRET_KEY" => {
-                JWT_SECRET_KEY.set(std::env::var(var).unwrap())?;
+                JWT_SECRET_KEY.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
             }
             _ => {}
         }
@@ -77,15 +86,21 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, Box<dyn std::
     };
 
     generate_dummy_user(&db_pool).await
-        .expect("Failed to generate dummy user");
+        .map_err(|e| {
+            error!("Failed to generate dummy user: {}", e);
+            ServerError::Internal
+        })?;
 
     generate_dummy_anonymous_transfer(&db_pool).await
-        .expect("Failed to generate dummy anonymous transfer");
+        .map_err(|e| {
+            error!("Failed to generate dummy anonymous transfer: {}", e);
+            ServerError::Internal
+        })?;
 
     Ok(state)
 }
 
-fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Box<dyn std::error::Error>> {
+fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, ServerError> {
 
     let manager = ConnectionManager::<PgConnection>::new(DATABASE_URL.get().unwrap());
     let pool = r2d2::Pool::builder()
@@ -98,19 +113,22 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Box<d
     // Run migrations
     pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
     conn.run_pending_migrations(MIGRATIONS)
-        .expect("Failed to run database migrations");
+        .map_err(|e| {
+            error!("Error running migrations: {}", e);
+            ServerError::Internal
+        })?;
     info!("Database migrations ran successfully");
 
     // Try to load OPAQUE settings from DB
     let setting: Option<OpaqueSetting> = opaque_settings::table
         .first::<OpaqueSetting>(&mut conn)
         .optional()
-        .expect("Error loading OPAQUE settings");
+        .map_err(|_| ServerError::Internal)?;
 
     let server_setup = if let Some(s) = setting {
         // Deserialize settings
         ServerSetup::<DefaultCipherSuite>::deserialize(&s.settings)
-            .expect("Error deserializing OPAQUE settings")
+            .map_err(|_| ServerError::Internal)?
     } else {
         // Create new settings
         let mut rng = OsRng;
@@ -124,7 +142,7 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Box<d
             .values(&new_setting)
             .returning(OpaqueSetting::as_returning())
             .get_result::<OpaqueSetting>(&mut conn)
-            .expect("Error saving OPAQUE settings");
+            .map_err(|_| ServerError::Internal)?;
 
         server_setup
     };
@@ -132,7 +150,7 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Box<d
     Ok(pool)
 }
 
-async fn server_init_s3() -> Result<aws_sdk_s3::Client, Box<dyn std::error::Error>> {
+async fn server_init_s3() -> Result<aws_sdk_s3::Client, ServerError> {
 
     // Init S3
     let client_config = Builder::new()
@@ -157,7 +175,11 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, Box<dyn std::error::Erro
 
     // Collect existing bucket names into a HashSet for efficient lookup
     let mut existing_buckets = HashSet::new();
-    while let Some(output) = buckets.try_next().await? {
+    while let Some(output) = buckets.try_next().await
+        .map_err(|e| {
+            error!("Error listing buckets: {}", e);
+            ServerError::Internal
+        })? {
         existing_buckets.extend(
             output
                 .buckets()
@@ -182,7 +204,11 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, Box<dyn std::error::Erro
                 .create_bucket()
                 .bucket(bucket_name)
                 .send()
-                .await?;
+                .await
+                .map_err(|e| {
+                    error!("Error creating bucket {}: {}", bucket_name, e);
+                    ServerError::Internal
+                })?;
 
             info!("Created bucket: {}", bucket_name);
         }
@@ -193,38 +219,28 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, Box<dyn std::error::Erro
 
 pub fn get_opaque_settings(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<ServerSetup<DefaultCipherSuite>, Box<dyn std::error::Error>> {
+) -> Result<ServerSetup<DefaultCipherSuite>, ServerError> {
 
     use crate::schema::opaque_settings;
 
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
     let setting = opaque_settings::table
         .first::<OpaqueSetting>(&mut conn)
         .optional()?
-        .ok_or_else(|| {
-            Box::<dyn std::error::Error>::from(io::Error::new(
-                io::ErrorKind::Other,
-                "OPAQUE settings not found in DB",
-            ))
-        })?;
+        .ok_or(ServerError::Internal)?;
 
     let server_opaque = ServerSetup::<DefaultCipherSuite>::deserialize(&setting.settings)
-        .map_err(|e| {
-            Box::<dyn std::error::Error>::from(io::Error::new(
-                io::ErrorKind::Other,
-                format!("Error deserializing OPAQUE settings: {}", e),
-            ))
-        })?;
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(server_opaque)
 }
 
 async fn generate_dummy_user(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), ServerError> {
 
     use crate::schema::users;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the dummy user already exists
     let existing_user = users::table
@@ -250,7 +266,7 @@ async fn generate_dummy_user(
             .values(&new_user)
             .returning(User::as_returning())
             .get_result(&mut conn)
-            .expect("Error saving dummy user");
+            .map_err(|e| ServerError::Internal)?;
     }
 
     // Get the id of the dummy user
@@ -258,20 +274,20 @@ async fn generate_dummy_user(
         .filter(users::username.eq(DUMMY_USERNAME))
         .select(users::id)
         .first::<i32>(&mut conn)
-        .expect("Error getting dummy user id");
+        .map_err(|_| ServerError::Internal)?;
 
     DUMMY_ID.set(dummy_id)
-        .map_err(|_| "Failed to set DUMMY_ID")?;
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
 
 async fn generate_dummy_anonymous_transfer(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), ServerError> {
 
     use crate::schema::anonymousmessages;
-    let mut conn = pool.get().expect("Failed to get DB connection");
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the dummy anonymous transfer already exists
     let existing_message = anonymousmessages::table
@@ -299,7 +315,112 @@ async fn generate_dummy_anonymous_transfer(
             .values(&new_message)
             .returning(AnonymousMessage::as_returning())
             .get_result(&mut conn)
-            .expect("Error saving dummy anonymous transfer");
+            .map_err(|_| ServerError::Internal)?;
+    }
+
+    Ok(())
+}
+
+
+pub async fn delete_invalid_file_size_connected (
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+    file_id_param: &Uuid,
+) -> Result<(), ServerError> {
+
+    // Get the file size from S3
+    let head_object_output = s3
+        .head_object()
+        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+        .key(file_id_param.to_string())
+        .send()
+        .await
+        .map_err(|_| ServerError::Internal)?;
+
+    let uploaded_file_size = head_object_output.content_length()
+        .ok_or(ServerError::Internal)?;
+
+    // Get the file size from DB
+    use crate::schema::messages;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let message = messages
+        .filter(messages::file_id.eq(file_id_param))
+        .first::<Message>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let diff = (uploaded_file_size - message.file_size).abs();
+    let tolerance = (message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT);
+
+    // Check if the uploaded file size matches the expected file size with tolerance 1%
+    if diff as f64 > tolerance {
+        // Delete the uploaded file from S3
+        s3.delete_object()
+            .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+            .key(file_id_param.to_string())
+            .send()
+            .await
+            .map_err(|_| ServerError::Internal)?;
+
+        // Delete the message from DB
+        diesel::delete(messages.filter(messages::id.eq(message.id)))
+            .execute(&mut conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        return Err(ServerError::Internal);
+    }
+
+    Ok(())
+}
+
+pub async fn delete_invalid_file_size_anonymous (
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+    file_id_param: &Uuid,
+) -> Result<(), ServerError> {
+
+    // Get the file size from S3
+    let head_object_output = s3
+        .head_object()
+        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .key(file_id_param.to_string())
+        .send()
+        .await
+        .map_err(|_| ServerError::Internal)?;
+
+    let uploaded_file_size = head_object_output.content_length()
+        .ok_or(ServerError::Internal)?;
+
+    // Get the file size from DB
+    use crate::schema::anonymousmessages;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let anonymous_message = anonymousmessages
+        .filter(anonymousmessages::file_id.eq(file_id_param))
+        .first::<AnonymousMessage>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let diff = (uploaded_file_size - anonymous_message.file_size).abs();
+    let tolerance = (anonymous_message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT);
+
+    // Check if the uploaded file size matches the expected file size with tolerance 1%
+    if diff as f64 > tolerance {
+        // Delete the uploaded file from S3
+        s3.delete_object()
+            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+            .key(file_id_param.to_string())
+            .send()
+            .await
+            .map_err(|_| ServerError::Internal)?;
+
+        // Delete the message from DB
+        diesel::delete(anonymousmessages.filter(anonymousmessages::id.eq(anonymous_message.id)))
+            .execute(&mut conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        return Err(ServerError::Internal);
     }
 
     Ok(())

@@ -19,7 +19,8 @@ use crate::schema::anonymousmessages::dsl::anonymousmessages;
 use crate::schema::messages::dsl::messages;
 use crate::api_handlers::misc::DbPool;
 use crate::error::{ApiError, ServerError};
-use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
+use crate::schema::users;
+use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_anonymous};
 
 ///
 /// Anonymous Messages
@@ -117,11 +118,28 @@ pub async fn anonymous_send_message(
         chunk_size: &CHUNK_SIZE_ANONYMOUS,
     };
 
-    diesel::insert_into(anonymousmessages::table)
-        .values(&new_message)
-        .returning(AnonymousMessage::as_returning())
-        .get_result(&mut conn)
-        .expect("Error saving new message");
+    conn.transaction::<_, ServerError, _>(|conn| {
+
+        // Count the number of anonymous messages
+        let sent_messages_count: i64 = anonymousmessages::table
+            .count()
+            .get_result(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Enforce limit
+        if sent_messages_count >= MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT {
+            return Err(ServerError::InsufficientStorage);
+        }
+
+        // Insert the new message into the database
+        diesel::insert_into(anonymousmessages::table)
+            .values(&new_message)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(())
+    })?;
+
 
     // Calculate the Number of chunks
     let num_chunks = (file_size_param as f64 / CHUNK_SIZE_ANONYMOUS as f64).ceil() as i32;
@@ -193,7 +211,8 @@ pub async fn anonymous_send_message_end(
         .await
         .map_err(|_| ServerError::Internal)?;
 
-    // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
+    // Check if the file size match the one store in DB
+    delete_invalid_file_size_anonymous(pool, s3, &file_id_param).await?;
 
     Ok(())
 }
@@ -254,7 +273,7 @@ pub async fn server_login_start_anonymous(
             server_login_start_result.state.serialize().to_vec(),
         )))
         .execute(&mut conn)
-        .expect("Error updating anonymous message");
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(server_login_start_result.message)
 }
@@ -282,7 +301,7 @@ pub async fn server_login_end_anonymous(
         diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
             .set(anonymousmessages::server_login.eq::<Option<Vec<u8>>>(None))
             .execute(&mut conn)
-            .expect("Error updating anonymous message");
+            .map_err(|_| ServerError::Internal)?;
 
         ServerLogin::deserialize(&server_login_state_bytes)
             .map_err(|_| ServerError::Internal)?
@@ -352,7 +371,7 @@ pub async fn anonymous_get_message(
     let updated_rows = diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
         .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
         .execute(&mut conn)
-        .expect("Error updating message");
+        .map_err(|_| ServerError::Internal)?;
 
     // Generate a presigned URL for the file in S3
     // Generate pre-signed S3 download URL

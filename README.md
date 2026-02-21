@@ -69,6 +69,4 @@ diesel migration generate initial_migration # Fulfill the up.sql and down.sql fi
 diesel migration run
 
 diesel print-schema > src/schema.rs # Generate schema.rs from the database
-
 ```
-

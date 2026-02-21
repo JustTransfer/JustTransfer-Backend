@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub const URL: &str = "0.0.0.0:80";
 pub const MAX_BODY_SIZE: usize = 100 * 1024 * 1024 * 1024; // 100 GB
 pub const MAX_TIME_MARGIN: i64 = 1; // minute
+pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.01; // 1%
 
 
 /// Const for Dummy User
@@ -29,7 +30,7 @@ pub const AUTH_HEADER: &str = "auth-token";
 
 
 /// Const for Anonymous Transfer
-pub const MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT: i32 = 200;
+pub const MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT: i64 = 10;
 pub const MAX_LIFETIME_ANONYMOUS: i32 = 3; // days
 pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 500 * 1024 * 1024; // 500 MB
 pub const CHUNK_SIZE_ANONYMOUS: i64 = 10 * 1024 * 1024; // 10 MB
@@ -37,7 +38,7 @@ pub const MAX_DOWNLOADS_ANONYMOUS: i32 = 3;
 
 
 /// Const for Connected Transfer
-pub const MAX_NUMBER_CONNECTED_TRANSFERS_PER_MONTH: i32 = 2;
+pub const MAX_NUMBER_CONNECTED_TRANSFERS: i64 = 2;
 pub const CHUNK_SIZE_CONNECTED: i64 = 10 * 1024 * 1024; // 10 MB
 pub const MAX_LIFETIME_CONNECTED: i32 = 7; // days
 pub const MAX_FILE_SIZE_CONNECTED: i64 = 1 * 1024 * 1024 * 1024; // 1 GB
@@ -45,7 +46,7 @@ pub const MAX_DOWNLOADS_CONNECTED: i32 = 5;
 
 
 /// Const for Premium Connected Transfer
-pub const MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_PER_MONTH: i32 = 10;
+pub const MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS: i64 = 10;
 pub const MAX_LIFETIME_CONNECTED_PREMIUM: i32 = 30; // days
 pub const MAX_FILE_SIZE_CONNECTED_PREMIUM: i64 = 20 * 1024 * 1024 * 1024 * 1024; // 20 GB
 pub const MAX_DOWNLOADS_CONNECTED_PREMIUM: i32 = 10;

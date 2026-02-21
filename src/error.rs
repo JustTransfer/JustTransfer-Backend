@@ -15,6 +15,9 @@ pub enum ServerError {
 
     #[error("unauthorized")]
     Unauthorized,
+
+    #[error("insufficient storage")]
+    InsufficientStorage,
 }
 impl From<aws_sdk_s3::error::BuildError> for ServerError {
     fn from(_: aws_sdk_s3::error::BuildError) -> Self {
@@ -40,6 +43,7 @@ impl From<ServerError> for ApiError {
             ServerError::UsernameTaken | ServerError::EmailTaken => ApiError::Conflict,
             ServerError::Internal => ApiError::ServerError,
             ServerError::Unauthorized => ApiError::Unauthorized,
+            ServerError::InsufficientStorage => ApiError::InsufficientStorage,
         }
     }
 }
@@ -57,6 +61,7 @@ pub enum ApiError {
     Unauthorized,
     Forbidden,
     Conflict,
+    InsufficientStorage,
 }
 
 impl IntoResponse for ApiError {
@@ -71,6 +76,7 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
             ApiError::Forbidden => StatusCode::FORBIDDEN,
             ApiError::Conflict => StatusCode::CONFLICT,
+            ApiError::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
         };
 
         status.into_response()

@@ -3,6 +3,12 @@ use diesel::prelude::*;
 use serde::Serialize;
 use uuid::{Uuid};
 
+use diesel::deserialize::{self, FromSql};
+use diesel::pg::Pg;
+use diesel::serialize::{self, Output, ToSql};
+use diesel::sql_types::Text;
+use std::io::Write;
+
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::opaque_settings)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -36,6 +42,14 @@ pub struct User {
     pub public_key_sign: Vec<u8>,
     pub nonce_sign: Vec<u8>,
     pub cipher_private_key_sign: Vec<u8>,
+}
+
+pub struct InfoUser {
+    pub id: i32,
+    pub username: String,
+    pub email: String,
+    pub role: String,
+    pub number_transfers: i64,
 }
 
 #[derive(Insertable)]
@@ -140,13 +154,6 @@ pub struct MessageWithUsernamesEncoded {
     pub number_downloads: i32,
     pub file_size: i64,
     pub chunk_size: i64,
-}
-
-#[derive(Queryable, Selectable)]
-#[diesel(table_name = crate::schema::roles)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct Role {
-    pub role: String,
 }
 
 #[derive(Queryable, Selectable, Identifiable)]

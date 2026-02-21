@@ -39,9 +39,11 @@ pub struct RootResponse {
     max_lifetime_connected: i32,
     max_file_size_connected: i64,
     max_downloads_connected: i32,
+    max_transfer_connected: i64,
     max_lifetime_connected_premium: i32,
     max_file_size_connected_premium: i64,
     max_downloads_connected_premium: i32,
+    max_transfer_connected_premium: i64,
 }
 
 #[instrument(err(Debug))]
@@ -56,9 +58,11 @@ pub async fn config() -> Result<impl IntoResponse, ApiError> {
             max_lifetime_connected: MAX_LIFETIME_CONNECTED,
             max_file_size_connected: MAX_FILE_SIZE_CONNECTED,
             max_downloads_connected: MAX_DOWNLOADS_CONNECTED,
+            max_transfer_connected: MAX_NUMBER_CONNECTED_TRANSFERS,
             max_lifetime_connected_premium: MAX_LIFETIME_CONNECTED_PREMIUM,
             max_file_size_connected_premium: MAX_FILE_SIZE_CONNECTED_PREMIUM,
             max_downloads_connected_premium: MAX_DOWNLOADS_CONNECTED_PREMIUM,
+            max_transfer_connected_premium: MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS,
         }),
     ))
 }
@@ -99,8 +103,7 @@ pub async fn anonymous_message_login_start(
         &state.db,
         &state.s3,
     )
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
 
     Ok((
         StatusCode::OK,
@@ -132,8 +135,7 @@ pub async fn anonymous_message_login_end(
         .map_err(|_| ApiError::Opaque)?;
 
     server::anonymous::server_login_end_anonymous(id, req, &state.db, &state.s3)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
 
     // Create cookie jar
     let jar = api_handlers::auth::create_anonymous_cookie(&id)?;
@@ -153,8 +155,7 @@ pub async fn anonymous_message_get_one_metadata(
 ) -> Result<impl IntoResponse, ApiError> {
 
     let message = server::anonymous::anonymous_get_message_metadata(id, &state.db, &state.s3)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
 
     let resp = Json(AnonymousGetMessageResult {
         message: AnonymousMessageMetadataEncoded {
@@ -187,8 +188,7 @@ pub async fn anonymous_message_get_download_url(
 ) -> Result<impl IntoResponse, ApiError> {
 
     let presigned_url = server::anonymous::anonymous_get_message(id, &state.db, &state.s3)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
 
     Ok((StatusCode::OK, Json(AnonymousGetMessageResultDownloadUrl {
         download_url: presigned_url,
@@ -230,8 +230,7 @@ pub async fn anonymous_message_send_start(
     let id = Uuid::new_v4();
 
     let server_registration_start_result =
-        server::anonymous::anonymous_send_message_start(id, req, &state.db)
-        .map_err(|_| ApiError::ServerError)?;
+        server::anonymous::anonymous_send_message_start(id, req, &state.db)?;
 
     Ok((
         StatusCode::OK,
@@ -318,8 +317,7 @@ pub async fn upload_anonymous_message(
         &state.db,
         &state.s3,
     )
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
 
     Ok((
         jar,
@@ -357,8 +355,7 @@ pub async fn upload_anonymous_message_finish_multipart(
         &state.db,
         &state.s3,
     )
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+        .await?;
 
     Ok((StatusCode::OK, Json(())))
 }

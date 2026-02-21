@@ -76,6 +76,15 @@ impl Role {
             Role::Anonymous => MAX_DOWNLOADS_ANONYMOUS,
         }
     }
+
+    pub fn max_messages(&self) -> Option<i64> {
+        match self {
+            Role::User => Some(MAX_NUMBER_CONNECTED_TRANSFERS),
+            Role::Premium => Some(MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS),
+            Role::Admin => None, // unlimited
+            Role::Anonymous => Some(MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT),
+        }
+    }
 }
 
 

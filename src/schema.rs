@@ -45,12 +45,6 @@ diesel::table! {
 }
 
 diesel::table! {
-    roles (role) {
-        role -> Text,
-    }
-}
-
-diesel::table! {
     users (id) {
         id -> Int4,
         username -> Text,
@@ -67,12 +61,4 @@ diesel::table! {
     }
 }
 
-diesel::joinable!(users -> roles (role));
-
-diesel::allow_tables_to_appear_in_same_query!(
-    anonymousmessages,
-    messages,
-    opaque_settings,
-    roles,
-    users,
-);
+diesel::allow_tables_to_appear_in_same_query!(anonymousmessages, messages, opaque_settings, users,);

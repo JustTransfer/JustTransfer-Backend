@@ -5,20 +5,6 @@ CREATE TABLE opaque_settings
     settings                 BYTEA NOT NULL
 );
 
-
--- Table roles
-CREATE TABLE roles
-(
-    role                    TEXT PRIMARY KEY
-);
-
--- Fill the roles table with initial data
-INSERT INTO roles (role)
-VALUES ('user'),
-       ('premium'),
-       ('admin'),
-       ('anonymous');
-
 -- Table users
 CREATE TABLE users
 (
@@ -27,7 +13,7 @@ CREATE TABLE users
     email                   TEXT  NOT NULL UNIQUE,
     password_file           BYTEA NOT NULL,
     server_login            BYTEA,
-    role                    TEXT  NOT NULL REFERENCES roles (role) ON DELETE RESTRICT,
+    role                    TEXT NOT NULL CHECK (role IN ('user', 'premium', 'admin', 'anonymous')),
 
     public_key_enc          BYTEA NOT NULL,
     nonce_enc               BYTEA NOT NULL,
