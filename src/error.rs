@@ -18,6 +18,9 @@ pub enum ServerError {
 
     #[error("insufficient storage")]
     InsufficientStorage,
+
+    #[error("resource not found")]
+    NotFound,
 }
 impl From<aws_sdk_s3::error::BuildError> for ServerError {
     fn from(_: aws_sdk_s3::error::BuildError) -> Self {
@@ -44,6 +47,7 @@ impl From<ServerError> for ApiError {
             ServerError::Internal => ApiError::ServerError,
             ServerError::Unauthorized => ApiError::Unauthorized,
             ServerError::InsufficientStorage => ApiError::InsufficientStorage,
+            ServerError::NotFound => ApiError::ServerNotFound,
         }
     }
 }

@@ -295,13 +295,13 @@ pub fn get_user(
         .first::<User>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
-    
+
     use crate::schema::messages;
     let number_transfers = messages
         .filter(messages::sender_id.eq(user.id))
         .count()
         .get_result::<i64>(&mut conn)?;
-    
+
 
     Ok(InfoUser {
         id: user.id,
@@ -322,7 +322,7 @@ pub fn get_pub_key_enc(
         .filter(crate::schema::users::username.eq(username_pub_key))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or(ServerError::Internal)?;
+        .ok_or(ServerError::NotFound)?;
 
     Ok(user.public_key_enc.as_slice().try_into()?)
 }
@@ -337,7 +337,7 @@ pub fn get_pub_key_sign(
         .filter(crate::schema::users::username.eq(username_pub_key))
         .first::<User>(&mut conn)
         .optional()?
-        .ok_or(ServerError::Internal)?;
+        .ok_or(ServerError::NotFound)?;
 
     Ok(user.public_key_sign.as_slice().try_into()?)
 }
