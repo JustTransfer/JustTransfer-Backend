@@ -717,3 +717,46 @@ pub async fn get_message(
 
     Ok(presigned_url)
 }
+
+pub async fn delete_message (
+    username_param: &str,
+    message_id_param: i32,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    use crate::schema::messages;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Get the message
+    let message = messages
+        .filter(messages::id.eq(message_id_param))
+        .first::<Message>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    // Check if the message belongs to the user
+    if message.receiver_id != users
+        .filter(users::username.eq(username_param))
+        .select(users::id)
+        .first::<i32>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Unauthorized)? {
+        return Err(ServerError::Unauthorized);
+    }
+
+    // Delete the file from S3
+    s3.delete_object()
+        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+        .key(message.file_id.to_string())
+        .send()
+        .await
+        .map_err(|_| ServerError::Internal)?;
+
+    // Delete the message from DB
+    diesel::delete(messages.filter(messages::id.eq(message.id)))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}

@@ -616,6 +616,23 @@ pub async fn upload_message_finish_multipart(
         &state.db,
     )?;
 
-    // TODO check if the file is not too large, otherwise abort the upload and delete DB entry
+    Ok(StatusCode::OK)
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn delete_message(
+    Path(id): Path<i32>,
+    State(state): State<AppState>,
+    Extension(claims_jwt): Extension<Claims>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    server::connected::delete_message(
+        &*claims_jwt.username,
+        id,
+        &state.db,
+        &state.s3,
+    )
+        .await?;
+
     Ok(StatusCode::OK)
 }

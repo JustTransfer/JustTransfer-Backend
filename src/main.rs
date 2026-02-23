@@ -3,7 +3,7 @@ use libsodium_sys::*;
 use axum::{
     extract::{DefaultBodyLimit},
     middleware::{self},
-    routing::{get, post, put},
+    routing::{get, post, put, delete},
     Router,
     error_handling::HandleErrorLayer,
     BoxError,
@@ -56,6 +56,7 @@ async fn main() {
         .route("/api/messages", get(api_handlers::connected::get_messages))
         .route("/api/messages/sent", get(api_handlers::connected::get_messages_sent))
         .route("/api/message/{id}", get(api_handlers::connected::get_one_message))
+        .route("/api/message/{id}", delete(api_handlers::connected::delete_message))
         .route("/api/message", post(api_handlers::connected::upload_message))
         .route("/api/message/uploadfinish/{file_id}", post(api_handlers::connected::upload_message_finish_multipart))
         .layer(middleware::from_fn(api_handlers::auth::jwt_auth_connected))
