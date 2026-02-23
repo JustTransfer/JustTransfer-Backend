@@ -179,8 +179,6 @@ pub async fn register_user_end(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEndUpdate {
-    //#[validate(custom(function = "validate_username"))]
-    //username: String, // TODO get username from JWT
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]

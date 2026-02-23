@@ -141,7 +141,7 @@ pub fn server_registration_finish_update(
         ))
         .returning(User::as_returning())
         .get_result(&mut conn)
-        .unwrap();
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
