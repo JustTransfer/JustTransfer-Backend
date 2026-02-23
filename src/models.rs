@@ -34,6 +34,7 @@ pub struct User {
     pub password_file: Vec<u8>,
     pub server_login: Option<Vec<u8>>,
     pub role: String,
+    pub number_transfers: i32,
 
     pub public_key_enc: Vec<u8>,
     pub nonce_enc: Vec<u8>,
@@ -49,7 +50,7 @@ pub struct InfoUser {
     pub username: String,
     pub email: String,
     pub role: String,
-    pub number_transfers: i64,
+    pub number_transfers: i32,
 }
 
 #[derive(Insertable)]

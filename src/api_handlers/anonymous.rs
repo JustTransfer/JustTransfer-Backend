@@ -39,11 +39,11 @@ pub struct RootResponse {
     max_lifetime_connected: i32,
     max_file_size_connected: i64,
     max_downloads_connected: i32,
-    max_transfer_connected: i64,
+    max_transfer_month_connected: i64,
     max_lifetime_connected_premium: i32,
     max_file_size_connected_premium: i64,
     max_downloads_connected_premium: i32,
-    max_transfer_connected_premium: i64,
+    max_transfer_month_connected_premium: i64,
 }
 
 #[instrument(err(Debug))]
@@ -58,11 +58,11 @@ pub async fn config() -> Result<impl IntoResponse, ApiError> {
             max_lifetime_connected: MAX_LIFETIME_CONNECTED,
             max_file_size_connected: MAX_FILE_SIZE_CONNECTED,
             max_downloads_connected: MAX_DOWNLOADS_CONNECTED,
-            max_transfer_connected: MAX_NUMBER_CONNECTED_TRANSFERS,
+            max_transfer_month_connected: MAX_NUMBER_CONNECTED_TRANSFERS_MONTH,
             max_lifetime_connected_premium: MAX_LIFETIME_CONNECTED_PREMIUM,
             max_file_size_connected_premium: MAX_FILE_SIZE_CONNECTED_PREMIUM,
             max_downloads_connected_premium: MAX_DOWNLOADS_CONNECTED_PREMIUM,
-            max_transfer_connected_premium: MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS,
+            max_transfer_month_connected_premium: MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH,
         }),
     ))
 }

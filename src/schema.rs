@@ -52,6 +52,7 @@ diesel::table! {
         password_file -> Bytea,
         server_login -> Nullable<Bytea>,
         role -> Text,
+        number_transfers -> Int4,
         public_key_enc -> Bytea,
         nonce_enc -> Bytea,
         cipher_private_key_enc -> Bytea,

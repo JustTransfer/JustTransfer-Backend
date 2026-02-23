@@ -296,19 +296,13 @@ pub fn get_user(
         .optional()?
         .ok_or(ServerError::Internal)?;
 
-    use crate::schema::messages;
-    let number_transfers = messages
-        .filter(messages::sender_id.eq(user.id))
-        .count()
-        .get_result::<i64>(&mut conn)?;
-
 
     Ok(InfoUser {
         id: user.id,
         username: user.username,
         email: user.email,
         role: user.role,
-        number_transfers: number_transfers,
+        number_transfers: user.number_transfers,
     })
 }
 
@@ -404,10 +398,11 @@ pub async fn send_message(
             .first::<String>(conn)?;
 
         // Enforce max sent messages limit
-        let sent_messages_count = messages::table
-            .filter(messages::sender_id.eq(sender.id))
-            .count()
-            .get_result::<i64>(conn)?;
+        let sent_messages_count = users::table
+            .filter(users::id.eq(sender.id))
+            .select(users::number_transfers)
+            .first::<i32>(conn)? as i64;
+
 
         // Convert DB string into Role enum
         let user_role = crate::api_handlers::auth::Role::try_from(sender_role.as_str())
@@ -418,11 +413,20 @@ pub async fn send_message(
             if sent_messages_count >= max {
                 return Err(ServerError::Unauthorized);
             }
+        } else {
+            return Err(ServerError::Internal);
         }
 
         // Insert the new message into the database
         diesel::insert_into(messages::table)
             .values(&new_message)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Increment the sender's number of transfer
+        diesel::update(users::table
+            .filter(users::id.eq(sender.id)))
+            .set(users::number_transfers.eq(users::number_transfers + 1))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 

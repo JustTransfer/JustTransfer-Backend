@@ -14,6 +14,7 @@ CREATE TABLE users
     password_file           BYTEA NOT NULL,
     server_login            BYTEA,
     role                    TEXT NOT NULL CHECK (role IN ('user', 'premium', 'admin', 'anonymous')),
+    number_transfers        INT NOT NULL DEFAULT 0,
 
     public_key_enc          BYTEA NOT NULL,
     nonce_enc               BYTEA NOT NULL,

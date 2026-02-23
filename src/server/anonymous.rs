@@ -11,8 +11,7 @@ use rand::rngs::OsRng;
 use opaque_ke::*;
 use tracing::info;
 use uuid::Uuid;
-
-
+use crate::api_handlers::auth::Role;
 use crate::consts::*;
 use crate::models::{AnonymousMessage, AnonymousMessageMetadata, Message, NewAnonymousMessage};
 use crate::schema::anonymousmessages::dsl::anonymousmessages;
@@ -127,8 +126,12 @@ pub async fn anonymous_send_message(
             .map_err(|_| ServerError::Internal)?;
 
         // Enforce limit
-        if sent_messages_count >= MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT {
-            return Err(ServerError::InsufficientStorage);
+        if let Some(max) = Role::Anonymous.max_messages() {
+            if sent_messages_count >= max {
+                return Err(ServerError::InsufficientStorage);
+            }
+        } else {
+            return Err(ServerError::Internal);
         }
 
         // Insert the new message into the database

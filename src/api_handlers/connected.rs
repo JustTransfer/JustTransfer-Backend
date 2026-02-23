@@ -27,7 +27,7 @@ pub struct UserInfoResult {
     username: String,
     email: String,
     role: String,
-    number_transfers: i64,
+    number_transfers: i32,
 }
 #[instrument(skip(state), err(Debug))]
 pub async fn get_user_info(
