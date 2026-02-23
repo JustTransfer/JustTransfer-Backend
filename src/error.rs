@@ -16,6 +16,9 @@ pub enum ServerError {
     #[error("unauthorized")]
     Unauthorized,
 
+    #[error("forbidden")]
+    Forbidden,
+
     #[error("insufficient storage")]
     InsufficientStorage,
 
@@ -46,6 +49,7 @@ impl From<ServerError> for ApiError {
             ServerError::UsernameTaken | ServerError::EmailTaken => ApiError::Conflict,
             ServerError::Internal => ApiError::ServerError,
             ServerError::Unauthorized => ApiError::Unauthorized,
+            ServerError::Forbidden => ApiError::Forbidden,
             ServerError::InsufficientStorage => ApiError::InsufficientStorage,
             ServerError::NotFound => ApiError::ServerNotFound,
         }

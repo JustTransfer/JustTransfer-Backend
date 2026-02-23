@@ -411,7 +411,7 @@ pub async fn send_message(
         // Enforce limit
         if let Some(max) = user_role.max_messages() {
             if sent_messages_count >= max {
-                return Err(ServerError::Unauthorized);
+                return Err(ServerError::Forbidden);
             }
         } else {
             return Err(ServerError::Internal);
