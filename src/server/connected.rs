@@ -67,6 +67,7 @@ pub fn server_registration_finish(
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
     let new_user = NewUser {
+        id: &Uuid::new_v4(),
         username: &username_param.to_string(),
         email: &email_param.to_string(),
         password_file: &password_file_param.serialize().to_vec(),
@@ -124,7 +125,7 @@ pub fn server_registration_finish_update(
     let user_id = users::table
         .filter(users::username.eq(username_param))
         .select(users::id)
-        .first::<i32>(&mut conn)
+        .first::<Uuid>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
 
@@ -372,7 +373,9 @@ pub async fn send_message(
         .optional()?
         .ok_or(ServerError::Internal)?;
 
+    // Generate a new message id
     let new_message = NewMessage {
+        id: &Uuid::new_v4(),
         sender_id: &sender.id,
         receiver_id: &receiver.id,
         cfilename: &filename_param,
@@ -576,7 +579,7 @@ async fn delete_invalid_messages_for_user(
             .map_err(|e| ServerError::Internal)?;
 
         // Delete from DB
-        let message_ids_to_delete: Vec<i32> = messages_to_delete.iter().map(|m| m.id).collect();
+        let message_ids_to_delete: Vec<Uuid> = messages_to_delete.iter().map(|m| m.id).collect();
         diesel::delete(messages.filter(messages::id.eq_any(message_ids_to_delete)))
             .execute(&mut conn)?;
 
@@ -689,7 +692,7 @@ pub async fn get_message(
     if message.receiver_id != users
         .filter(users::username.eq(username_param))
         .select(users::id)
-        .first::<i32>(&mut conn)
+        .first::<Uuid>(&mut conn)
         .optional()?
         .ok_or(ServerError::Unauthorized)? {
         return Err(ServerError::Unauthorized);
@@ -720,7 +723,7 @@ pub async fn get_message(
 
 pub async fn delete_message (
     username_param: &str,
-    message_id_param: i32,
+    message_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
@@ -739,7 +742,7 @@ pub async fn delete_message (
     if message.receiver_id != users
         .filter(users::username.eq(username_param))
         .select(users::id)
-        .first::<i32>(&mut conn)
+        .first::<Uuid>(&mut conn)
         .optional()?
         .ok_or(ServerError::Unauthorized)? {
         return Err(ServerError::Unauthorized);

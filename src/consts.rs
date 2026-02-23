@@ -16,7 +16,7 @@ pub const DUMMY_USERNAME: &str = "__dummy_user__";
 pub const DUMMY_EMAIL: &str = "__dummy_email__";
 pub const DUMMY_PASSWORD: &str = "__dummy_password__";
 pub const DUMMY_ROLE: &str = "user";
-pub static DUMMY_ID: OnceCell<i32> = OnceCell::new();
+pub static DUMMY_ID: OnceCell<Uuid> = OnceCell::new();
 
 
 /// Const for Dummy Anonymous Transfer

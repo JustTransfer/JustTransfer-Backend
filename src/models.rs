@@ -28,7 +28,7 @@ pub struct NewOpaqueSetting<'a> {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(belongs_to(User, foreign_key = role))]
 pub struct User {
-    pub id: i32,
+    pub id: Uuid,
     pub username: String,
     pub email: String,
     pub password_file: Vec<u8>,
@@ -46,7 +46,7 @@ pub struct User {
 }
 
 pub struct InfoUser {
-    pub id: i32,
+    pub id: Uuid,
     pub username: String,
     pub email: String,
     pub role: String,
@@ -56,6 +56,7 @@ pub struct InfoUser {
 #[derive(Insertable)]
 #[diesel(table_name = crate::schema::users)]
 pub struct NewUser<'a> {
+    pub id: &'a Uuid,
     pub username: &'a String,
     pub email: &'a String,
     pub password_file: &'a Vec<u8>,
@@ -76,9 +77,9 @@ pub struct NewUser<'a> {
 #[diesel(belongs_to(User, foreign_key = sender_id))]
 #[diesel(belongs_to(User, foreign_key = receiver_id))]
 pub struct Message {
-    pub id: i32,
-    pub sender_id: i32,
-    pub receiver_id: i32,
+    pub id: Uuid,
+    pub sender_id: Uuid,
+    pub receiver_id: Uuid,
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
@@ -95,8 +96,9 @@ pub struct Message {
 #[derive(Insertable)]
 #[diesel(table_name = crate::schema::messages)]
 pub struct NewMessage<'a> {
-    pub sender_id: &'a i32,
-    pub receiver_id: &'a i32,
+    pub id: &'a Uuid,
+    pub sender_id: &'a Uuid,
+    pub receiver_id: &'a Uuid,
     pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
     pub file_id: &'a Uuid,
@@ -112,7 +114,7 @@ pub struct NewMessage<'a> {
 
 #[derive(Queryable, Serialize)]
 pub struct MessageSentWithUsernames {
-    pub id: i32,
+    pub id: Uuid,
     pub sender: String,
     pub receiver: String,
     pub max_downloads: i32,
@@ -123,7 +125,7 @@ pub struct MessageSentWithUsernames {
 
 #[derive(Queryable, Serialize)]
 pub struct MessageWithUsernames {
-    pub id: i32,
+    pub id: Uuid,
     pub sender: String,
     pub receiver: String,
     pub cfilename: Vec<u8>,
@@ -141,7 +143,7 @@ pub struct MessageWithUsernames {
 
 #[derive(Queryable, Serialize)]
 pub struct MessageWithUsernamesEncoded {
-    pub id: i32,
+    pub id: Uuid,
     pub sender: String,
     pub receiver: String,
     pub cfilename: String,

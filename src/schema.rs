@@ -20,9 +20,9 @@ diesel::table! {
 
 diesel::table! {
     messages (id) {
-        id -> Int4,
-        sender_id -> Int4,
-        receiver_id -> Int4,
+        id -> Uuid,
+        sender_id -> Uuid,
+        receiver_id -> Uuid,
         cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,
@@ -46,7 +46,7 @@ diesel::table! {
 
 diesel::table! {
     users (id) {
-        id -> Int4,
+        id -> Uuid,
         username -> Text,
         email -> Text,
         password_file -> Bytea,

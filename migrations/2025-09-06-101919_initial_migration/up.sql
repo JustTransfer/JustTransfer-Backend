@@ -8,7 +8,7 @@ CREATE TABLE opaque_settings
 -- Table users
 CREATE TABLE users
 (
-    id                      SERIAL PRIMARY KEY,
+    id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     username                TEXT  NOT NULL UNIQUE,
     email                   TEXT  NOT NULL UNIQUE,
     password_file           BYTEA NOT NULL,
@@ -28,9 +28,9 @@ CREATE TABLE users
 -- Table messages
 CREATE TABLE messages
 (
-    id               SERIAL PRIMARY KEY,
-    sender_id        INT           NOT NULL REFERENCES users (id) ON DELETE CASCADE,
-    receiver_id      INT           NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    id               UUID          PRIMARY KEY DEFAULT gen_random_uuid(),
+    sender_id        UUID          NOT NULL REFERENCES users (id) ON DELETE CASCADE,
+    receiver_id      UUID          NOT NULL REFERENCES users (id) ON DELETE CASCADE,
 
     cfilename         BYTEA        NOT NULL,
     nonce_filename   BYTEA         NOT NULL,

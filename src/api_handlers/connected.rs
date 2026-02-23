@@ -621,7 +621,7 @@ pub async fn upload_message_finish_multipart(
 
 #[instrument(skip(state), err(Debug))]
 pub async fn delete_message(
-    Path(id): Path<i32>,
+    Path(id): Path<Uuid>,
     State(state): State<AppState>,
     Extension(claims_jwt): Extension<Claims>,
 ) -> Result<impl IntoResponse, ApiError> {

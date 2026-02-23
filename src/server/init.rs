@@ -250,6 +250,7 @@ async fn generate_dummy_user(
 
     if existing_user.is_none() {
         let new_user = NewUser {
+            id: &Uuid::new_v4(),
             username: &DUMMY_USERNAME.to_string(),
             email: &DUMMY_EMAIL.to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
@@ -269,14 +270,14 @@ async fn generate_dummy_user(
             .map_err(|e| ServerError::Internal)?;
     }
 
-    // Get the id of the dummy user
-    let dummy_id = users::table
+
+    let dummy_user_id = users::table
         .filter(users::username.eq(DUMMY_USERNAME))
         .select(users::id)
-        .first::<i32>(&mut conn)
+        .first::<Uuid>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    DUMMY_ID.set(dummy_id)
+    DUMMY_ID.set(dummy_user_id)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
