@@ -42,7 +42,7 @@ async fn main() {
     // Spawn a background task to run monthly tasks at the 1st of every month at 00:00:00 UTC
     let server_mode = consts::SERVER_MODE
         .get()
-        .unwrap_or(&"master".to_string())
+        .unwrap()
         .to_string();
 
     if server_mode == "slave" {
@@ -75,9 +75,17 @@ async fn main() {
                             Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).unwrap()
                         };
 
-                        (next_run - now)
+                        let time_next_month = (next_run - now)
                             .to_std()
-                            .unwrap_or(std::time::Duration::from_secs(0))
+                            .unwrap_or(std::time::Duration::from_secs(0));
+
+                        tracing::info!(
+                            "Server mode is 'master'. Monthly task will run in {:?} at {}",
+                            time_next_month,
+                            next_run
+                        );
+
+                        time_next_month
                     }
                     _ => {
                         tracing::error!(
