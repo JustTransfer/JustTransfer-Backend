@@ -71,6 +71,16 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
                 JWT_SECRET_KEY.set(std::env::var(var).unwrap())
                     .map_err(|_| ServerError::Internal)?;
             }
+            "SERVER_MODE" => {
+                // Validate server mode
+                let mode = std::env::var(var).unwrap();
+                if mode != "master" && mode != "slave" && mode != "development" {
+                    error!("Invalid server mode: {}. Must be 'master', 'slave' or 'development'", mode);
+                    return Err(ServerError::Internal);
+                }
+                SERVER_MODE.set(mode)
+                    .map_err(|_| ServerError::Internal)?;
+            }
             _ => {}
         }
     }
