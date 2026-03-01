@@ -19,6 +19,7 @@
 ## Install Diesel
 
 ```bash
+# On Windows
 setx PQ_LIB_DIR "C:\Program Files\PostgreSQL\17\lib"
 cargo install diesel_cli --no-default-features --features postgres
 
@@ -40,3 +41,4 @@ diesel migration run
 
 diesel print-schema > src/schema.rs # Generate schema.rs from the database
 ```
+
