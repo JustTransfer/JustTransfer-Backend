@@ -763,3 +763,18 @@ pub async fn delete_message (
 
     Ok(())
 }
+
+pub async fn reset_transfer_counter_all_users(
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Reset the transfer counter for all users
+    diesel::update(users::table)
+        .set(users::number_transfers.eq(0))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
