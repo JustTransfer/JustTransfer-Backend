@@ -16,36 +16,6 @@
 ## Features
 - TODO
 
-## TODO Backend
-- Fix HTTP return codes
-- Validate email (email format and code transmitted by email)
-- Add a username which is unique in the app (in addition to email)
-- Add a counter to max number of anonymous transfers (avoid server overload)
-- Add a counter to max number of transfers (avoid server overload)
-- Put public key of signature in the message
-- Add a key rotation option (should keep old messages)
-- Add a delete account option
-- Add delete message inbox option
-- Login endpoint to have a supervisor
-- Upgrade Database performance
-  - Indexes
-  - Partitioning
-  - Replication
-- OPAQUE
-  - Use dummy password file (None) if not found
-  - Check server public key
-  - Change the way connected user are stored (hashmap)
-  - Change password/Key rotation should keep old messages readable
-
-- Load config from env file in a single point
-  - Remove it from the server
- 
-- Auto run migration at server start (no cli required) and maque Down.sql
-
-- Files in a bucket S3
-
-- Mecanism to report a transfer and delete it
-
 ## Install Diesel
 
 ```bash
