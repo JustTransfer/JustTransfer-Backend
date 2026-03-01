@@ -40,3 +40,4 @@ diesel migration run
 
 diesel print-schema > src/schema.rs # Generate schema.rs from the database
 ```
+test
