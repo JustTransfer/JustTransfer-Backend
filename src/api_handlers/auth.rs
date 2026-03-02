@@ -123,8 +123,8 @@ impl Claims {
     }
 }
 
-// TODO use persistent store
 pub fn get_session_layer() -> SessionManagerLayer<MemoryStore> {
+    // In-memory session store
     let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(true)

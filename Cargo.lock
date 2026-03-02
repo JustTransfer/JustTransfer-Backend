@@ -9,7 +9,6 @@ dependencies = [
  "argon2 0.6.0-rc.7",
  "aws-sdk-s3",
  "axum",
- "axum-extra",
  "base64",
  "chrono",
  "diesel",
@@ -498,28 +497,6 @@ dependencies = [
  "mime",
  "pin-project-lite",
  "sync_wrapper",
- "tower-layer",
- "tower-service",
- "tracing",
-]
-
-[[package]]
-name = "axum-extra"
-version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fef252edff26ddba56bbcdf2ee3307b8129acb86f5749b68990c168a6fcc9c76"
-dependencies = [
- "axum",
- "axum-core",
- "bytes",
- "cookie",
- "futures-core",
- "futures-util",
- "http 1.4.0",
- "http-body 1.0.1",
- "http-body-util",
- "mime",
- "pin-project-lite",
  "tower-layer",
  "tower-service",
  "tracing",
