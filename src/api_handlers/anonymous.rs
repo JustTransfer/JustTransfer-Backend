@@ -141,7 +141,7 @@ pub async fn anonymous_message_login_end(
 
     // Create cookie jar
     // let jar = api_handlers::auth::create_anonymous_cookie(&id)?;
-    session.insert("anonymous_message_id", id.to_string())
+    session.insert(AUTH_KEY_ANONYMOUS, id.to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -292,10 +292,10 @@ pub async fn upload_anonymous_message(
     let claims = Claims {
         username: payload.id.to_string(),
         role: auth::Role::Anonymous,
-        exp: 0, // Not used in this case to validate the following
+        iat: 0, // Not used in this case to validate the following
     };
 
-    session.insert("anonymous_message_id", payload.id.to_string())
+    session.insert(AUTH_KEY_ANONYMOUS, payload.id.to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
 

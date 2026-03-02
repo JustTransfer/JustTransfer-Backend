@@ -120,18 +120,8 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
-    let session_store = MemoryStore::default();
-    let session_layer = SessionManagerLayer::new(session_store)
-        .with_secure(true)
-        .with_expiry(Expiry::OnInactivity(Duration::hours(48)));
-
-    // Store for anonymous user session
-    let anonymous_session_store = MemoryStore::default();
-    let anonymous_session_layer = SessionManagerLayer::new(anonymous_session_store)
-        .with_secure(true)
-        .with_expiry(Expiry::OnInactivity(Duration::hours(48)));
-
+    let session_layer = api_handlers::auth::get_session_layer();
+    let anonymous_session_layer = api_handlers::auth::get_session_layer();
 
     // build our application with a route
     let public_app = Router::new()

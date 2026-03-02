@@ -4,6 +4,8 @@ use axum::extract::{Request, Path};
 use axum::middleware::Next;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::CookieJar;
+use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
+
 use chrono::Utc;
 // use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 use uuid::Uuid;
@@ -93,7 +95,7 @@ impl Role {
 pub struct Claims {
     pub username: String,
     pub role: Role,
-    pub exp: usize,  // expiration time as UNIX timestamp
+    pub iat: usize, // issued at, as a timestamp in seconds since the epoch
 }
 
 impl Claims {
@@ -124,12 +126,15 @@ impl Claims {
     }
 }
 
-use async_trait::async_trait;
-use axum::{
-    extract::{FromRequestParts, State},
-    http::{request::Parts},
-};
-use tower_sessions::Session;
+// TODO use persistent store
+pub fn get_session_layer() -> SessionManagerLayer<MemoryStore> {
+    let session_store = MemoryStore::default();
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(true)
+        .with_expiry(Expiry::OnInactivity(Duration::hours(SESSION_DURATION_HOURS)));
+
+    session_layer
+}
 
 #[instrument(skip(session, req, next))]
 pub async fn require_auth(
@@ -137,18 +142,20 @@ pub async fn require_auth(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if session.get::<String>("username").await.unwrap_or(None).is_none() {
+    if session.get::<String>(AUTH_KEY).await.unwrap_or(None).is_none() {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
     // Extend the request with the user's role and username for later use in handlers
-    if let Some(username) = session.get::<String>("username").await.unwrap_or(None) {
-        let role = session.get::<String>("role").await.unwrap_or(None).unwrap_or("user".to_string());
+    if let Some(username) = session.get::<String>(AUTH_KEY).await.unwrap_or(None) {
+        let role = session.get::<String>(AUTH_KEY_ROLE).await.unwrap_or(None).unwrap_or("user".to_string());
+        let created_at_str = session.get::<String>(AUTH_KEY_CREATED_AT).await.unwrap_or(None).unwrap_or("0".to_string());
+        let created_at = created_at_str.parse::<usize>().unwrap_or(0);
 
         req.extensions_mut().insert(Claims {
             username,
             role: Role::try_from(role.as_str()).unwrap_or(Role::User),
-            exp: 0, // TODO
+            iat: created_at,
         });
     }
 
@@ -161,16 +168,17 @@ pub async  fn require_auth_anonymous(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if session.get::<String>("anonymous_message_id").await.unwrap_or(None).is_none() {
+    if session.get::<String>(AUTH_KEY_ANONYMOUS).await.unwrap_or(None).is_none() {
         return Err(StatusCode::UNAUTHORIZED);
     }
 
     // Extend the request with the anonymous message ID for later use in handlers
-    if let Some(message_id) = session.get::<String>("anonymous_message_id").await.unwrap_or(None) {
+    if let Some(message_id) = session.get::<String>(AUTH_KEY_ANONYMOUS).await.unwrap_or(None) {
+
         req.extensions_mut().insert(Claims {
             username: message_id,
             role: Role::Anonymous,
-            exp: 0, // TODO
+            iat: 0,
         });
     }
 

@@ -171,10 +171,13 @@ pub async fn register_user_end(
 
     // Create JWT token for the new user
     // let jar = api_handlers::auth::create_connected_cookie(&payload.username, api_handlers::auth::Role::User)?;
-    session.insert("username", &payload.username)
+    session.insert(AUTH_KEY, &payload.username)
         .await
         .map_err(|_| ApiError::ServerError)?;
-    session.insert("role", api_handlers::auth::Role::User.to_string())
+    session.insert(AUTH_KEY_ROLE, api_handlers::auth::Role::User.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session.insert(AUTH_KEY_CREATED_AT, Utc::now().to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -348,10 +351,13 @@ pub async fn login_user_end(
 
     // Generate JWT token
     // let jar = api_handlers::auth::create_connected_cookie(&user.username, role)?;
-    session.insert("username", &user.username)
+    session.insert(AUTH_KEY, &user.username)
         .await
         .map_err(|_| ApiError::ServerError)?;
-    session.insert("role", api_handlers::auth::Role::User.to_string())
+    session.insert(AUTH_KEY_ROLE, api_handlers::auth::Role::User.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session.insert(AUTH_KEY_CREATED_AT, Utc::now().to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
 
