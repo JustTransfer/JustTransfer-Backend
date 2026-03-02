@@ -14,16 +14,15 @@ rand = "0.8.5"
 
 # Web framework and related libraries
 axum = { version = "0.8.6", features = ["multipart", "tokio", "macros"]}
-axum-extra = { version = "0.12.5", features = ["cookie"]}
 http = "1.4.0"
 tower = { version = "0.5.2", features = ["timeout"] }
 tower-http = { version = "0.6.8", features = ["cors", "trace", "catch-panic"] }
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = { version = "1.49.0", features = ["full"] }
 validator = { version = "0.20.0", features = ["derive"] }
-jsonwebtoken = { version = "10.3.0", features = ["aws_lc_rs"] }
 tracing = "0.1.41"
 tracing-subscriber = "0.3.22"
+tower-sessions = "0.14.0"
 
 # Database and environment management
 once_cell = "1.21.3"

@@ -1,6 +1,6 @@
 use std::io;
 use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler, Extension};
-use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
 
 use serde::{Deserialize, Serialize};
 
@@ -21,7 +21,7 @@ use crate::api_handlers::*;
 use crate::{api_handlers, server};
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
-use crate::api_handlers::auth::{create_jwt, Claims};
+use crate::api_handlers::auth::{Claims};
 use crate::consts::*;
 use crate::error::ApiError;
 use crate::models::*;
@@ -123,6 +123,7 @@ pub struct AnonymousLoginEnd {
 pub async fn anonymous_message_login_end(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
+    session: Session,
     Json(payload): Json<AnonymousLoginEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -137,10 +138,12 @@ pub async fn anonymous_message_login_end(
     server::anonymous::server_login_end_anonymous(id, req, &state.db, &state.s3)
         .await?;
 
-    // Create cookie jar
-    let jar = api_handlers::auth::create_anonymous_cookie(&id)?;
+    // Create session
+    session.insert(AUTH_KEY_ANONYMOUS, id.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
 
-    Ok((jar, (StatusCode::OK, Json(()))))
+    Ok((StatusCode::OK, Json(())))
 }
 
 #[derive(Serialize)]
@@ -275,18 +278,21 @@ pub struct UploadAnonymousMessageFinishResult {
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_anonymous_message(
     State(state): State<AppState>,
+    session: Session,
     Json(payload): Json<UploadAnonymousMessageFinish>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    // Create JWT token
-    let jar = api_handlers::auth::create_anonymous_cookie(&payload.id)?;
+    // Create session
+    session.insert(AUTH_KEY_ANONYMOUS, payload.id.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
     let claims = Claims {
         username: payload.id.to_string(),
         role: auth::Role::Anonymous,
-        exp: 0, // Not used in this case to validate the following
+        iat: 0, // Not used in this case to validate the following
     };
 
     // Authorize the upload based on the user role and the provided parameters
@@ -320,14 +326,12 @@ pub async fn upload_anonymous_message(
         .await?;
 
     Ok((
-        jar,
-        (
         StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
         upload_urls,
         transfer_id: payload.id,
         upload_id,
         message_file_id: file_id,
-    })))
+    }))
     )
 }
 

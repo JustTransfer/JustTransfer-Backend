@@ -2,12 +2,12 @@ use axum::{http::StatusCode, response::Response, RequestExt};
 use serde::{Deserialize, Serialize};
 use axum::extract::{Request, Path};
 use axum::middleware::Next;
-use axum_extra::extract::cookie::{Cookie, SameSite};
-use axum_extra::extract::CookieJar;
+use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
+
 use chrono::Utc;
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 use uuid::Uuid;
 use std::fmt;
+use tracing::{info, instrument};
 
 use crate::consts::*;
 use crate::{api_handlers, consts};
@@ -92,7 +92,7 @@ impl Role {
 pub struct Claims {
     pub username: String,
     pub role: Role,
-    pub exp: usize,  // expiration time as UNIX timestamp
+    pub iat: usize, // issued at, as a timestamp in seconds since the epoch
 }
 
 impl Claims {
@@ -123,131 +123,61 @@ impl Claims {
     }
 }
 
-pub fn create_anonymous_cookie (message_id: &Uuid) -> Result<CookieJar, ApiError> {
+pub fn get_session_layer() -> SessionManagerLayer<MemoryStore> {
+    // In-memory session store
+    let session_store = MemoryStore::default();
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(true)
+        .with_expiry(Expiry::OnInactivity(Duration::hours(SESSION_DURATION_HOURS)));
 
-    let token = create_jwt(&*message_id.to_string(), auth::Role::Anonymous)
-        .map_err(|_| ApiError::JWTError)?;
-
-    let cookie_name = format!("{}_{}", AUTH_HEADER_ANONYMOUS, message_id);
-    let cookie = Cookie::build((cookie_name, token))
-        .http_only(true)
-        .secure(true)
-        .same_site(SameSite::Strict)
-        .path("/")
-        .finish();
-
-    let jar = CookieJar::new().add(cookie);
-
-    Ok(jar)
+    session_layer
 }
 
-pub fn create_connected_cookie (username: &String, role: Role) -> Result<CookieJar, ApiError> {
-
-    let token = create_jwt(&username, role)
-        .map_err(|_| ApiError::JWTError)?;
-
-    // Create cookie (HttpOnly, Secure for production)
-    let cookie = Cookie::build((AUTH_HEADER, token.clone()))
-        .http_only(true)
-        .secure(true)
-        .same_site(SameSite::Strict)
-        .path("/")
-        .finish();
-
-    let jar = CookieJar::new().add(cookie);
-
-    Ok(jar)
-}
-
-pub fn create_jwt(user_id: &str, role: Role) -> Result<String, Error> {
-    let expiration = chrono::Utc::now()
-        .checked_add_signed(chrono::Duration::minutes(JWT_DURATION_MINUTES))
-        .expect("valid timestamp")
-        .timestamp() as usize;
-
-    let claims = Claims {
-        username: user_id.to_owned(),
-        role: role,
-        exp: expiration,
-    };
-
-    encode(
-        &Header::default(),
-        &claims,
-        &EncodingKey::from_secret(JWT_SECRET_KEY.get().unwrap().as_ref()),
-    )
-}
-
-pub fn verify_jwt(token: &str) -> Result<TokenData<Claims>, Error> {
-    decode::<Claims>(
-        token,
-        &DecodingKey::from_secret(JWT_SECRET_KEY.get().unwrap().as_ref()),
-        &Validation::default(),
-    )
-}
-
-pub async fn jwt_auth_connected(mut req: Request, next: Next) -> Result<Response, StatusCode> {
-    // Get the Cookie
-    let headers = req.headers();
-    if let Some(cookie_header) = headers.get("Cookie") {
-        if let Ok(cookie_str) = cookie_header.to_str() {
-            // Look for the jwt_token cookie
-            for cookie in cookie_str.split(';') {
-                let cookie = cookie.trim();
-
-                if let Some(token) = cookie.strip_prefix(AUTH_HEADER) {
-                    let token = token.trim_start_matches('=').trim();
-
-                    return match verify_jwt(token) {
-                        Ok(token_data) => {
-                            // Add claims to request extensions if needed
-                            req.extensions_mut().insert(token_data.claims);
-
-                            // Proceed to the next middleware or handler
-                            return Ok(next.run(req).await);
-                        }
-                        Err(_) => Err(StatusCode::UNAUTHORIZED), // Invalid JWT
-                    };
-                }
-            }
-        }
+#[instrument(skip(session, req, next))]
+pub async fn require_auth(
+    session: Session,
+    mut req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if session.get::<String>(AUTH_KEY).await.unwrap_or(None).is_none() {
+        return Err(StatusCode::UNAUTHORIZED);
     }
 
-    Err(StatusCode::UNAUTHORIZED) // No Authorization header or invalid token
-}
+    // Extend the request with the user's role and username for later use in handlers
+    if let Some(username) = session.get::<String>(AUTH_KEY).await.unwrap_or(None) {
+        let role = session.get::<String>(AUTH_KEY_ROLE).await.unwrap_or(None).unwrap_or("user".to_string());
+        let created_at_str = session.get::<String>(AUTH_KEY_CREATED_AT).await.unwrap_or(None).unwrap_or("0".to_string());
+        let created_at = created_at_str.parse::<usize>().unwrap_or(0);
 
-pub async fn jwt_auth_anonymous(mut req: Request, next: Next) -> Result<Response, StatusCode> {
-
-    let Path(id): Path<String> = req.extract_parts().await.map_err(|_| StatusCode::BAD_REQUEST)?;
-
-    let expected_cookie_name = format!("{}_{}", AUTH_HEADER_ANONYMOUS, id);
-
-    // Get the Cookie
-    let headers = req.headers();
-    if let Some(cookie_header) = headers.get("Cookie") {
-        if let Ok(cookie_str) = cookie_header.to_str() {
-            // Look for the jwt_token cookie
-            for cookie in cookie_str.split(';') {
-                let cookie = cookie.trim();
-
-                // Check if the cookie name matches the expected format for anonymous tokens
-                if let Some(token) = cookie.strip_prefix(&expected_cookie_name) {
-                    let token = token.trim_start_matches('=').trim();
-
-                    return match verify_jwt(token) {
-                        Ok(token_data) => {
-                            // Add claims to request extensions if needed
-                            req.extensions_mut().insert(token_data.claims);
-
-                            // Proceed to the next middleware or handler
-                            return Ok(next.run(req).await);
-                        },
-                        Err(_) => Err(StatusCode::UNAUTHORIZED), // Invalid JWT
-                    }
-                }
-            }
-        }
+        req.extensions_mut().insert(Claims {
+            username,
+            role: Role::try_from(role.as_str()).unwrap_or(Role::User),
+            iat: created_at,
+        });
     }
 
-    Err(StatusCode::UNAUTHORIZED) // No Authorization header or invalid token
+    Ok(next.run(req).await)
+}
+
+#[instrument(skip(session, req, next))]
+pub async  fn require_auth_anonymous(
+    session: Session,
+    mut req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if session.get::<String>(AUTH_KEY_ANONYMOUS).await.unwrap_or(None).is_none() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // Extend the request with the anonymous message ID for later use in handlers
+    if let Some(message_id) = session.get::<String>(AUTH_KEY_ANONYMOUS).await.unwrap_or(None) {
+
+        req.extensions_mut().insert(Claims {
+            username: message_id,
+            role: Role::Anonymous,
+            iat: 0,
+        });
+    }
+
+    Ok(next.run(req).await)
 }

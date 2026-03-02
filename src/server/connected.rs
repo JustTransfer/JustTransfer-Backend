@@ -269,17 +269,6 @@ pub fn server_login_finish(
     ))
 }
 
-// TODO implement logout
-/*pub fn logout(
-    &mut self,
-    username_param: &str,
-) -> Result<(), ServerError> {
-
-    self.disconnect_user(username_param)?;
-
-    Ok(())
-}*/
-
 ///
 /// Users
 ///
