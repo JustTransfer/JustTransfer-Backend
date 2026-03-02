@@ -2,6 +2,7 @@ use std::io;
 use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Extension, Json};
 use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
+use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use chrono::{Duration, Utc};
@@ -13,7 +14,7 @@ use tracing::{info, instrument};
 use crate::{api_handlers, server};
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
-use crate::api_handlers::auth::{create_jwt, Claims};
+use crate::api_handlers::auth::{Claims};
 use crate::consts::*;
 use crate::models::*;
 use crate::error::*;
@@ -119,6 +120,7 @@ pub struct RegisterEndResult {
 #[instrument(skip(state), err(Debug))]
 pub async fn register_user_end(
     State(state): State<AppState>,
+    session: Session,
     Json(payload): Json<RegisterUserEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -168,13 +170,19 @@ pub async fn register_user_end(
     )?;
 
     // Create JWT token for the new user
-    let jar = api_handlers::auth::create_connected_cookie(&payload.username, api_handlers::auth::Role::User)?;
+    // let jar = api_handlers::auth::create_connected_cookie(&payload.username, api_handlers::auth::Role::User)?;
+    session.insert("username", &payload.username)
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session.insert("role", api_handlers::auth::Role::User.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
 
     let content = Json(RegisterEndResult {
         role: api_handlers::auth::Role::User.to_string(),
     });
 
-    Ok((jar, (StatusCode::OK, content)))
+    Ok((StatusCode::OK, content))
 }
 
 #[derive(Deserialize, Validate, Debug)]
@@ -312,6 +320,7 @@ pub struct LoginEndResult {
 #[instrument(skip(state), err(Debug))]
 pub async fn login_user_end(
     State(state): State<AppState>,
+    session: Session,
     Json(payload): Json<LoginEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -338,7 +347,13 @@ pub async fn login_user_end(
         .map_err(|_| ApiError::ServerError)?;
 
     // Generate JWT token
-    let jar = api_handlers::auth::create_connected_cookie(&user.username, role)?;
+    // let jar = api_handlers::auth::create_connected_cookie(&user.username, role)?;
+    session.insert("username", &user.username)
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session.insert("role", api_handlers::auth::Role::User.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
 
     // Encode the keys to base64
     let pub_enc = URL_SAFE_NO_PAD.encode(server_login_finish.0);
@@ -358,30 +373,19 @@ pub async fn login_user_end(
         role: user.role,
     });
 
-    Ok((jar, (StatusCode::OK, content)))
-}
-
-// TODO uncomment it
-/*#[derive(Deserialize, Validate, Debug)]
-pub struct Logout {
-    #[validate(custom(function = "validate_username"))]
-    username: String,
+    Ok((StatusCode::OK, content))
 }
 
 #[instrument(skip(state), err(Debug))]
-pub async fn logout(State(state): State<AppState>, Json(payload): Json<Logout>) -> Result<impl IntoResponse, ApiError> {
+pub async fn logout(
+    State(state): State<AppState>,
+    session: Session,
+) -> Result<impl IntoResponse, ApiError> {
 
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
+    session.delete().await.map_err(|_| ApiError::ServerError)?;
 
-    let mut srv = state.srv;
-    let logout_result = srv.logout(&*payload.username);
-
-    match logout_result {
-        Ok(_) => (StatusCode::OK),
-        Err(_) => (StatusCode::BAD_REQUEST),
-    }
-}*/
+    Ok(StatusCode::OK)
+}
 
 ///
 /// Get Public Keys

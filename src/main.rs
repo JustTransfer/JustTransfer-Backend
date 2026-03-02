@@ -17,6 +17,8 @@ use http::Response;
 use std::any::Any;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
+use tower_sessions::cookie::time::Duration;
+use tracing_subscriber::fmt::layer;
 
 pub mod api_handlers;
 pub mod consts;
@@ -118,92 +120,63 @@ async fn main() {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
+    let session_store = MemoryStore::default();
+    let session_layer = SessionManagerLayer::new(session_store)
+        .with_secure(true)
+        .with_expiry(Expiry::OnInactivity(Duration::hours(48)));
+
+    // Store for anonymous user session
+    let anonymous_session_store = MemoryStore::default();
+    let anonymous_session_layer = SessionManagerLayer::new(anonymous_session_store)
+        .with_secure(true)
+        .with_expiry(Expiry::OnInactivity(Duration::hours(48)));
+
+
     // build our application with a route
-    let app = Router::new()
+    let public_app = Router::new()
+        .route("/api/config", get(api_handlers::anonymous::config));
+
+    let account_app = Router::new()
         .route("/api/user", get(api_handlers::connected::get_user_info))
-        .route(
-            "/api/register/update",
-            post(api_handlers::connected::register_user_end_update),
-        )
-        //.route("/api/logout", post(api_handlers::logout))
-        .route(
-            "/api/pubkey/enc/{id}",
-            get(api_handlers::connected::get_pub_key_enc),
-        )
-        .route(
-            "/api/pubkey/sign/{id}",
-            get(api_handlers::connected::get_pub_key_sign),
-        )
+        .route("/api/register/update", post(api_handlers::connected::register_user_end_update))
+        .route("/api/logout", post(api_handlers::connected::logout))
+        .route("/api/pubkey/enc/{id}", get(api_handlers::connected::get_pub_key_enc))
+        .route("/api/pubkey/sign/{id}", get(api_handlers::connected::get_pub_key_sign))
         .route("/api/messages", get(api_handlers::connected::get_messages))
-        .route(
-            "/api/messages/sent",
-            get(api_handlers::connected::get_messages_sent),
-        )
-        .route(
-            "/api/message/{id}",
-            get(api_handlers::connected::get_one_message),
-        )
-        .route(
-            "/api/message/{id}",
-            delete(api_handlers::connected::delete_message),
-        )
-        .route(
-            "/api/message",
-            post(api_handlers::connected::upload_message),
-        )
-        .route(
-            "/api/message/uploadfinish/{file_id}",
-            post(api_handlers::connected::upload_message_finish_multipart),
-        )
-        .layer(middleware::from_fn(api_handlers::auth::jwt_auth_connected))
-        // Apply JWT auth middleware to all routes defined before this line
-        .route("/api/config", get(api_handlers::anonymous::config))
-        .route(
-            "/api/register/start",
-            post(api_handlers::connected::register_user_start),
-        )
-        .route(
-            "/api/register/end",
-            post(api_handlers::connected::register_user_end),
-        )
-        .route(
-            "/api/login/start",
-            post(api_handlers::connected::login_user_start),
-        )
-        .route(
-            "/api/login/end",
-            post(api_handlers::connected::login_user_end),
-        )
-        .route(
-            "/api/anonymous/message/start",
-            post(api_handlers::anonymous::anonymous_message_send_start),
-        )
-        .route(
-            "/api/anonymous/message",
-            post(api_handlers::anonymous::upload_anonymous_message),
-        )
-        .route(
-            "/api/anonymous/message/uploadfinish/{file_id}",
-            post(api_handlers::anonymous::upload_anonymous_message_finish_multipart),
-        )
-        .route(
-            "/api/anonymous/message/{id}/login/start",
-            post(api_handlers::anonymous::anonymous_message_login_start),
-        )
-        .route(
-            "/api/anonymous/message/{id}/login/end",
-            post(api_handlers::anonymous::anonymous_message_login_end),
-        )
-        .route(
-            "/api/anonymous/message/{id}/metadata",
-            get(api_handlers::anonymous::anonymous_message_get_one_metadata)
-                .layer(middleware::from_fn(api_handlers::auth::jwt_auth_anonymous)),
-        )
-        .route(
-            "/api/anonymous/message/{id}",
-            get(api_handlers::anonymous::anonymous_message_get_download_url)
-                .layer(middleware::from_fn(api_handlers::auth::jwt_auth_anonymous)),
-        )
+        .route("/api/messages/sent", get(api_handlers::connected::get_messages_sent))
+        .route("/api/message/{id}", get(api_handlers::connected::get_one_message))
+        .route("/api/message/{id}", delete(api_handlers::connected::delete_message))
+        .route("/api/message", post(api_handlers::connected::upload_message))
+        .route("/api/message/uploadfinish/{file_id}", post(api_handlers::connected::upload_message_finish_multipart))
+        .layer(middleware::from_fn(api_handlers::auth::require_auth))
+
+        .route("/api/register/start", post(api_handlers::connected::register_user_start))
+        .route("/api/register/end", post(api_handlers::connected::register_user_end))
+        .route("/api/login/start", post(api_handlers::connected::login_user_start))
+        .route("/api/login/end", post(api_handlers::connected::login_user_end))
+
+        .layer(session_layer);
+
+
+    let anonymous_app = Router::new()
+        .route("/api/anonymous/message/{id}/metadata", get(api_handlers::anonymous::anonymous_message_get_one_metadata))
+        .route("/api/anonymous/message/{id}", get(api_handlers::anonymous::anonymous_message_get_download_url))
+        .layer(middleware::from_fn(api_handlers::auth::require_auth_anonymous))
+
+        .route("/api/anonymous/message/start", post(api_handlers::anonymous::anonymous_message_send_start))
+        .route("/api/anonymous/message", post(api_handlers::anonymous::upload_anonymous_message))
+        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::anonymous::upload_anonymous_message_finish_multipart))
+        .route("/api/anonymous/message/{id}/login/start", post(api_handlers::anonymous::anonymous_message_login_start))
+        .route("/api/anonymous/message/{id}/login/end", post(api_handlers::anonymous::anonymous_message_login_end))
+
+        .layer(anonymous_session_layer);
+
+
+    let app = Router::new()
+        .merge(public_app)
+        .merge(account_app)
+        .merge(anonymous_app)
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)

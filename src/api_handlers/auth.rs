@@ -5,9 +5,10 @@ use axum::middleware::Next;
 use axum_extra::extract::cookie::{Cookie, SameSite};
 use axum_extra::extract::CookieJar;
 use chrono::Utc;
-use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
+// use jsonwebtoken::{encode, decode, Header, Validation, EncodingKey, DecodingKey, TokenData, errors::Error};
 use uuid::Uuid;
 use std::fmt;
+use tracing::{info, instrument};
 
 use crate::consts::*;
 use crate::{api_handlers, consts};
@@ -123,7 +124,60 @@ impl Claims {
     }
 }
 
-pub fn create_anonymous_cookie (message_id: &Uuid) -> Result<CookieJar, ApiError> {
+use async_trait::async_trait;
+use axum::{
+    extract::{FromRequestParts, State},
+    http::{request::Parts},
+};
+use tower_sessions::Session;
+
+#[instrument(skip(session, req, next))]
+pub async fn require_auth(
+    session: Session,
+    mut req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if session.get::<String>("username").await.unwrap_or(None).is_none() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // Extend the request with the user's role and username for later use in handlers
+    if let Some(username) = session.get::<String>("username").await.unwrap_or(None) {
+        let role = session.get::<String>("role").await.unwrap_or(None).unwrap_or("user".to_string());
+
+        req.extensions_mut().insert(Claims {
+            username,
+            role: Role::try_from(role.as_str()).unwrap_or(Role::User),
+            exp: 0, // TODO
+        });
+    }
+
+    Ok(next.run(req).await)
+}
+
+#[instrument(skip(session, req, next))]
+pub async  fn require_auth_anonymous(
+    session: Session,
+    mut req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    if session.get::<String>("anonymous_message_id").await.unwrap_or(None).is_none() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    // Extend the request with the anonymous message ID for later use in handlers
+    if let Some(message_id) = session.get::<String>("anonymous_message_id").await.unwrap_or(None) {
+        req.extensions_mut().insert(Claims {
+            username: message_id,
+            role: Role::Anonymous,
+            exp: 0, // TODO
+        });
+    }
+
+    Ok(next.run(req).await)
+}
+
+/*pub fn create_anonymous_cookie (message_id: &Uuid) -> Result<CookieJar, ApiError> {
 
     let token = create_jwt(&*message_id.to_string(), auth::Role::Anonymous)
         .map_err(|_| ApiError::JWTError)?;
@@ -250,4 +304,4 @@ pub async fn jwt_auth_anonymous(mut req: Request, next: Next) -> Result<Response
     }
 
     Err(StatusCode::UNAUTHORIZED) // No Authorization header or invalid token
-}
+}*/
