@@ -175,7 +175,7 @@ pub async fn register_user_end(
     session.insert(AUTH_KEY_ROLE, api_handlers::auth::Role::User.to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
-    session.insert(AUTH_KEY_CREATED_AT, Utc::now().to_string())
+    session.insert(AUTH_KEY_CREATED_AT, Utc::now().timestamp())
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -354,7 +354,7 @@ pub async fn login_user_end(
     session.insert(AUTH_KEY_ROLE, api_handlers::auth::Role::User.to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
-    session.insert(AUTH_KEY_CREATED_AT, Utc::now().to_string())
+    session.insert(AUTH_KEY_CREATED_AT, Utc::now().timestamp())
         .await
         .map_err(|_| ApiError::ServerError)?;
 

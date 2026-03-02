@@ -25,6 +25,7 @@ pub const DUMMY_ANONYMOUS_MESSAGE_ID: Uuid = Uuid::from_u128(0x12345678123456781
 
 /// Const for JWT
 pub const SESSION_DURATION_HOURS: i64 = 72; // 3 days
+pub const FRESH_SESSION_DURATION_MINUTES: i64 = 5; // 5 minutes
 pub const AUTH_KEY_ANONYMOUS: &str = "anonymous_message_id";
 pub const AUTH_KEY: &str = "username";
 pub const AUTH_KEY_ROLE: &str = "role";

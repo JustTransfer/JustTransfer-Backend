@@ -7,7 +7,7 @@ use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::
 use chrono::Utc;
 use uuid::Uuid;
 use std::fmt;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 use crate::consts::*;
 use crate::{api_handlers, consts};
@@ -133,7 +133,6 @@ pub fn get_session_layer() -> SessionManagerLayer<MemoryStore> {
     session_layer
 }
 
-#[instrument(skip(session, req, next))]
 pub async fn require_auth(
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
@@ -159,7 +158,6 @@ pub async fn require_auth(
     Ok(next.run(req).await)
 }
 
-#[instrument(skip(session, req, next))]
 pub async  fn require_auth_anonymous(
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
@@ -177,6 +175,33 @@ pub async  fn require_auth_anonymous(
             role: Role::Anonymous,
             iat: 0,
         });
+    }
+
+    Ok(next.run(req).await)
+}
+
+// Check if the iat of the session is recent
+pub async  fn require_fresh_login(
+    session: Session,
+    mut req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Result<Response, StatusCode> {
+
+    if session.get::<String>(AUTH_KEY).await.unwrap_or(None).is_none() {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+
+    let created_at: Option<i64> = session.get(AUTH_KEY_CREATED_AT).await.unwrap_or(None);
+
+    if let Some(ts) = created_at {
+        let now = Utc::now().timestamp();
+
+        if (now - ts).abs() > (FRESH_SESSION_DURATION_MINUTES * 60) {
+            warn!("Session is not fresh: created at {}, now is {}, difference is {} seconds", ts, now, (now - ts).abs());
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+    } else {
+        return Err(StatusCode::UNAUTHORIZED);
     }
 
     Ok(next.run(req).await)

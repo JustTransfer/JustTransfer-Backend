@@ -129,7 +129,8 @@ async fn main() {
 
     let account_app = Router::new()
         .route("/api/user", get(api_handlers::connected::get_user_info))
-        .route("/api/register/update", post(api_handlers::connected::register_user_end_update))
+        .route("/api/register/update", post(api_handlers::connected::register_user_end_update)
+            .layer(middleware::from_fn(api_handlers::auth::require_fresh_login)))
         .route("/api/logout", post(api_handlers::connected::logout))
         .route("/api/pubkey/enc/{id}", get(api_handlers::connected::get_pub_key_enc))
         .route("/api/pubkey/sign/{id}", get(api_handlers::connected::get_pub_key_sign))
