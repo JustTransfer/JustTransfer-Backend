@@ -14,7 +14,6 @@ rand = "0.8.5"
 
 # Web framework and related libraries
 axum = { version = "0.8.6", features = ["multipart", "tokio", "macros"]}
-axum-extra = { version = "0.12.5", features = ["cookie"]}
 http = "1.4.0"
 tower = { version = "0.5.2", features = ["timeout"] }
 tower-http = { version = "0.6.8", features = ["cors", "trace", "catch-panic"] }
@@ -36,4 +35,3 @@ base64 = "0.22.1"
 uuid = { version = "1.20.0", features = ["v4", "serde"] }
 chrono = { version = "0.4.43", features = ["serde", "clock"] }
 thiserror = "2"
-async-trait = "0.1.89"

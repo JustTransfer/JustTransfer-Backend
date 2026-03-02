@@ -1,6 +1,5 @@
 use std::io;
 use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Extension, Json};
-use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use serde::{Deserialize, Serialize};
 use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
 
@@ -169,8 +168,7 @@ pub async fn register_user_end(
         &state.db,
     )?;
 
-    // Create JWT token for the new user
-    // let jar = api_handlers::auth::create_connected_cookie(&payload.username, api_handlers::auth::Role::User)?;
+    // Create session
     session.insert(AUTH_KEY, &payload.username)
         .await
         .map_err(|_| ApiError::ServerError)?;
@@ -349,8 +347,7 @@ pub async fn login_user_end(
     let role = api_handlers::auth::Role::try_from(user.role.as_str())
         .map_err(|_| ApiError::ServerError)?;
 
-    // Generate JWT token
-    // let jar = api_handlers::auth::create_connected_cookie(&user.username, role)?;
+    // Create session
     session.insert(AUTH_KEY, &user.username)
         .await
         .map_err(|_| ApiError::ServerError)?;

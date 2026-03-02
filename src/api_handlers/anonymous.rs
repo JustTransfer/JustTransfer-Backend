@@ -1,6 +1,5 @@
 use std::io;
 use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler, Extension};
-use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
 use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
 
 use serde::{Deserialize, Serialize};
@@ -139,8 +138,7 @@ pub async fn anonymous_message_login_end(
     server::anonymous::server_login_end_anonymous(id, req, &state.db, &state.s3)
         .await?;
 
-    // Create cookie jar
-    // let jar = api_handlers::auth::create_anonymous_cookie(&id)?;
+    // Create session
     session.insert(AUTH_KEY_ANONYMOUS, id.to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
@@ -287,17 +285,15 @@ pub async fn upload_anonymous_message(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    // Create JWT token
-    //let jar = api_handlers::auth::create_anonymous_cookie(&payload.id)?;
+    // Create session
+    session.insert(AUTH_KEY_ANONYMOUS, payload.id.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
     let claims = Claims {
         username: payload.id.to_string(),
         role: auth::Role::Anonymous,
         iat: 0, // Not used in this case to validate the following
     };
-
-    session.insert(AUTH_KEY_ANONYMOUS, payload.id.to_string())
-        .await
-        .map_err(|_| ApiError::ServerError)?;
 
     // Authorize the upload based on the user role and the provided parameters
     claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
