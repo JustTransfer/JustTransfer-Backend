@@ -385,7 +385,7 @@ pub async fn logout(
     session: Session,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    session.delete().await.map_err(|_| ApiError::ServerError)?;
+    session.flush().await.map_err(|_| ApiError::ServerError)?;
 
     Ok(StatusCode::OK)
 }
