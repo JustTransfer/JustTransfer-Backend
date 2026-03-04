@@ -72,46 +72,72 @@ pub fn server_registration_finish(
         email: &email_param.to_string(),
         password_file: &password_file_param.serialize().to_vec(),
         role: &"user".to_string(),
-        public_key_enc: &pub_enc.to_vec(),
-        nonce_enc: &nonce_priv_enc.to_vec(),
-        cipher_private_key_enc: &cpriv_enc,
-        public_key_sign: &pub_sign.to_vec(),
-        nonce_sign: &nonce_priv_sign.to_vec(),
-        cipher_private_key_sign: &cpriv_sign,
     };
 
     let result = diesel::insert_into(users::table)
         .values(&new_user)
-        .execute(&mut conn);
+        .execute(&mut conn)
+        .map_err(|e| {
+            if let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = &e {
+                let msg = info.constraint_name().unwrap_or("");
 
-    match result {
-        Ok(_) => Ok(()),
-
-        Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info)) => {
-            let msg = info.constraint_name().unwrap_or("");
-
-            if msg.contains("username") {
-                Err(ServerError::UsernameTaken)
-            } else if msg.contains("email") {
-                Err(ServerError::EmailTaken)
+                if msg.contains("username") {
+                    ServerError::UsernameTaken
+                } else if msg.contains("email") {
+                    ServerError::EmailTaken
+                } else {
+                    ServerError::Internal
+                }
             } else {
-                Err(ServerError::Internal)
+                ServerError::Internal
             }
-        }
+        })?;
 
-        Err(_) => Err(ServerError::Internal),
-    }
+    // Create new keys
+    let key_enc = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: new_user.id,
+        usage: &"encryption".to_string(),
+        public_key: &pub_enc.to_vec(),
+        nonce_private_key: &nonce_priv_enc.to_vec(),
+        cipher_private_key: &cpriv_enc,
+        is_active: &true,
+        revoked_at: None,
+    };
+
+    let _ = diesel::insert_into(crate::schema::key_pairs::table)
+        .values(&key_enc)
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    let key_sign = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: new_user.id,
+        usage: &"signing".to_string(),
+        public_key: &pub_sign.to_vec(),
+        nonce_private_key: &nonce_priv_sign.to_vec(),
+        cipher_private_key: &cpriv_sign,
+        is_active: &true,
+        revoked_at: None,
+    };
+
+    let _ = diesel::insert_into(crate::schema::key_pairs::table)
+        .values(&key_sign)
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
 }
 
 pub fn server_registration_finish_update(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     username_param: &str,
-    cpriv1: Vec<u8>,
-    nonce1: Vec<u8>,
-    pub1: Vec<u8>,
-    cpriv2: Vec<u8>,
-    nonce2: Vec<u8>,
-    pub2: Vec<u8>,
+    cpriv_enc: Vec<u8>,
+    nonce_enc: Vec<u8>,
+    pub_enc: Vec<u8>,
+    cpriv_sign: Vec<u8>,
+    nonce_sign: Vec<u8>,
+    pub_sign: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
@@ -132,15 +158,55 @@ pub fn server_registration_finish_update(
     let user = diesel::update(users.find(user_id))
         .set((
             users::password_file.eq(password_file_bytes.to_vec()),
-            public_key_enc.eq(pub1.to_vec()),
-            nonce_enc.eq(nonce1.to_vec()),
-            cipher_private_key_enc.eq(cpriv1),
-            public_key_sign.eq(pub2.to_vec()),
-            nonce_sign.eq(nonce2.to_vec()),
-            cipher_private_key_sign.eq(cpriv2),
+            /*public_key_enc.eq(pub_sign.to_vec()),
+            nonce_enc.eq(nonce_sign.to_vec()),
+            cipher_private_key_enc.eq(cpriv_sign),
+            public_key_sign.eq(pub_sign.to_vec()),
+            nonce_sign.eq(nonce_sign.to_vec()),
+            cipher_private_key_sign.eq(cpriv_sign),*/
         ))
         .returning(User::as_returning())
         .get_result(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Invalidate old keys
+    diesel::update(crate::schema::key_pairs::table)
+        .filter(crate::schema::key_pairs::owner_id.eq(user_id))
+        .set(crate::schema::key_pairs::is_active.eq(false))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Insert new keys
+    let key_enc = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: &user.id,
+        usage: &"encryption".to_string(),
+        public_key: &pub_enc.to_vec(),
+        nonce_private_key: &nonce_enc.to_vec(),
+        cipher_private_key: &cpriv_enc,
+        is_active: &true,
+        revoked_at: None,
+    };
+
+    let _ = diesel::insert_into(crate::schema::key_pairs::table)
+        .values(&key_enc)
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    let key_sign = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: &user.id,
+        usage: &"signing".to_string(),
+        public_key: &pub_sign.to_vec(),
+        nonce_private_key: &nonce_sign.to_vec(),
+        cipher_private_key: &cpriv_sign,
+        is_active: &true,
+        revoked_at: None,
+    }
+
+    let _ = diesel::insert_into(crate::schema::key_pairs::table)
+        .values(&key_sign)
+        .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
