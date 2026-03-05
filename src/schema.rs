@@ -22,10 +22,12 @@ diesel::table! {
     key_pairs (id) {
         id -> Uuid,
         owner_id -> Uuid,
-        usage -> Text,
-        public_key -> Bytea,
-        nonce_private_key -> Bytea,
-        cipher_private_key -> Bytea,
+        enc_public_key -> Bytea,
+        enc_nonce_private_key -> Bytea,
+        enc_cipher_private_key -> Bytea,
+        sign_public_key -> Bytea,
+        sign_nonce_private_key -> Bytea,
+        sign_cipher_private_key -> Bytea,
         is_active -> Bool,
         created_at -> Timestamptz,
         revoked_at -> Nullable<Timestamptz>,
@@ -37,9 +39,8 @@ diesel::table! {
         id -> Uuid,
         sender_id -> Uuid,
         receiver_id -> Uuid,
-        sender_key_enc_id -> Uuid,
-        receiver_key_enc_id -> Uuid,
-        sender_key_sign_id -> Uuid,
+        sender_key_id -> Uuid,
+        receiver_key_id -> Uuid,
         cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,
@@ -71,7 +72,6 @@ diesel::table! {
         role -> Text,
         number_transfers -> Int4,
         created_at -> Timestamptz,
-        last_login_at -> Nullable<Timestamptz>,
     }
 }
 

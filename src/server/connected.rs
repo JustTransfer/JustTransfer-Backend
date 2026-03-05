@@ -72,6 +72,7 @@ pub fn server_registration_finish(
         email: &email_param.to_string(),
         password_file: &password_file_param.serialize().to_vec(),
         role: &"user".to_string(),
+        created_at: Utc::now(),
     };
 
     let result = diesel::insert_into(users::table)
@@ -97,32 +98,21 @@ pub fn server_registration_finish(
     let key_enc = NewKeyPairs {
         id: &Uuid::new_v4(),
         owner_id: new_user.id,
-        usage: &"encryption".to_string(),
-        public_key: &pub_enc.to_vec(),
-        nonce_private_key: &nonce_priv_enc.to_vec(),
-        cipher_private_key: &cpriv_enc,
+
+        enc_public_key: &pub_enc.to_vec(),
+        enc_nonce_private_key: &nonce_priv_enc.to_vec(),
+        enc_cipher_private_key: &cpriv_enc,
+
+        sign_public_key: &pub_sign.to_vec(),
+        sign_nonce_private_key: &nonce_priv_sign.to_vec(),
+        sign_cipher_private_key: &cpriv_sign,
+
         is_active: &true,
         revoked_at: None,
     };
 
     let _ = diesel::insert_into(crate::schema::key_pairs::table)
         .values(&key_enc)
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    let key_sign = NewKeyPairs {
-        id: &Uuid::new_v4(),
-        owner_id: new_user.id,
-        usage: &"signing".to_string(),
-        public_key: &pub_sign.to_vec(),
-        nonce_private_key: &nonce_priv_sign.to_vec(),
-        cipher_private_key: &cpriv_sign,
-        is_active: &true,
-        revoked_at: None,
-    };
-
-    let _ = diesel::insert_into(crate::schema::key_pairs::table)
-        .values(&key_sign)
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -158,12 +148,6 @@ pub fn server_registration_finish_update(
     let user = diesel::update(users.find(user_id))
         .set((
             users::password_file.eq(password_file_bytes.to_vec()),
-            /*public_key_enc.eq(pub_sign.to_vec()),
-            nonce_enc.eq(nonce_sign.to_vec()),
-            cipher_private_key_enc.eq(cpriv_sign),
-            public_key_sign.eq(pub_sign.to_vec()),
-            nonce_sign.eq(nonce_sign.to_vec()),
-            cipher_private_key_sign.eq(cpriv_sign),*/
         ))
         .returning(User::as_returning())
         .get_result(&mut conn)
@@ -180,32 +164,21 @@ pub fn server_registration_finish_update(
     let key_enc = NewKeyPairs {
         id: &Uuid::new_v4(),
         owner_id: &user.id,
-        usage: &"encryption".to_string(),
-        public_key: &pub_enc.to_vec(),
-        nonce_private_key: &nonce_enc.to_vec(),
-        cipher_private_key: &cpriv_enc,
+
+        enc_public_key: &pub_enc.to_vec(),
+        enc_nonce_private_key: &nonce_enc.to_vec(),
+        enc_cipher_private_key: &cpriv_enc,
+
+        sign_public_key: &pub_sign.to_vec(),
+        sign_nonce_private_key: &nonce_sign.to_vec(),
+        sign_cipher_private_key: &cpriv_sign,
+
         is_active: &true,
         revoked_at: None,
     };
 
     let _ = diesel::insert_into(crate::schema::key_pairs::table)
         .values(&key_enc)
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    let key_sign = NewKeyPairs {
-        id: &Uuid::new_v4(),
-        owner_id: &user.id,
-        usage: &"signing".to_string(),
-        public_key: &pub_sign.to_vec(),
-        nonce_private_key: &nonce_sign.to_vec(),
-        cipher_private_key: &cpriv_sign,
-        is_active: &true,
-        revoked_at: None,
-    }
-
-    let _ = diesel::insert_into(crate::schema::key_pairs::table)
-        .values(&key_sign)
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -282,12 +255,7 @@ pub fn server_login_finish(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<
     (
-        [u8; ENC_KEY_LEN_PUB],
-        Vec<u8>,
-        [u8; SYM_LEN_NONCE],
-        [u8; SIGN_KEY_LEN_PUB],
-        Vec<u8>,
-        [u8; SYM_LEN_NONCE],
+        Vec<KeyPairs>
     ),
     ServerError
 > {
@@ -325,14 +293,13 @@ pub fn server_login_finish(
         .optional()?
         .ok_or(ServerError::Internal)?;
 
-    Ok((
-        user.public_key_enc.as_slice().try_into().unwrap(),
-        user.cipher_private_key_enc.clone(),
-        user.nonce_enc.as_slice().try_into().unwrap(),
-        user.public_key_sign.as_slice().try_into().unwrap(),
-        user.cipher_private_key_sign.clone(),
-        user.nonce_sign.as_slice().try_into().unwrap(),
-    ))
+    // Get all the keys of the user
+    let keys = crate::schema::key_pairs::table
+        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+        .load::<KeyPairs>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(keys)
 }
 
 ///
@@ -352,7 +319,6 @@ pub fn get_user(
         .optional()?
         .ok_or(ServerError::Internal)?;
 
-
     Ok(InfoUser {
         id: user.id,
         username: user.username,
@@ -362,10 +328,10 @@ pub fn get_user(
     })
 }
 
-pub fn get_pub_key_enc(
+pub fn get_pub_key(
     username_pub_key: &str,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<[u8; ENC_KEY_LEN_PUB], ServerError> {
+) -> Result<([u8; ENC_KEY_LEN_PUB], [u8; SIGN_KEY_LEN_PUB]), ServerError> {
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let user = crate::schema::users::table
@@ -374,22 +340,17 @@ pub fn get_pub_key_enc(
         .optional()?
         .ok_or(ServerError::NotFound)?;
 
-    Ok(user.public_key_enc.as_slice().try_into()?)
-}
-
-pub fn get_pub_key_sign(
-    username_pub_key: &str,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<[u8; SIGN_KEY_LEN_PUB], ServerError> {
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    let user = crate::schema::users::table
-        .filter(crate::schema::users::username.eq(username_pub_key))
-        .first::<User>(&mut conn)
+    let keys = crate::schema::key_pairs::table
+        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+        .filter(crate::schema::key_pairs::is_active.eq(true))
+        .first::<KeyPairs>(&mut conn)
         .optional()?
-        .ok_or(ServerError::NotFound)?;
+        .ok_or(ServerError::Internal)?;
 
-    Ok(user.public_key_sign.as_slice().try_into()?)
+    Ok((
+            keys.enc_public_key.as_slice().try_into().map_err(|_| ServerError::Internal)?,
+            keys.sign_public_key.as_slice().try_into().map_err(|_| ServerError::Internal)?,
+    ))
 }
 
 ///
@@ -399,6 +360,8 @@ pub fn get_pub_key_sign(
 pub async fn send_message(
     sender: &str,
     receiver: &str,
+    sender_key_id_param: Uuid,
+    receiver_key_id_param: Uuid,
     filename_param: Vec<u8>,
     nonce_filename_param: Vec<u8>,
     file_id_param: Uuid,
@@ -433,6 +396,10 @@ pub async fn send_message(
         id: &Uuid::new_v4(),
         sender_id: &sender.id,
         receiver_id: &receiver.id,
+
+        sender_key_id: &sender_key_id_param,
+        receiver_key_id: &receiver_key_id_param,
+
         cfilename: &filename_param,
         nonce_filename: &nonce_filename_param,
         file_id: &file_id_param,
@@ -667,6 +634,8 @@ pub async fn get_messages(
             messages::id,
             sender.field(users::username),
             receiver.field(users::username),
+            messages::sender_key_id,
+            messages::receiver_key_id,
             messages::cfilename,
             messages::nonce_filename,
             messages::file_id,

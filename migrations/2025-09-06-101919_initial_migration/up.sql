@@ -16,22 +16,22 @@ CREATE TABLE users
     role                    TEXT        NOT NULL CHECK (role IN ('user', 'premium', 'admin', 'anonymous')),
     number_transfers        INT         NOT NULL DEFAULT 0,
 
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
-    last_login_at           TIMESTAMPTZ
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Table key_pairs
 CREATE TABLE key_pairs
 (
     id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-
     owner_id                UUID        NOT NULL REFERENCES users(id),
 
-    usage                   TEXT        NOT NULL CHECK (usage IN ('encryption', 'signature')),
+    enc_public_key          BYTEA       NOT NULL,
+    enc_nonce_private_key   BYTEA       NOT NULL,
+    enc_cipher_private_key  BYTEA       NOT NULL,
 
-    public_key              BYTEA       NOT NULL,
-    nonce_private_key       BYTEA       NOT NULL,
-    cipher_private_key      BYTEA       NOT NULL,
+    sign_public_key         BYTEA       NOT NULL,
+    sign_nonce_private_key  BYTEA       NOT NULL,
+    sign_cipher_private_key BYTEA       NOT NULL,
 
     is_active               BOOLEAN     NOT NULL DEFAULT true,
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -45,9 +45,8 @@ CREATE TABLE messages
     sender_id               UUID        NOT NULL REFERENCES users (id),
     receiver_id             UUID        NOT NULL REFERENCES users (id),
 
-    sender_key_enc_id       UUID        NOT NULL REFERENCES key_pairs (id),
-    receiver_key_enc_id     UUID        NOT NULL REFERENCES key_pairs (id),
-    sender_key_sign_id      UUID        NOT NULL REFERENCES key_pairs (id),
+    sender_key_id           UUID        NOT NULL REFERENCES key_pairs (id),
+    receiver_key_id         UUID        NOT NULL REFERENCES key_pairs (id),
 
     cfilename               BYTEA       NOT NULL,
     nonce_filename          BYTEA       NOT NULL,

@@ -265,19 +265,14 @@ async fn generate_dummy_user(
             email: &DUMMY_EMAIL.to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
             role: &DUMMY_ROLE.to_string(),
-            public_key_enc: &vec![0; ENC_KEY_LEN_PUB],
-            nonce_enc: &vec![0; SYM_LEN_NONCE],
-            cipher_private_key_enc: &vec![0; ENC_KEY_LEN_PRIV],
-            public_key_sign: &vec![0; SIGN_KEY_LEN_PUB],
-            nonce_sign: &vec![0; SIGN_LEN_NONCE],
-            cipher_private_key_sign: &vec![0; SIGN_KEY_LEN_PRIV],
+            created_at: Utc::now(),
         };
 
         diesel::insert_into(users::table)
             .values(&new_user)
             .returning(User::as_returning())
             .get_result(&mut conn)
-            .map_err(|e| ServerError::Internal)?;
+            .map_err(|_| ServerError::Internal)?;
     }
 
 

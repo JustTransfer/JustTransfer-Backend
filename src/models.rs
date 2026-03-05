@@ -37,11 +37,14 @@ pub struct NewOpaqueSetting<'a> {
 pub struct KeyPairs {
     pub id: Uuid,
     pub owner_id: Uuid,
-    pub usage: String,
 
-    pub public_key: Vec<u8>,
-    pub nonce_private_key: Vec<u8>,
-    pub cipher_private_key: Vec<u8>,
+    pub enc_public_key: Vec<u8>,
+    pub enc_nonce_private_key: Vec<u8>,
+    pub enc_cipher_private_key: Vec<u8>,
+
+    pub sign_public_key: Vec<u8>,
+    pub sign_nonce_private_key: Vec<u8>,
+    pub sign_cipher_private_key: Vec<u8>,
 
     pub is_active: bool,
     pub created_at: chrono::DateTime<Utc>,
@@ -53,12 +56,35 @@ pub struct KeyPairs {
 pub struct NewKeyPairs<'a> {
     pub id: &'a Uuid,
     pub owner_id: &'a Uuid,
-    pub usage: &'a String,
-    pub public_key: &'a Vec<u8>,
-    pub nonce_private_key: &'a Vec<u8>,
-    pub cipher_private_key: &'a Vec<u8>,
+
+    pub enc_public_key: &'a Vec<u8>,
+    pub enc_nonce_private_key: &'a Vec<u8>,
+    pub enc_cipher_private_key: &'a Vec<u8>,
+
+    pub sign_public_key: &'a Vec<u8>,
+    pub sign_nonce_private_key: &'a Vec<u8>,
+    pub sign_cipher_private_key: &'a Vec<u8>,
+
     pub is_active: &'a bool,
     pub revoked_at: Option<&'a chrono::DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+pub struct KeyPairsEncoded {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+
+    pub enc_public_key: String,
+    pub enc_nonce_private_key: String,
+    pub enc_cipher_private_key: String,
+
+    pub sign_public_key: String,
+    pub sign_nonce_private_key: String,
+    pub sign_cipher_private_key: String,
+
+    pub is_active: bool,
+    pub created_at: chrono::DateTime<Utc>,
+    pub revoked_at: Option<chrono::DateTime<Utc>>,
 }
 
 ///
@@ -76,6 +102,7 @@ pub struct User {
     pub server_login: Option<Vec<u8>>,
     pub role: String,
     pub number_transfers: i32,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 pub struct InfoUser {
@@ -94,6 +121,7 @@ pub struct NewUser<'a> {
     pub email: &'a String,
     pub password_file: &'a Vec<u8>,
     pub role: &'a String,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 ///
@@ -102,8 +130,8 @@ pub struct NewUser<'a> {
 #[derive(Queryable, Selectable, Identifiable, Insertable)]
 #[diesel(table_name = crate::schema::messages)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[diesel(belongs_to(KeyPairs, foreign_key = sender_key_sign_id))]
-#[diesel(belongs_to(KeyPairs, foreign_key = receiver_key_enc_id))]
+#[diesel(belongs_to(KeyPairs, foreign_key = sender_key_id))]
+#[diesel(belongs_to(KeyPairs, foreign_key = receiver_key_id))]
 #[diesel(belongs_to(User, foreign_key = sender_id))]
 #[diesel(belongs_to(User, foreign_key = receiver_id))]
 pub struct Message {
@@ -112,9 +140,8 @@ pub struct Message {
     pub sender_id: Uuid,
     pub receiver_id: Uuid,
 
-    pub sender_key_enc_id: Uuid,
-    pub receiver_key_enc_id: Uuid,
-    pub sender_key_sign_id: Uuid,
+    pub sender_key_id: Uuid,
+    pub receiver_key_id: Uuid,
 
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
@@ -137,9 +164,8 @@ pub struct NewMessage<'a> {
     pub sender_id: &'a Uuid,
     pub receiver_id: &'a Uuid,
 
-    pub sender_key_enc_id: &'a Uuid,
-    pub receiver_key_enc_id: &'a Uuid,
-    pub sender_key_sign_id: &'a Uuid,
+    pub sender_key_id: &'a Uuid,
+    pub receiver_key_id: &'a Uuid,
 
     pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
@@ -172,9 +198,8 @@ pub struct MessageWithUsernames {
     pub sender: String,
     pub receiver: String,
 
-    pub sender_key_enc_id: Uuid,
-    pub receiver_key_enc_id: Uuid,
-    pub sender_key_sign_id: Uuid,
+    pub sender_key_id: Uuid,
+    pub receiver_key_id: Uuid,
 
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
@@ -196,9 +221,8 @@ pub struct MessageWithUsernamesEncoded {
     pub sender: String,
     pub receiver: String,
 
-    pub sender_key_enc_id: Uuid,
-    pub receiver_key_enc_id: Uuid,
-    pub sender_key_sign_id: Uuid,
+    pub sender_key_id: Uuid,
+    pub receiver_key_id: Uuid,
 
     pub cfilename: String,
     pub nonce_filename: String,
