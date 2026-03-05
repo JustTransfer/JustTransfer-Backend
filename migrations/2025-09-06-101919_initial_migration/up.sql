@@ -42,8 +42,6 @@ CREATE TABLE key_pairs
 CREATE TABLE messages
 (
     id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    sender_id               UUID        NOT NULL REFERENCES users (id),
-    receiver_id             UUID        NOT NULL REFERENCES users (id),
 
     sender_key_id           UUID        NOT NULL REFERENCES key_pairs (id),
     receiver_key_id         UUID        NOT NULL REFERENCES key_pairs (id),

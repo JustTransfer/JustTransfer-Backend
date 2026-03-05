@@ -132,13 +132,8 @@ pub struct NewUser<'a> {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 #[diesel(belongs_to(KeyPairs, foreign_key = sender_key_id))]
 #[diesel(belongs_to(KeyPairs, foreign_key = receiver_key_id))]
-#[diesel(belongs_to(User, foreign_key = sender_id))]
-#[diesel(belongs_to(User, foreign_key = receiver_id))]
 pub struct Message {
     pub id: Uuid,
-
-    pub sender_id: Uuid,
-    pub receiver_id: Uuid,
 
     pub sender_key_id: Uuid,
     pub receiver_key_id: Uuid,
@@ -160,9 +155,6 @@ pub struct Message {
 #[diesel(table_name = crate::schema::messages)]
 pub struct NewMessage<'a> {
     pub id: &'a Uuid,
-
-    pub sender_id: &'a Uuid,
-    pub receiver_id: &'a Uuid,
 
     pub sender_key_id: &'a Uuid,
     pub receiver_key_id: &'a Uuid,

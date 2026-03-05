@@ -133,6 +133,7 @@ async fn main() {
             .layer(middleware::from_fn(api_handlers::auth::require_fresh_login)))
         .route("/api/logout", post(api_handlers::connected::logout))
         .route("/api/pubkey/{id}", get(api_handlers::connected::get_pub_key))
+        .route("/api/user/{username}/pubkey", get(api_handlers::connected::get_pub_key_user))
         .route("/api/messages", get(api_handlers::connected::get_messages))
         .route("/api/messages/sent", get(api_handlers::connected::get_messages_sent))
         .route("/api/message/{id}", get(api_handlers::connected::get_one_message))

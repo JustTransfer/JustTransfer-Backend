@@ -114,6 +114,7 @@ pub struct RegisterUserEnd {
 #[derive(Serialize)]
 pub struct RegisterEndResult {
     role: String,
+    keys: Vec<KeyPairsEncoded>,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -168,6 +169,22 @@ pub async fn register_user_end(
         &state.db,
     )?;
 
+    let keys_encoded: Vec<KeyPairsEncoded> = server_registration_finish.into_iter().map(|k| {
+        KeyPairsEncoded {
+            id: k.id,
+            owner_id: k.owner_id,
+            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
+            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
+            is_active: k.is_active,
+            created_at: k.created_at,
+            revoked_at: k.revoked_at,
+        }
+    }).collect();
+
     // Create session
     session.insert(AUTH_KEY, &payload.username)
         .await
@@ -181,6 +198,7 @@ pub async fn register_user_end(
 
     let content = Json(RegisterEndResult {
         role: api_handlers::auth::Role::User.to_string(),
+        keys: keys_encoded,
     });
 
     Ok((StatusCode::OK, content))
@@ -251,7 +269,26 @@ pub async fn register_user_end_update(
         &state.db,
     )?;
 
-    Ok(StatusCode::OK)
+    let keys_encoded: Vec<KeyPairsEncoded> = server_registration_finish.into_iter().map(|k| {
+        KeyPairsEncoded {
+            id: k.id,
+            owner_id: k.owner_id,
+            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
+            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
+            is_active: k.is_active,
+            created_at: k.created_at,
+            revoked_at: k.revoked_at,
+        }
+    }).collect();
+
+    Ok((StatusCode::OK, Json(RegisterEndResult {
+        role: api_handlers::auth::Role::User.to_string(),
+        keys: keys_encoded,
+    })))
 }
 
 ///
@@ -396,25 +433,44 @@ pub async fn logout(
 
 #[derive(Serialize)]
 pub struct GetPubKeyResult {
+    key_id: Uuid,
     pub_enc: String,
     pub_sign: String,
 }
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_pub_key(
+    Path(key_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+    
+    let pub_keys = server::connected::get_pub_key(key_id, &state.db)?;
+
+    Ok((StatusCode::OK, Json(
+        GetPubKeyResult {
+            key_id: pub_keys.0,
+            pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.1),
+            pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.2),
+        }
+    )))
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn get_pub_key_user(
     Path(username): Path<String>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     // Validate the username
     validate_username(&username).map_err(|_| ApiError::InputValidation)?;
-    
-    let pub_keys = server::connected::get_pub_key(&*username, &state.db)?;
+
+    let pub_keys = server::connected::get_pub_key_user(&*username, &state.db)?;
 
     Ok((StatusCode::OK, Json(
         GetPubKeyResult {
-            pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.0),
-            pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.1),
+            key_id: pub_keys.0,
+            pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.1),
+            pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.2),
         }
     )))
 }
@@ -503,8 +559,6 @@ pub async fn get_one_message(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessage {
-    #[validate(custom(function = "validate_username"))]
-    receiver: String,
     sender_key_id: Uuid,
     receiver_key_id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -550,7 +604,6 @@ pub async fn upload_message(
 
     let (upload_urls, upload_id) = server::connected::send_message(
         &claims_jwt.username,
-        &payload.receiver,
         payload.sender_key_id,
         payload.receiver_key_id,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
