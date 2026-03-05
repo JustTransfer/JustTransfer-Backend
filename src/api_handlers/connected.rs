@@ -208,18 +208,7 @@ pub async fn register_user_end(
 pub struct RegisterUserEndUpdate {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    cpriv_enc: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    nonce_priv_enc: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    pub_enc: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    cpriv_sign: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    nonce_priv_sign: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    pub_sign: String,
+    keys: Vec<KeyPairsEncodedUpdate>
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -238,34 +227,24 @@ pub async fn register_user_end_update(
         .map_err(|_| ApiError::Base64)?;
     let client_registration_finish = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
-    let cpriv_enc = URL_SAFE_NO_PAD
-        .decode(&payload.cpriv_enc)
-        .map_err(|_| ApiError::Base64)?;
-    let nonce_priv_enc = URL_SAFE_NO_PAD
-        .decode(&payload.nonce_priv_enc)
-        .map_err(|_| ApiError::Base64)?;
-    let pub_enc = URL_SAFE_NO_PAD
-        .decode(&payload.pub_enc)
-        .map_err(|_| ApiError::Base64)?;
-    let cpriv_sign = URL_SAFE_NO_PAD
-        .decode(&payload.cpriv_sign)
-        .map_err(|_| ApiError::Base64)?;
-    let nonce_priv_sign = URL_SAFE_NO_PAD
-        .decode(&payload.nonce_priv_sign)
-        .map_err(|_| ApiError::Base64)?;
-    let pub_sign = URL_SAFE_NO_PAD
-        .decode(&payload.pub_sign)
-        .map_err(|_| ApiError::Base64)?;
+
+
+    let decoded_keys: Vec<KeyPairsdUpdate> = payload.keys.into_iter().map(|k| {
+        KeyPairsdUpdate {
+            id: k.id,
+            enc_public_key: URL_SAFE_NO_PAD.decode(k.enc_public_key).unwrap_or(vec![]),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.decode(k.enc_nonce_private_key).unwrap_or(vec![]),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.decode(k.enc_cipher_private_key).unwrap_or(vec![]),
+            sign_public_key: URL_SAFE_NO_PAD.decode(k.sign_public_key).unwrap_or(vec![]),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.decode(k.sign_nonce_private_key).unwrap_or(vec![]),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.decode(k.sign_cipher_private_key).unwrap_or(vec![]),
+        }
+    }).collect();
     
     let server_registration_finish = server::connected::server_registration_finish_update(
         client_registration_finish,
         &*claims_jwt.username,
-        cpriv_enc,
-        nonce_priv_enc,
-        pub_enc,
-        cpriv_sign,
-        nonce_priv_sign,
-        pub_sign,
+        decoded_keys,
         &state.db,
     )?;
 
@@ -425,6 +404,65 @@ pub async fn logout(
     session.flush().await.map_err(|_| ApiError::ServerError)?;
 
     Ok(StatusCode::OK)
+}
+
+///
+/// Add Key
+///
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct AddKeyParam {
+    key: NewKeyPairsEncoded
+}
+
+#[derive(Serialize)]
+pub struct AddKeyResult {
+    keys: Vec<KeyPairsEncoded>,
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn add_key(
+    Extension(claims_jwt): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(payload): Json<AddKeyParam>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    // Decode the base64 encoded keys
+    let decoded_key = NewKeyPairsDecoded {
+        enc_public_key: URL_SAFE_NO_PAD.decode(payload.key.enc_public_key).map_err(|_| ApiError::Base64)?,
+        enc_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        enc_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
+        sign_public_key: URL_SAFE_NO_PAD.decode(payload.key.sign_public_key).map_err(|_| ApiError::Base64)?,
+        sign_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        sign_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
+    };
+
+    let keys = server::connected::add_key(
+        &*claims_jwt.username,
+        decoded_key,
+        &state.db,
+    )?;
+
+    let encoded_keys: Vec<KeyPairsEncoded> = keys.into_iter().map(|k| {
+        KeyPairsEncoded {
+            id: k.id,
+            owner_id: k.owner_id,
+            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
+            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
+            is_active: k.is_active,
+            created_at: k.created_at,
+            revoked_at: k.revoked_at,
+        }
+    }).collect();
+
+    Ok((StatusCode::OK, Json(AddKeyResult { keys: encoded_keys })))
 }
 
 ///

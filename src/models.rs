@@ -1,6 +1,6 @@
 use chrono::Utc;
 use diesel::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::{Uuid};
 
 use diesel::deserialize::{self, FromSql};
@@ -85,6 +85,53 @@ pub struct KeyPairsEncoded {
     pub is_active: bool,
     pub created_at: chrono::DateTime<Utc>,
     pub revoked_at: Option<chrono::DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeyPairsdUpdate {
+    pub id: Uuid,
+
+    pub enc_public_key: Vec<u8>,
+    pub enc_nonce_private_key: Vec<u8>,
+    pub enc_cipher_private_key: Vec<u8>,
+
+    pub sign_public_key: Vec<u8>,
+    pub sign_nonce_private_key: Vec<u8>,
+    pub sign_cipher_private_key: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeyPairsEncodedUpdate {
+    pub id: Uuid,
+
+    pub enc_public_key: String,
+    pub enc_nonce_private_key: String,
+    pub enc_cipher_private_key: String,
+
+    pub sign_public_key: String,
+    pub sign_nonce_private_key: String,
+    pub sign_cipher_private_key: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NewKeyPairsEncoded {
+    pub enc_public_key: String,
+    pub enc_nonce_private_key: String,
+    pub enc_cipher_private_key: String,
+
+    pub sign_public_key: String,
+    pub sign_nonce_private_key: String,
+    pub sign_cipher_private_key: String,
+}
+
+pub struct NewKeyPairsDecoded {
+    pub enc_public_key: Vec<u8>,
+    pub enc_nonce_private_key: Vec<u8>,
+    pub enc_cipher_private_key: Vec<u8>,
+
+    pub sign_public_key: Vec<u8>,
+    pub sign_nonce_private_key: Vec<u8>,
+    pub sign_cipher_private_key: Vec<u8>,
 }
 
 ///

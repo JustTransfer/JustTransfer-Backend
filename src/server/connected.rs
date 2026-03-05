@@ -128,12 +128,7 @@ pub fn server_registration_finish(
 pub fn server_registration_finish_update(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     username_param: &str,
-    cpriv_enc: Vec<u8>,
-    nonce_enc: Vec<u8>,
-    pub_enc: Vec<u8>,
-    cpriv_sign: Vec<u8>,
-    nonce_sign: Vec<u8>,
-    pub_sign: Vec<u8>,
+    keys: Vec<KeyPairsdUpdate>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<Vec<KeyPairs>, ServerError> {
     use crate::schema::users;
@@ -159,36 +154,23 @@ pub fn server_registration_finish_update(
         .get_result(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    // Invalidate old keys
-    diesel::update(crate::schema::key_pairs::table)
-        .filter(crate::schema::key_pairs::owner_id.eq(user_id))
-        .set(crate::schema::key_pairs::is_active.eq(false))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    // TODO the other keys must be re encrypted with new password on frontend and stored here !!!
-
-    // Insert new keys
-    let key_enc = NewKeyPairs {
-        id: &Uuid::new_v4(),
-        owner_id: &user.id,
-
-        enc_public_key: &pub_enc.to_vec(),
-        enc_nonce_private_key: &nonce_enc.to_vec(),
-        enc_cipher_private_key: &cpriv_enc,
-
-        sign_public_key: &pub_sign.to_vec(),
-        sign_nonce_private_key: &nonce_sign.to_vec(),
-        sign_cipher_private_key: &cpriv_sign,
-
-        is_active: &true,
-        revoked_at: None,
-    };
-
-    let _ = diesel::insert_into(crate::schema::key_pairs::table)
-        .values(&key_enc)
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+    // Update keys
+    for key in keys {
+        diesel::update(crate::schema::key_pairs::table)
+            .filter(crate::schema::key_pairs::id.eq(key.id))
+            .set((
+                crate::schema::key_pairs::enc_public_key.eq(key.enc_public_key),
+                crate::schema::key_pairs::enc_nonce_private_key.eq(key.enc_nonce_private_key),
+                crate::schema::key_pairs::enc_cipher_private_key.eq(key.enc_cipher_private_key),
+                crate::schema::key_pairs::sign_public_key.eq(key.sign_public_key),
+                crate::schema::key_pairs::sign_nonce_private_key.eq(key.sign_nonce_private_key),
+                crate::schema::key_pairs::sign_cipher_private_key.eq(key.sign_cipher_private_key),
+                crate::schema::key_pairs::is_active.eq(true),
+                crate::schema::key_pairs::revoked_at.eq::<Option<chrono::DateTime<Utc>>>(None),
+            ))
+            .execute(&mut conn)
+            .map_err(|_| ServerError::Internal)?;
+    }
 
     let keys = crate::schema::key_pairs::table
         .filter(crate::schema::key_pairs::owner_id.eq(user.id))
@@ -318,6 +300,58 @@ pub fn server_login_finish(
 ///
 /// Users
 ///
+
+pub fn add_key (
+    username_param: &str,
+    key: NewKeyPairsDecoded,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<Vec<KeyPairs>, ServerError> {
+    use crate::schema::users;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let user = users::table
+        .filter(users::username.eq(username_param))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let new_key = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: &user.id,
+
+        enc_public_key: &key.enc_public_key,
+        enc_nonce_private_key: &key.enc_nonce_private_key,
+        enc_cipher_private_key: &key.enc_cipher_private_key,
+
+        sign_public_key: &key.sign_public_key,
+        sign_nonce_private_key: &key.sign_nonce_private_key,
+        sign_cipher_private_key: &key.sign_cipher_private_key,
+
+        is_active: &true,
+        revoked_at: None,
+    };
+
+    diesel::insert_into(crate::schema::key_pairs::table)
+        .values(&new_key)
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Invalid all other keys of the user
+    diesel::update(crate::schema::key_pairs::table)
+        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+        .filter(crate::schema::key_pairs::id.ne(new_key.id))
+        .set(crate::schema::key_pairs::is_active.eq(false))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    let keys = crate::schema::key_pairs::table
+        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+        .load::<KeyPairs>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(keys)
+}
 
 pub fn get_user(
     username_param: &str,
