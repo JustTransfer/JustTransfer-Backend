@@ -19,7 +19,7 @@ use crate::models::*;
 use crate::error::*;
 
 ///
-/// User Info
+/// User
 ///
 
 #[derive(Serialize)]
@@ -44,6 +44,27 @@ pub async fn get_user_info(
         number_transfers: user_info.number_transfers,
     })))
 }
+
+#[instrument(skip(state), err(Debug))]
+pub async fn delete_user(
+    Extension(claims_jwt): Extension<Claims>,
+    Path(username): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate the username
+    validate_username(&username).map_err(|_| ApiError::InputValidation)?;
+
+    // Check if the username is the same as the one in the JWT claims
+    if *claims_jwt.username != username {
+        return Err(ApiError::Forbidden);
+    }
+
+    server::connected::delete_user(&*claims_jwt.username, &state.db)?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
 
 ///
 /// Registration

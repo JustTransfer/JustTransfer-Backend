@@ -148,6 +148,7 @@ async fn main() {
         .layer(session_layer.clone());
 
     let account_app_fresh_login = Router::new()
+        .route("/api/user/{username}", delete(api_handlers::connected::delete_user))
         .route("/api/user/addkey", put(api_handlers::connected::add_key))
         .route("/api/register/update", post(api_handlers::connected::register_user_end_update))
         .layer(middleware::from_fn(api_handlers::auth::require_fresh_login))
