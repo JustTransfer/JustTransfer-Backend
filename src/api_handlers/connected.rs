@@ -228,23 +228,23 @@ pub async fn register_user_end_update(
     let client_registration_finish = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-
-    let decoded_keys: Vec<KeyPairsdUpdate> = payload.keys.into_iter().map(|k| {
-        KeyPairsdUpdate {
-            id: k.id,
-            enc_public_key: URL_SAFE_NO_PAD.decode(k.enc_public_key).unwrap_or(vec![]),
-            enc_nonce_private_key: URL_SAFE_NO_PAD.decode(k.enc_nonce_private_key).unwrap_or(vec![]),
-            enc_cipher_private_key: URL_SAFE_NO_PAD.decode(k.enc_cipher_private_key).unwrap_or(vec![]),
-            sign_public_key: URL_SAFE_NO_PAD.decode(k.sign_public_key).unwrap_or(vec![]),
-            sign_nonce_private_key: URL_SAFE_NO_PAD.decode(k.sign_nonce_private_key).unwrap_or(vec![]),
-            sign_cipher_private_key: URL_SAFE_NO_PAD.decode(k.sign_cipher_private_key).unwrap_or(vec![]),
-        }
-    }).collect();
+    let decoded_keys: Result<Vec<KeyPairsdUpdate>, ApiError> =
+        payload.keys.into_iter().map(|k| {
+            Ok(KeyPairsdUpdate {
+                id: k.id,
+                enc_public_key: URL_SAFE_NO_PAD.decode(k.enc_public_key).map_err(|_| ApiError::Base64)?,
+                enc_nonce_private_key: URL_SAFE_NO_PAD.decode(k.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
+                enc_cipher_private_key: URL_SAFE_NO_PAD.decode(k.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
+                sign_public_key: URL_SAFE_NO_PAD.decode(k.sign_public_key).map_err(|_| ApiError::Base64)?,
+                sign_nonce_private_key: URL_SAFE_NO_PAD.decode(k.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
+                sign_cipher_private_key: URL_SAFE_NO_PAD.decode(k.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
+            })
+        }).collect();
     
     let server_registration_finish = server::connected::server_registration_finish_update(
         client_registration_finish,
         &*claims_jwt.username,
-        decoded_keys,
+        decoded_keys.map_err(|_| ApiError::ServerError)?,
         &state.db,
     )?;
 
