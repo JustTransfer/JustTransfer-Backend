@@ -291,8 +291,37 @@ pub fn server_login_finish(
 }
 
 ///
-/// Users
+/// Keys
 ///
+
+fn delete_old_keys_for_user(
+    pool: &DbPool,
+    user_id_param: Uuid,
+) -> Result<(), ServerError> {
+    use crate::schema::key_pairs;
+    use diesel::sql_types::Bool;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete all keys that are not active and not used referenced by any message
+    diesel::delete(
+        key_pairs::table
+            .filter(key_pairs::owner_id.eq(user_id_param))
+            .filter(key_pairs::is_active.eq(false))
+            .filter(sql::<Bool>(
+                "NOT EXISTS (
+                    SELECT 1
+                    FROM messages
+                    WHERE sender_key_id = key_pairs.id
+                       OR receiver_key_id = key_pairs.id
+                )"
+            ))
+    )
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
 
 pub fn add_key (
     username_param: &str,
@@ -342,6 +371,9 @@ pub fn add_key (
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
+    // Delete old keys that are not active and not used by any message
+    delete_old_keys_for_user(pool, user.id)?;
+
     let keys = crate::schema::key_pairs::table
         .filter(crate::schema::key_pairs::owner_id.eq(user.id))
         .load::<KeyPairs>(&mut conn)
@@ -349,6 +381,10 @@ pub fn add_key (
 
     Ok(keys)
 }
+
+///
+/// Users
+///
 
 pub fn get_user(
     username_param: &str,
