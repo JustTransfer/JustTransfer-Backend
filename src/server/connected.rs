@@ -408,6 +408,48 @@ pub fn get_user(
     })
 }
 
+pub fn delete_user(
+    username_param: &str,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    use crate::schema::messages;
+    use crate::schema::key_pairs;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+    let user = users::table
+        .filter(users::username.eq(username_param))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    // Delete all sent messages of the user
+    diesel::delete(messages.filter(messages::sender_key_id.eq_any(
+        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+    )))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Delete all received messages of the user
+    diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
+        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+    )))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Delete all keys of the user
+    diesel::delete(key_pairs.filter(key_pairs::owner_id.eq(user.id)))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Delete the user
+    diesel::delete(users.filter(users::id.eq(user.id)))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
 pub fn get_pub_key(
     key_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
