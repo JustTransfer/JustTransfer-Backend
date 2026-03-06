@@ -165,8 +165,6 @@ pub fn server_registration_finish_update(
                 crate::schema::key_pairs::sign_public_key.eq(key.sign_public_key),
                 crate::schema::key_pairs::sign_nonce_private_key.eq(key.sign_nonce_private_key),
                 crate::schema::key_pairs::sign_cipher_private_key.eq(key.sign_cipher_private_key),
-                crate::schema::key_pairs::is_active.eq(true),
-                crate::schema::key_pairs::revoked_at.eq::<Option<chrono::DateTime<Utc>>>(None),
             ))
             .execute(&mut conn)
             .map_err(|_| ServerError::Internal)?;
@@ -248,12 +246,7 @@ pub fn server_login_finish(
     username_param: &str,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<
-    (
-        Vec<KeyPairs>
-    ),
-    ServerError
-> {
+) -> Result<Vec<KeyPairs>,ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -337,11 +330,15 @@ pub fn add_key (
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    // Invalid all other keys of the user
+    // Invalid all other valid keys of the user and set the revoked_at date
     diesel::update(crate::schema::key_pairs::table)
         .filter(crate::schema::key_pairs::owner_id.eq(user.id))
         .filter(crate::schema::key_pairs::id.ne(new_key.id))
-        .set(crate::schema::key_pairs::is_active.eq(false))
+        .filter(crate::schema::key_pairs::is_active.eq(true))
+        .set((
+            crate::schema::key_pairs::is_active.eq(false),
+            crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
+        ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
