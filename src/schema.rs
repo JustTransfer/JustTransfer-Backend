@@ -19,10 +19,26 @@ diesel::table! {
 }
 
 diesel::table! {
+    key_pairs (id) {
+        id -> Uuid,
+        owner_id -> Uuid,
+        enc_public_key -> Bytea,
+        enc_nonce_private_key -> Bytea,
+        enc_cipher_private_key -> Bytea,
+        sign_public_key -> Bytea,
+        sign_nonce_private_key -> Bytea,
+        sign_cipher_private_key -> Bytea,
+        is_active -> Bool,
+        created_at -> Timestamptz,
+        revoked_at -> Nullable<Timestamptz>,
+    }
+}
+
+diesel::table! {
     messages (id) {
         id -> Uuid,
-        sender_id -> Uuid,
-        receiver_id -> Uuid,
+        sender_key_id -> Uuid,
+        receiver_key_id -> Uuid,
         cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,
@@ -53,13 +69,16 @@ diesel::table! {
         server_login -> Nullable<Bytea>,
         role -> Text,
         number_transfers -> Int4,
-        public_key_enc -> Bytea,
-        nonce_enc -> Bytea,
-        cipher_private_key_enc -> Bytea,
-        public_key_sign -> Bytea,
-        nonce_sign -> Bytea,
-        cipher_private_key_sign -> Bytea,
+        created_at -> Timestamptz,
     }
 }
 
-diesel::allow_tables_to_appear_in_same_query!(anonymousmessages, messages, opaque_settings, users,);
+diesel::joinable!(key_pairs -> users (owner_id));
+
+diesel::allow_tables_to_appear_in_same_query!(
+    anonymousmessages,
+    key_pairs,
+    messages,
+    opaque_settings,
+    users,
+);

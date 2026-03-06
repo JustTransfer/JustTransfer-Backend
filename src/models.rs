@@ -1,6 +1,6 @@
 use chrono::Utc;
 use diesel::prelude::*;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use uuid::{Uuid};
 
 use diesel::deserialize::{self, FromSql};
@@ -9,6 +9,10 @@ use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
 use std::io::Write;
 
+
+///
+/// Opaque settings
+///
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::opaque_settings)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -23,6 +27,116 @@ pub struct NewOpaqueSetting<'a> {
     pub settings: &'a Vec<u8>,
 }
 
+///
+/// Key pairs
+///
+#[derive(Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::key_pairs)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(belongs_to(User, foreign_key = owner_id))]
+pub struct KeyPairs {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+
+    pub enc_public_key: Vec<u8>,
+    pub enc_nonce_private_key: Vec<u8>,
+    pub enc_cipher_private_key: Vec<u8>,
+
+    pub sign_public_key: Vec<u8>,
+    pub sign_nonce_private_key: Vec<u8>,
+    pub sign_cipher_private_key: Vec<u8>,
+
+    pub is_active: bool,
+    pub created_at: chrono::DateTime<Utc>,
+    pub revoked_at: Option<chrono::DateTime<Utc>>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::key_pairs)]
+pub struct NewKeyPairs<'a> {
+    pub id: &'a Uuid,
+    pub owner_id: &'a Uuid,
+
+    pub enc_public_key: &'a Vec<u8>,
+    pub enc_nonce_private_key: &'a Vec<u8>,
+    pub enc_cipher_private_key: &'a Vec<u8>,
+
+    pub sign_public_key: &'a Vec<u8>,
+    pub sign_nonce_private_key: &'a Vec<u8>,
+    pub sign_cipher_private_key: &'a Vec<u8>,
+
+    pub is_active: &'a bool,
+    pub revoked_at: Option<&'a chrono::DateTime<Utc>>,
+}
+
+#[derive(Serialize)]
+pub struct KeyPairsEncoded {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+
+    pub enc_public_key: String,
+    pub enc_nonce_private_key: String,
+    pub enc_cipher_private_key: String,
+
+    pub sign_public_key: String,
+    pub sign_nonce_private_key: String,
+    pub sign_cipher_private_key: String,
+
+    pub is_active: bool,
+    pub created_at: chrono::DateTime<Utc>,
+    pub revoked_at: Option<chrono::DateTime<Utc>>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeyPairsdUpdate {
+    pub id: Uuid,
+
+    pub enc_public_key: Vec<u8>,
+    pub enc_nonce_private_key: Vec<u8>,
+    pub enc_cipher_private_key: Vec<u8>,
+
+    pub sign_public_key: Vec<u8>,
+    pub sign_nonce_private_key: Vec<u8>,
+    pub sign_cipher_private_key: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct KeyPairsEncodedUpdate {
+    pub id: Uuid,
+
+    pub enc_public_key: String,
+    pub enc_nonce_private_key: String,
+    pub enc_cipher_private_key: String,
+
+    pub sign_public_key: String,
+    pub sign_nonce_private_key: String,
+    pub sign_cipher_private_key: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct NewKeyPairsEncoded {
+    pub enc_public_key: String,
+    pub enc_nonce_private_key: String,
+    pub enc_cipher_private_key: String,
+
+    pub sign_public_key: String,
+    pub sign_nonce_private_key: String,
+    pub sign_cipher_private_key: String,
+}
+
+pub struct NewKeyPairsDecoded {
+    pub enc_public_key: Vec<u8>,
+    pub enc_nonce_private_key: Vec<u8>,
+    pub enc_cipher_private_key: Vec<u8>,
+
+    pub sign_public_key: Vec<u8>,
+    pub sign_nonce_private_key: Vec<u8>,
+    pub sign_cipher_private_key: Vec<u8>,
+}
+
+///
+/// Users
+///
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::users)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
@@ -35,14 +149,7 @@ pub struct User {
     pub server_login: Option<Vec<u8>>,
     pub role: String,
     pub number_transfers: i32,
-
-    pub public_key_enc: Vec<u8>,
-    pub nonce_enc: Vec<u8>,
-    pub cipher_private_key_enc: Vec<u8>,
-
-    pub public_key_sign: Vec<u8>,
-    pub nonce_sign: Vec<u8>,
-    pub cipher_private_key_sign: Vec<u8>,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
 pub struct InfoUser {
@@ -61,25 +168,23 @@ pub struct NewUser<'a> {
     pub email: &'a String,
     pub password_file: &'a Vec<u8>,
     pub role: &'a String,
-
-    pub public_key_enc: &'a Vec<u8>,
-    pub nonce_enc: &'a Vec<u8>,
-    pub cipher_private_key_enc: &'a Vec<u8>,
-
-    pub public_key_sign: &'a Vec<u8>,
-    pub nonce_sign: &'a Vec<u8>,
-    pub cipher_private_key_sign: &'a Vec<u8>,
+    pub created_at: chrono::DateTime<Utc>,
 }
 
+///
+/// Messages
+///
 #[derive(Queryable, Selectable, Identifiable, Insertable)]
 #[diesel(table_name = crate::schema::messages)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-#[diesel(belongs_to(User, foreign_key = sender_id))]
-#[diesel(belongs_to(User, foreign_key = receiver_id))]
+#[diesel(belongs_to(KeyPairs, foreign_key = sender_key_id))]
+#[diesel(belongs_to(KeyPairs, foreign_key = receiver_key_id))]
 pub struct Message {
     pub id: Uuid,
-    pub sender_id: Uuid,
-    pub receiver_id: Uuid,
+
+    pub sender_key_id: Uuid,
+    pub receiver_key_id: Uuid,
+
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
@@ -97,8 +202,10 @@ pub struct Message {
 #[diesel(table_name = crate::schema::messages)]
 pub struct NewMessage<'a> {
     pub id: &'a Uuid,
-    pub sender_id: &'a Uuid,
-    pub receiver_id: &'a Uuid,
+
+    pub sender_key_id: &'a Uuid,
+    pub receiver_key_id: &'a Uuid,
+
     pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
     pub file_id: &'a Uuid,
@@ -126,8 +233,13 @@ pub struct MessageSentWithUsernames {
 #[derive(Queryable, Serialize)]
 pub struct MessageWithUsernames {
     pub id: Uuid,
+
     pub sender: String,
     pub receiver: String,
+
+    pub sender_key_id: Uuid,
+    pub receiver_key_id: Uuid,
+
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
@@ -144,8 +256,13 @@ pub struct MessageWithUsernames {
 #[derive(Queryable, Serialize)]
 pub struct MessageWithUsernamesEncoded {
     pub id: Uuid,
+
     pub sender: String,
     pub receiver: String,
+
+    pub sender_key_id: Uuid,
+    pub receiver_key_id: Uuid,
+
     pub cfilename: String,
     pub nonce_filename: String,
     pub file_id: Uuid,
@@ -159,6 +276,9 @@ pub struct MessageWithUsernamesEncoded {
     pub chunk_size: i64,
 }
 
+///
+/// Anonymous messages
+///
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::anonymousmessages)]
 #[diesel(check_for_backend(diesel::pg::Pg))]

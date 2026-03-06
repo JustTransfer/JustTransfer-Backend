@@ -129,11 +129,9 @@ async fn main() {
 
     let account_app = Router::new()
         .route("/api/user", get(api_handlers::connected::get_user_info))
-        .route("/api/register/update", post(api_handlers::connected::register_user_end_update)
-            .layer(middleware::from_fn(api_handlers::auth::require_fresh_login)))
         .route("/api/logout", post(api_handlers::connected::logout))
-        .route("/api/pubkey/enc/{id}", get(api_handlers::connected::get_pub_key_enc))
-        .route("/api/pubkey/sign/{id}", get(api_handlers::connected::get_pub_key_sign))
+        .route("/api/pubkey/{id}", get(api_handlers::connected::get_pub_key))
+        .route("/api/user/{username}/pubkey", get(api_handlers::connected::get_pub_key_user))
         .route("/api/messages", get(api_handlers::connected::get_messages))
         .route("/api/messages/sent", get(api_handlers::connected::get_messages_sent))
         .route("/api/message/{id}", get(api_handlers::connected::get_one_message))
@@ -147,6 +145,13 @@ async fn main() {
         .route("/api/login/start", post(api_handlers::connected::login_user_start))
         .route("/api/login/end", post(api_handlers::connected::login_user_end))
 
+        .layer(session_layer.clone());
+
+    let account_app_fresh_login = Router::new()
+        .route("/api/user/addkey", put(api_handlers::connected::add_key))
+        .route("/api/register/update", post(api_handlers::connected::register_user_end_update))
+        .layer(middleware::from_fn(api_handlers::auth::require_fresh_login))
+        .layer(middleware::from_fn(api_handlers::auth::require_auth))
         .layer(session_layer);
 
 
@@ -167,6 +172,7 @@ async fn main() {
     let app = Router::new()
         .merge(public_app)
         .merge(account_app)
+        .merge(account_app_fresh_login)
         .merge(anonymous_app)
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))

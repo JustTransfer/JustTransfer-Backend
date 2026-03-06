@@ -167,7 +167,7 @@ pub async fn anonymous_send_message(
             .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
             .key(file_id_param.to_string())
             .part_number(part_number)
-            .upload_id(upload_id.clone())
+            .upload_id(upload_id)
             .presigned(
                 PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
                     .map_err(|_| ServerError::Internal)?

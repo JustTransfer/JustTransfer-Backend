@@ -114,6 +114,7 @@ pub struct RegisterUserEnd {
 #[derive(Serialize)]
 pub struct RegisterEndResult {
     role: String,
+    keys: Vec<KeyPairsEncoded>,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -168,6 +169,22 @@ pub async fn register_user_end(
         &state.db,
     )?;
 
+    let keys_encoded: Vec<KeyPairsEncoded> = server_registration_finish.into_iter().map(|k| {
+        KeyPairsEncoded {
+            id: k.id,
+            owner_id: k.owner_id,
+            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
+            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
+            is_active: k.is_active,
+            created_at: k.created_at,
+            revoked_at: k.revoked_at,
+        }
+    }).collect();
+
     // Create session
     session.insert(AUTH_KEY, &payload.username)
         .await
@@ -181,6 +198,7 @@ pub async fn register_user_end(
 
     let content = Json(RegisterEndResult {
         role: api_handlers::auth::Role::User.to_string(),
+        keys: keys_encoded,
     });
 
     Ok((StatusCode::OK, content))
@@ -190,18 +208,7 @@ pub async fn register_user_end(
 pub struct RegisterUserEndUpdate {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    cpriv_enc: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    nonce_priv_enc: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    pub_enc: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    cpriv_sign: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    nonce_priv_sign: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    pub_sign: String,
+    keys: Vec<KeyPairsEncodedUpdate>
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -220,38 +227,47 @@ pub async fn register_user_end_update(
         .map_err(|_| ApiError::Base64)?;
     let client_registration_finish = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
-    let cpriv_enc = URL_SAFE_NO_PAD
-        .decode(&payload.cpriv_enc)
-        .map_err(|_| ApiError::Base64)?;
-    let nonce_priv_enc = URL_SAFE_NO_PAD
-        .decode(&payload.nonce_priv_enc)
-        .map_err(|_| ApiError::Base64)?;
-    let pub_enc = URL_SAFE_NO_PAD
-        .decode(&payload.pub_enc)
-        .map_err(|_| ApiError::Base64)?;
-    let cpriv_sign = URL_SAFE_NO_PAD
-        .decode(&payload.cpriv_sign)
-        .map_err(|_| ApiError::Base64)?;
-    let nonce_priv_sign = URL_SAFE_NO_PAD
-        .decode(&payload.nonce_priv_sign)
-        .map_err(|_| ApiError::Base64)?;
-    let pub_sign = URL_SAFE_NO_PAD
-        .decode(&payload.pub_sign)
-        .map_err(|_| ApiError::Base64)?;
+
+    let decoded_keys: Result<Vec<KeyPairsdUpdate>, ApiError> =
+        payload.keys.into_iter().map(|k| {
+            Ok(KeyPairsdUpdate {
+                id: k.id,
+                enc_public_key: URL_SAFE_NO_PAD.decode(k.enc_public_key).map_err(|_| ApiError::Base64)?,
+                enc_nonce_private_key: URL_SAFE_NO_PAD.decode(k.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
+                enc_cipher_private_key: URL_SAFE_NO_PAD.decode(k.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
+                sign_public_key: URL_SAFE_NO_PAD.decode(k.sign_public_key).map_err(|_| ApiError::Base64)?,
+                sign_nonce_private_key: URL_SAFE_NO_PAD.decode(k.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
+                sign_cipher_private_key: URL_SAFE_NO_PAD.decode(k.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
+            })
+        }).collect();
     
     let server_registration_finish = server::connected::server_registration_finish_update(
         client_registration_finish,
         &*claims_jwt.username,
-        cpriv_enc,
-        nonce_priv_enc,
-        pub_enc,
-        cpriv_sign,
-        nonce_priv_sign,
-        pub_sign,
+        decoded_keys.map_err(|_| ApiError::ServerError)?,
         &state.db,
     )?;
 
-    Ok(StatusCode::OK)
+    let keys_encoded: Vec<KeyPairsEncoded> = server_registration_finish.into_iter().map(|k| {
+        KeyPairsEncoded {
+            id: k.id,
+            owner_id: k.owner_id,
+            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
+            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
+            is_active: k.is_active,
+            created_at: k.created_at,
+            revoked_at: k.revoked_at,
+        }
+    }).collect();
+
+    Ok((StatusCode::OK, Json(RegisterEndResult {
+        role: api_handlers::auth::Role::User.to_string(),
+        keys: keys_encoded,
+    })))
 }
 
 ///
@@ -309,13 +325,8 @@ pub struct LoginEnd {
 
 #[derive(Serialize)]
 pub struct LoginEndResult {
-    pub_enc: String,
-    cpriv_enc: String,
-    nonce_priv_enc: String,
-    pub_sign: String,
-    cpriv_sign: String,
-    nonce_priv_sign: String,
     role: String,
+    keys: Vec<KeyPairsEncoded>,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -359,24 +370,29 @@ pub async fn login_user_end(
         .map_err(|_| ApiError::ServerError)?;
 
     // Encode the keys to base64
-    let pub_enc = URL_SAFE_NO_PAD.encode(server_login_finish.0);
-    let cpriv_enc = URL_SAFE_NO_PAD.encode(server_login_finish.1);
-    let nonce_priv_enc = URL_SAFE_NO_PAD.encode(server_login_finish.2);
-    let pub_sign = URL_SAFE_NO_PAD.encode(server_login_finish.3);
-    let cpriv_sign = URL_SAFE_NO_PAD.encode(server_login_finish.4);
-    let nonce_priv_sign = URL_SAFE_NO_PAD.encode(server_login_finish.5);
+    let keys_encoded: Vec<KeyPairsEncoded> = server_login_finish.into_iter().map(|k| {
+        KeyPairsEncoded {
+            id: k.id,
+            owner_id: k.owner_id,
+            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
+            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
+            is_active: k.is_active,
+            created_at: k.created_at,
+            revoked_at: k.revoked_at,
+        }
+    }).collect();
 
-    let content = Json(LoginEndResult {
-        pub_enc,
-        cpriv_enc,
-        nonce_priv_enc,
-        pub_sign,
-        cpriv_sign,
-        nonce_priv_sign,
-        role: user.role,
-    });
-
-    Ok((StatusCode::OK, content))
+    Ok((
+        StatusCode::OK,
+        Json(LoginEndResult {
+            role: role.to_string(),
+            keys: keys_encoded,
+        })
+    ))
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -391,45 +407,110 @@ pub async fn logout(
 }
 
 ///
+/// Add Key
+///
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct AddKeyParam {
+    key: NewKeyPairsEncoded
+}
+
+#[derive(Serialize)]
+pub struct AddKeyResult {
+    keys: Vec<KeyPairsEncoded>,
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn add_key(
+    Extension(claims_jwt): Extension<Claims>,
+    State(state): State<AppState>,
+    Json(payload): Json<AddKeyParam>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    // Decode the base64 encoded keys
+    let decoded_key = NewKeyPairsDecoded {
+        enc_public_key: URL_SAFE_NO_PAD.decode(payload.key.enc_public_key).map_err(|_| ApiError::Base64)?,
+        enc_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        enc_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
+        sign_public_key: URL_SAFE_NO_PAD.decode(payload.key.sign_public_key).map_err(|_| ApiError::Base64)?,
+        sign_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        sign_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
+    };
+
+    let keys = server::connected::add_key(
+        &*claims_jwt.username,
+        decoded_key,
+        &state.db,
+    )?;
+
+    let encoded_keys: Vec<KeyPairsEncoded> = keys.into_iter().map(|k| {
+        KeyPairsEncoded {
+            id: k.id,
+            owner_id: k.owner_id,
+            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
+            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
+            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
+            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
+            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
+            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
+            is_active: k.is_active,
+            created_at: k.created_at,
+            revoked_at: k.revoked_at,
+        }
+    }).collect();
+
+    Ok((StatusCode::OK, Json(AddKeyResult { keys: encoded_keys })))
+}
+
+///
 /// Get Public Keys
 ///
 
 #[derive(Serialize)]
-pub struct GetPubKeyEncResult {
+pub struct GetPubKeyResult {
+    key_id: Uuid,
     pub_enc: String,
+    pub_sign: String,
 }
 
 #[instrument(skip(state), err(Debug))]
-pub async fn get_pub_key_enc(
+pub async fn get_pub_key(
+    Path(key_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+    
+    let pub_keys = server::connected::get_pub_key(key_id, &state.db)?;
+
+    Ok((StatusCode::OK, Json(
+        GetPubKeyResult {
+            key_id: pub_keys.0,
+            pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.1),
+            pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.2),
+        }
+    )))
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn get_pub_key_user(
     Path(username): Path<String>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     // Validate the username
     validate_username(&username).map_err(|_| ApiError::InputValidation)?;
-    
-    let pub_enc = server::connected::get_pub_key_enc(&*username, &state.db)?;
 
-    Ok((StatusCode::OK, Json(GetPubKeyEncResult { pub_enc: URL_SAFE_NO_PAD.encode(pub_enc) })))
-}
+    let pub_keys = server::connected::get_pub_key_user(&*username, &state.db)?;
 
-#[derive(Serialize)]
-pub struct GetPubKeySignResult {
-    pub_sign: String,
-}
-
-#[instrument(skip(state), err(Debug))]
-pub async fn get_pub_key_sign(
-    Path(username): Path<String>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    // Validate the username
-    validate_username(&username).map_err(|_|  ApiError::InputValidation)?;
-
-    let pub_sign = server::connected::get_pub_key_sign(&*username, &state.db)?;
-
-    Ok((StatusCode::OK, Json(GetPubKeySignResult { pub_sign: URL_SAFE_NO_PAD.encode(pub_sign) })))
+    Ok((StatusCode::OK, Json(
+        GetPubKeyResult {
+            key_id: pub_keys.0,
+            pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.1),
+            pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.2),
+        }
+    )))
 }
 
 ///
@@ -456,6 +537,8 @@ pub async fn get_messages(
             id: m.id,
             sender: m.sender,
             receiver: m.receiver,
+            sender_key_id: m.sender_key_id,
+            receiver_key_id: m.receiver_key_id,
             cfilename: URL_SAFE_NO_PAD.encode(m.cfilename),
             nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
             file_id: m.file_id,
@@ -514,8 +597,8 @@ pub async fn get_one_message(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessage {
-    #[validate(custom(function = "validate_username"))]
-    receiver: String,
+    sender_key_id: Uuid,
+    receiver_key_id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -559,7 +642,8 @@ pub async fn upload_message(
 
     let (upload_urls, upload_id) = server::connected::send_message(
         &claims_jwt.username,
-        &payload.receiver,
+        payload.sender_key_id,
+        payload.receiver_key_id,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
