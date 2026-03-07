@@ -188,41 +188,10 @@ pub async fn register_user_end(
         nonce_priv_sign,
         pub_sign,
         &state.db,
+        &state.mailer,
     )?;
 
-    let keys_encoded: Vec<KeyPairsEncoded> = server_registration_finish.into_iter().map(|k| {
-        KeyPairsEncoded {
-            id: k.id,
-            owner_id: k.owner_id,
-            enc_public_key: URL_SAFE_NO_PAD.encode(k.enc_public_key),
-            enc_nonce_private_key: URL_SAFE_NO_PAD.encode(k.enc_nonce_private_key),
-            enc_cipher_private_key: URL_SAFE_NO_PAD.encode(k.enc_cipher_private_key),
-            sign_public_key: URL_SAFE_NO_PAD.encode(k.sign_public_key),
-            sign_nonce_private_key: URL_SAFE_NO_PAD.encode(k.sign_nonce_private_key),
-            sign_cipher_private_key: URL_SAFE_NO_PAD.encode(k.sign_cipher_private_key),
-            is_active: k.is_active,
-            created_at: k.created_at,
-            revoked_at: k.revoked_at,
-        }
-    }).collect();
-
-    // Create session
-    session.insert(AUTH_KEY, &payload.username)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
-    session.insert(AUTH_KEY_ROLE, api_handlers::auth::Role::User.to_string())
-        .await
-        .map_err(|_| ApiError::ServerError)?;
-    session.insert(AUTH_KEY_CREATED_AT, Utc::now().timestamp())
-        .await
-        .map_err(|_| ApiError::ServerError)?;
-
-    let content = Json(RegisterEndResult {
-        role: api_handlers::auth::Role::User.to_string(),
-        keys: keys_encoded,
-    });
-
-    Ok((StatusCode::OK, content))
+    Ok(StatusCode::OK)
 }
 
 #[derive(Deserialize, Validate, Debug)]
@@ -267,6 +236,7 @@ pub async fn register_user_end_update(
         &*claims_jwt.username,
         decoded_keys.map_err(|_| ApiError::ServerError)?,
         &state.db,
+        &state.mailer,
     )?;
 
     let keys_encoded: Vec<KeyPairsEncoded> = server_registration_finish.into_iter().map(|k| {
@@ -289,6 +259,24 @@ pub async fn register_user_end_update(
         role: api_handlers::auth::Role::User.to_string(),
         keys: keys_encoded,
     })))
+}
+
+///
+/// Verify Email
+///
+
+#[instrument(skip(state), err(Debug))]
+pub async fn verify_email(
+    Path(id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    server::connected::verify_email(
+        id,
+        &state.db,
+    )?;
+
+    Ok(StatusCode::OK)
 }
 
 ///

@@ -12,6 +12,7 @@ pub struct AppState {
     pub s3: Client,
     pub bucket_name: String,
     pub bucket_name_anonymous: String,
+    pub mailer: lettre::SmtpTransport,
 }
 
 ///

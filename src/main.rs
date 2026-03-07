@@ -144,6 +144,7 @@ async fn main() {
         .route("/api/register/end", post(api_handlers::connected::register_user_end))
         .route("/api/login/start", post(api_handlers::connected::login_user_start))
         .route("/api/login/end", post(api_handlers::connected::login_user_end))
+        .route("/api/verify-email/{id}", post(api_handlers::connected::verify_email))
 
         .layer(session_layer.clone());
 

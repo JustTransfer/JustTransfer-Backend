@@ -13,7 +13,7 @@ use opaque_ke::{CipherSuite, ServerSetup};
 use tracing::{info, warn, error};
 use uuid::Uuid;
 
-use crate::api_handlers;
+use crate::{api_handlers, server};
 use crate::consts::*;
 use crate::error::ServerError;
 use crate::models::*;
@@ -39,6 +39,10 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
 
         // Set the corresponding constant
         match var {
+            "FRONTEND_URL" => {
+                FRONTEND_URL.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
+            }
             "POSTGRESQL_USERNAME" => {
                 POSTGRESQL_USERNAME.set(std::env::var(var).unwrap())
                     .map_err(|_| ServerError::Internal)?;
@@ -81,6 +85,18 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
                 SERVER_MODE.set(mode)
                     .map_err(|_| ServerError::Internal)?;
             }
+            "SMTP_HOST" => {
+                SMTP_HOST.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
+            }
+            "SMTP_MAIL" => {
+                SMTP_MAIL.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
+            }
+            "SMTP_PASSWORD" => {
+                SMTP_PASSWORD.set(std::env::var(var).unwrap())
+                    .map_err(|_| ServerError::Internal)?;
+            }
             _ => {}
         }
     }
@@ -88,11 +104,18 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
     let db_pool = server_init_db()?;
     let s3_client = server_init_s3().await?;
 
+    let mailer = server::mail::init_mailer(
+        SMTP_HOST.get().unwrap(),
+        SMTP_MAIL.get().unwrap(),
+        SMTP_PASSWORD.get().unwrap(),
+    );
+
     let state = api_handlers::misc::AppState {
         db: db_pool.clone(),
         s3: s3_client.clone(),
         bucket_name: S3_BUCKET_NAME_CONNECTED.get().unwrap().clone(),
         bucket_name_anonymous: S3_BUCKET_NAME_ANONYMOUS.get().unwrap().clone(),
+        mailer,
     };
 
     generate_dummy_user(&db_pool).await
@@ -266,6 +289,8 @@ async fn generate_dummy_user(
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
             role: &DUMMY_ROLE.to_string(),
             created_at: Utc::now(),
+            registration_token: Uuid::new_v4(),
+            email_verified: false,
         };
 
         diesel::insert_into(users::table)

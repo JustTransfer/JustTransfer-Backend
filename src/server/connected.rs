@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use crate::consts::*;
 use crate::models::*;
-use crate::{api_handlers, schema};
+use crate::{api_handlers, schema, server};
 use crate::schema::messages::dsl::messages;
 use crate::schema::users::dsl::users;
 use crate::schema::users::*;
@@ -60,7 +60,8 @@ pub fn server_registration_finish(
     nonce_priv_sign: Vec<u8>,
     pub_sign: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<Vec<KeyPairs>, ServerError> {
+    mailer: &lettre::SmtpTransport,
+) -> Result<(), ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -74,6 +75,8 @@ pub fn server_registration_finish(
         password_file: &password_file_param.serialize().to_vec(),
         role: &"user".to_string(),
         created_at: Utc::now(),
+        registration_token: Uuid::new_v4(),
+        email_verified: false,
     };
 
     let result = diesel::insert_into(users::table)
@@ -117,12 +120,21 @@ pub fn server_registration_finish(
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    let keys = crate::schema::key_pairs::table
-        .filter(crate::schema::key_pairs::owner_id.eq(new_user.id))
-        .load::<KeyPairs>(&mut conn)
+    // Email verification
+    let url = format!(
+        "{}/verify-email/{}",
+        FRONTEND_URL.get().unwrap(),
+        new_user.registration_token
+    );
+    server::mail::send_verification_email(
+        new_user.email.as_str(),
+        new_user.username.as_str(),
+        url.as_str(),
+        mailer,
+    )
         .map_err(|_| ServerError::Internal)?;
 
-    Ok(keys)
+    Ok(())
 }
 
 pub fn server_registration_finish_update(
@@ -130,6 +142,7 @@ pub fn server_registration_finish_update(
     username_param: &str,
     keys: Vec<KeyPairsdUpdate>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    mailer: &lettre::SmtpTransport,
 ) -> Result<Vec<KeyPairs>, ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -170,12 +183,49 @@ pub fn server_registration_finish_update(
             .map_err(|_| ServerError::Internal)?;
     }
 
+    // Email notification of password change
+    server::mail::send_password_changed_notification_email(
+        user.email.as_str(),
+        user.username.as_str(),
+        mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
+
     let keys = crate::schema::key_pairs::table
         .filter(crate::schema::key_pairs::owner_id.eq(user.id))
         .load::<KeyPairs>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(keys)
+}
+
+///
+/// Email verification
+///
+
+pub fn verify_email(
+    token_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let user = users::table
+        .filter(users::registration_token.eq(token_param))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    if user.email_verified {
+        return Err(ServerError::Internal);
+    }
+
+    diesel::update(users.find(user.id))
+        .set(users::email_verified.eq(true))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
 }
 
 ///
@@ -275,11 +325,16 @@ pub fn server_login_finish(
         ServerLoginParameters::default(),
     ).map_err(|_| ServerError::Internal)?;
 
+    // Check if the account is verified
     let user = users::table
         .filter(users::username.eq(username_param))
         .first::<User>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
+
+    if !user.email_verified {
+            return Err(ServerError::Forbidden);
+    }
 
     // Get all the keys of the user
     let keys = crate::schema::key_pairs::table

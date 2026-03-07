@@ -16,7 +16,10 @@ CREATE TABLE users
     role                    TEXT        NOT NULL CHECK (role IN ('user', 'premium', 'admin', 'anonymous')),
     number_transfers        INT         NOT NULL DEFAULT 0,
 
-    created_at              TIMESTAMPTZ NOT NULL DEFAULT now()
+    created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    registration_token      UUID        NOT NULL UNIQUE,
+    email_verified          BOOLEAN     NOT NULL DEFAULT false
 );
 
 -- Table key_pairs
@@ -54,9 +57,9 @@ CREATE TABLE messages
     lifetime                INT         NOT NULL,
     creation_time           TIMESTAMPTZ NOT NULL,
     signature               BYTEA,
-    number_downloads        INT DEFAULT 0 NOT NULL,
-    file_size               BIGINT        NOT NULL,
-    chunk_size              BIGINT        NOT NULL
+    number_downloads        INT         DEFAULT 0 NOT NULL,
+    file_size               BIGINT      NOT NULL,
+    chunk_size              BIGINT      NOT NULL
 );
 
 -- Table Anonymous messages

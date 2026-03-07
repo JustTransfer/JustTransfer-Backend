@@ -83,7 +83,8 @@ pub const SIGN_LEN_NONCE: usize = crypto_secretbox_NONCEBYTES as usize;
 pub const SIGN_LEN_SIGNATURE: usize = crypto_sign_BYTES  as usize;
 
 /// Environment variable list
-pub const ENV_VARS: [&str; 9] = [
+pub const ENV_VARS: [&str; 13] = [
+    "FRONTEND_URL",
     "POSTGRESQL_USERNAME",
     "DATABASE_URL",
     "MINIO_ROOT_USER",
@@ -92,10 +93,14 @@ pub const ENV_VARS: [&str; 9] = [
     "S3_BUCKET_NAME",
     "S3_BUCKET_NAME_ANONYMOUS",
     "JWT_SECRET_KEY",
-    "SERVER_MODE"
+    "SERVER_MODE",
+    "SMTP_HOST",
+    "SMTP_MAIL",
+    "SMTP_PASSWORD"
 ];
 
 /// Env variables once_cell key
+pub static FRONTEND_URL: OnceCell<String> = OnceCell::new();
 pub static POSTGRESQL_USERNAME: OnceCell<String> = OnceCell::new();
 pub static DATABASE_URL: OnceCell<String> = OnceCell::new();
 pub static MINIO_ROOT_USER: OnceCell<String> = OnceCell::new();
@@ -105,3 +110,6 @@ pub static S3_BUCKET_NAME_CONNECTED: OnceCell<String> = OnceCell::new();
 pub static S3_BUCKET_NAME_ANONYMOUS: OnceCell<String> = OnceCell::new();
 pub static JWT_SECRET_KEY: OnceCell<String> = OnceCell::new();
 pub static SERVER_MODE: OnceCell<String> = OnceCell::new();
+pub static SMTP_HOST: OnceCell<String> = OnceCell::new();
+pub static SMTP_MAIL: OnceCell<String> = OnceCell::new();
+pub static SMTP_PASSWORD: OnceCell<String> = OnceCell::new();

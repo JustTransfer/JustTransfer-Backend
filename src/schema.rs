@@ -70,6 +70,8 @@ diesel::table! {
         role -> Text,
         number_transfers -> Int4,
         created_at -> Timestamptz,
+        registration_token -> Uuid,
+        email_verified -> Bool,
     }
 }
 

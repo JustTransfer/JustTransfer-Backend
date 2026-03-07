@@ -8,7 +8,7 @@ use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
 use std::io::Write;
-
+use crate::schema::users::email_verified;
 
 ///
 /// Opaque settings
@@ -150,6 +150,9 @@ pub struct User {
     pub role: String,
     pub number_transfers: i32,
     pub created_at: chrono::DateTime<Utc>,
+
+    pub registration_token: Uuid,
+    pub email_verified: bool,
 }
 
 pub struct InfoUser {
@@ -169,6 +172,9 @@ pub struct NewUser<'a> {
     pub password_file: &'a Vec<u8>,
     pub role: &'a String,
     pub created_at: chrono::DateTime<Utc>,
+
+    pub registration_token: Uuid,
+    pub email_verified: bool,
 }
 
 ///
