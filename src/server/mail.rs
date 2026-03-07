@@ -25,11 +25,11 @@ fn send_mail(receiver: &str, username: &str, subject: &str, body: &str, mailer: 
 
     // Send the email
     match mailer.send(&email) {
-        Ok(_) => { 
+        Ok(_) => {
             tracing::info!("Email sent to {} ({})", username, receiver);
             Ok(())
         }
-        Err(e) => { 
+        Err(e) => {
             tracing::error!("Could not send email to {} ({}): {:?}", username, receiver, e);
             Err(ServerError::EmailSendError)
         }
@@ -55,7 +55,7 @@ pub fn send_password_reset_email(receiver: &str, username: &str, link: &str, mai
 pub fn send_password_changed_notification_email(receiver: &str, username: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "Your JustTransfer password has been changed";
-    let body = format!("Hello {},\n\nThis is a notification that your JustTransfer password has been changed. If you did not initiate this change, please contact our support team immediately.\n\nBest regards,\nJustTransfer Team", username);
+    let body = format!("Hello {},\n\nThis is a notification that your JustTransfer password has been changed. If you did not initiate this change, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", username);
 
     send_mail(receiver, username, subject, &body, mailer)
 }
