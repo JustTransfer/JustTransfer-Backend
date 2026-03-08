@@ -1,6 +1,7 @@
 use std::io;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
+use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
 use diesel::{alias, r2d2, PgConnection, QueryDsl, RunQueryDsl};
@@ -17,7 +18,7 @@ use uuid::Uuid;
 
 use crate::consts::*;
 use crate::models::*;
-use crate::{api_handlers, schema};
+use crate::{api_handlers, schema, server};
 use crate::schema::messages::dsl::messages;
 use crate::schema::users::dsl::users;
 use crate::schema::users::*;
@@ -60,7 +61,8 @@ pub fn server_registration_finish(
     nonce_priv_sign: Vec<u8>,
     pub_sign: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<Vec<KeyPairs>, ServerError> {
+    mailer: &lettre::SmtpTransport,
+) -> Result<(), ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -74,6 +76,8 @@ pub fn server_registration_finish(
         password_file: &password_file_param.serialize().to_vec(),
         role: &"user".to_string(),
         created_at: Utc::now(),
+        registration_token: Uuid::new_v4(),
+        email_verified: false,
     };
 
     let result = diesel::insert_into(users::table)
@@ -117,12 +121,21 @@ pub fn server_registration_finish(
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    let keys = crate::schema::key_pairs::table
-        .filter(crate::schema::key_pairs::owner_id.eq(new_user.id))
-        .load::<KeyPairs>(&mut conn)
+    // Email verification
+    let url = format!(
+        "{}/verify-email/{}",
+        FRONTEND_URL.get().unwrap(),
+        new_user.registration_token
+    );
+    server::mail::send_verification_email(
+        new_user.email.as_str(),
+        new_user.username.as_str(),
+        url.as_str(),
+        mailer,
+    )
         .map_err(|_| ServerError::Internal)?;
 
-    Ok(keys)
+    Ok(())
 }
 
 pub fn server_registration_finish_update(
@@ -130,6 +143,7 @@ pub fn server_registration_finish_update(
     username_param: &str,
     keys: Vec<KeyPairsdUpdate>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    mailer: &lettre::SmtpTransport,
 ) -> Result<Vec<KeyPairs>, ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -170,12 +184,219 @@ pub fn server_registration_finish_update(
             .map_err(|_| ServerError::Internal)?;
     }
 
+    // Email notification of password change
+    server::mail::send_password_changed_notification_email(
+        user.email.as_str(),
+        user.username.as_str(),
+        mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
+
     let keys = crate::schema::key_pairs::table
         .filter(crate::schema::key_pairs::owner_id.eq(user.id))
         .load::<KeyPairs>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(keys)
+}
+
+///
+/// Email verification
+///
+
+pub fn verify_email(
+    token_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let user = users::table
+        .filter(users::registration_token.eq(token_param))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    if user.email_verified {
+        return Err(ServerError::Internal);
+    }
+
+    diesel::update(users.find(user.id))
+        .set(users::email_verified.eq(true))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
+///
+/// Password reset
+///
+
+pub fn request_password_reset(
+    email_param: &str,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    mailer: &lettre::SmtpTransport,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    use crate::schema::reset_tokens;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Generate a new registration token for password reset
+    let new_registration_token = Uuid::new_v4();
+
+    // Get the user or dummy user to prevent user enumeration
+    let user_opt = users::table
+        .filter(users::email.eq(email_param))
+        .first::<User>(&mut conn)
+        .optional()?;
+
+    let user_id = if let Some(user) = &user_opt {
+        user.id
+    } else {
+        // Get the dummy user id to prevent user enumeration
+        DUMMY_ID.get().unwrap().to_owned()
+    };
+
+    // Create a new registration token for the user or update the dummy user to prevent user enumeration
+    diesel::insert_into(reset_tokens::table)
+        .values((
+            reset_tokens::account_id.eq(user_id),
+            reset_tokens::token.eq(new_registration_token),
+            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(RESET_PASSWORD_TOKEN_DURATION_MINUTES))
+        ))
+        .on_conflict(reset_tokens::account_id)
+        .do_update()
+        .set((
+            reset_tokens::token.eq(new_registration_token),
+            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(RESET_PASSWORD_TOKEN_DURATION_MINUTES))
+        ))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+
+    // TODO timing attack possible here
+    if user_opt.is_some() {
+        let user = user_opt.unwrap();
+
+        // Send password reset email
+        let url = format!(
+            "{}/reset-password/{}/{}",
+            FRONTEND_URL.get().unwrap(),
+            new_registration_token,
+            urlencoding::encode(user.username.as_str())
+        );
+        server::mail::send_password_reset_email(
+            user.email.as_str(),
+            user.username.as_str(),
+            url.as_str(),
+            mailer,
+        )
+            .map_err(|_| ServerError::Internal)?;
+    }
+
+    Ok(())
+}
+
+pub fn server_registration_finish_password_reset(
+    token: Uuid,
+    client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
+    key: KeyPairsdUpdate,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    mailer: &lettre::SmtpTransport,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    use crate::schema::messages;
+    use crate::schema::key_pairs;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Check if the token is valid
+    let reset_token = crate::schema::reset_tokens::table
+        .filter(crate::schema::reset_tokens::token.eq(token))
+        .first::<ResetToken>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Forbidden)?;
+
+    // Check if the token is expired
+    if reset_token.expires_at < Utc::now() {
+        return Err(ServerError::Forbidden);
+    }
+
+    // Get the user of the token
+    let user = users::table
+        .filter(users::id.eq(reset_token.account_id))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    // Delete the token to prevent reuse
+    diesel::delete(crate::schema::reset_tokens::table)
+        .filter(crate::schema::reset_tokens::token.eq(token))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    let password_file_param =
+        ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
+
+    let password_file_bytes = password_file_param.serialize();
+
+    let user = diesel::update(users.find(user.id))
+        .set((
+            users::password_file.eq(password_file_bytes.to_vec()),
+        ))
+        .returning(User::as_returning())
+        .get_result(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Delete all sent and received messages of the user to prevent access with old keys
+    diesel::delete(messages.filter(messages::sender_key_id.eq_any(
+        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+    )))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
+        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+    )))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Delete all keys of the user to prevent access with old keys
+    diesel::delete(crate::schema::key_pairs::table.filter(crate::schema::key_pairs::owner_id.eq(user.id)))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Create new keys
+    let new_key = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: &user.id,
+
+        enc_public_key: &key.enc_public_key,
+        enc_nonce_private_key: &key.enc_nonce_private_key,
+        enc_cipher_private_key: &key.enc_cipher_private_key,
+
+        sign_public_key: &key.sign_public_key,
+        sign_nonce_private_key: &key.sign_nonce_private_key,
+        sign_cipher_private_key: &key.sign_cipher_private_key,
+
+        is_active: &true,
+        revoked_at: None,
+    };
+
+    let _ = diesel::insert_into(crate::schema::key_pairs::table)
+        .values(&new_key)
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Email notification of password change
+    server::mail::send_password_reset_confirmation_email(
+        user.email.as_str(),
+        user.username.as_str(),
+        mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
 }
 
 ///
@@ -275,11 +496,16 @@ pub fn server_login_finish(
         ServerLoginParameters::default(),
     ).map_err(|_| ServerError::Internal)?;
 
+    // Check if the account is verified
     let user = users::table
         .filter(users::username.eq(username_param))
         .first::<User>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
+
+    if !user.email_verified {
+            return Err(ServerError::Forbidden);
+    }
 
     // Get all the keys of the user
     let keys = crate::schema::key_pairs::table

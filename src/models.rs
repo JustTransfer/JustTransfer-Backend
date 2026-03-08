@@ -8,7 +8,7 @@ use diesel::pg::Pg;
 use diesel::serialize::{self, Output, ToSql};
 use diesel::sql_types::Text;
 use std::io::Write;
-
+use crate::schema::users::email_verified;
 
 ///
 /// Opaque settings
@@ -150,6 +150,9 @@ pub struct User {
     pub role: String,
     pub number_transfers: i32,
     pub created_at: chrono::DateTime<Utc>,
+
+    pub registration_token: Uuid,
+    pub email_verified: bool,
 }
 
 pub struct InfoUser {
@@ -169,6 +172,24 @@ pub struct NewUser<'a> {
     pub password_file: &'a Vec<u8>,
     pub role: &'a String,
     pub created_at: chrono::DateTime<Utc>,
+
+    pub registration_token: Uuid,
+    pub email_verified: bool,
+}
+
+///
+/// Reset tokens
+/// 
+
+#[derive(Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::reset_tokens)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(belongs_to(User, foreign_key = account_id))]
+pub struct ResetToken {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub token: Uuid,
+    pub expires_at: chrono::DateTime<Utc>,
 }
 
 ///

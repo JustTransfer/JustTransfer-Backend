@@ -24,6 +24,9 @@ pub enum ServerError {
 
     #[error("resource not found")]
     NotFound,
+
+    #[error("error sending email")]
+    EmailSendError,
 }
 impl From<aws_sdk_s3::error::BuildError> for ServerError {
     fn from(_: aws_sdk_s3::error::BuildError) -> Self {
@@ -52,6 +55,7 @@ impl From<ServerError> for ApiError {
             ServerError::Forbidden => ApiError::Forbidden,
             ServerError::InsufficientStorage => ApiError::InsufficientStorage,
             ServerError::NotFound => ApiError::ServerNotFound,
+            ServerError::EmailSendError => ApiError::ServerError,
         }
     }
 }

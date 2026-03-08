@@ -61,6 +61,15 @@ diesel::table! {
 }
 
 diesel::table! {
+    reset_tokens (id) {
+        id -> Uuid,
+        account_id -> Uuid,
+        token -> Uuid,
+        expires_at -> Timestamptz,
+    }
+}
+
+diesel::table! {
     users (id) {
         id -> Uuid,
         username -> Text,
@@ -70,15 +79,19 @@ diesel::table! {
         role -> Text,
         number_transfers -> Int4,
         created_at -> Timestamptz,
+        registration_token -> Uuid,
+        email_verified -> Bool,
     }
 }
 
 diesel::joinable!(key_pairs -> users (owner_id));
+diesel::joinable!(reset_tokens -> users (account_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
     anonymousmessages,
     key_pairs,
     messages,
     opaque_settings,
+    reset_tokens,
     users,
 );
