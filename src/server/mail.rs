@@ -8,7 +8,7 @@ pub fn init_mailer(smtp_server: &str, smtp_username: &str, smtp_password: &str) 
 
     if SERVER_MODE.get().unwrap() == "development" {
         tracing::info!("Server mode is 'development', emails will be printed to console instead of being sent");
-        tracing::warn!("Valid SMTP credentials are still required to initialize the mailer, but emails will not be sent");
+        tracing::warn!("The connection will still be established to the SMTP server");
     }
 
     let creds = Credentials::new(smtp_username.to_owned(), smtp_password.to_owned());
