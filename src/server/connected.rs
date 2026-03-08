@@ -348,7 +348,13 @@ pub fn server_registration_finish_password_reset(
         .get_result(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    // Delete all received messages of the user to prevent access with old keys
+    // Delete all sent and received messages of the user to prevent access with old keys
+    diesel::delete(messages.filter(messages::sender_key_id.eq_any(
+        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+    )))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
     diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
         key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
     )))
