@@ -41,6 +41,15 @@ CREATE TABLE key_pairs
     revoked_at              TIMESTAMPTZ
 );
 
+-- Table reset_tokens
+CREATE TABLE reset_tokens
+(
+    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    account_id              UUID        NOT NULL UNIQUE REFERENCES users(id),
+    token                   UUID        NOT NULL UNIQUE,
+    expires_at              TIMESTAMPTZ NOT NULL
+);
+
 -- Table messages
 CREATE TABLE messages
 (

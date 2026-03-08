@@ -1,9 +1,16 @@
 use lettre::message::{Mailbox, header::ContentType};
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{Message, SmtpTransport, Transport};
+use crate::consts::SERVER_MODE;
 use crate::error::ServerError;
 
 pub fn init_mailer(smtp_server: &str, smtp_username: &str, smtp_password: &str) -> SmtpTransport {
+
+    if SERVER_MODE.get().unwrap() == "development" {
+        tracing::info!("Server mode is 'development', emails will be printed to console instead of being sent");
+        tracing::warn!("Valid SMTP credentials are still required to initialize the mailer, but emails will not be sent");
+    }
+
     let creds = Credentials::new(smtp_username.to_owned(), smtp_password.to_owned());
 
     // Open a remote connection to the SMTP server
@@ -14,6 +21,11 @@ pub fn init_mailer(smtp_server: &str, smtp_username: &str, smtp_password: &str) 
 }
 
 fn send_mail(receiver: &str, username: &str, subject: &str, body: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    if SERVER_MODE.get().unwrap() == "development" {
+        tracing::info!("--- Email to {} ({}) ---\nSubject: {}\n\n{}\n--- End of email ---", username, receiver, subject, body);
+        return Ok(());
+    }
 
     let email = Message::builder()
         .from(Mailbox::new(Some("JustTransfer".to_owned()), crate::consts::SMTP_MAIL.get().unwrap().to_owned().parse().unwrap()))
@@ -48,6 +60,14 @@ pub fn send_password_reset_email(receiver: &str, username: &str, link: &str, mai
 
     let subject = "JustTransfer password reset request";
     let body = format!("Hello {},\n\nWe received a request to reset your JustTransfer password. If you initiated this request, please click the following link to reset your password:\n\n{}\n\nIf you did not request a password reset, please ignore this email. Your password will remain unchanged.\n\nBest regards,\nJustTransfer Team", username, link);
+
+    send_mail(receiver, username, subject, &body, mailer)
+}
+
+pub fn send_password_reset_confirmation_email(receiver: &str, username: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    let subject = "Your JustTransfer password has been reset";
+    let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer password has been reset. If you did not initiate this request, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", username);
 
     send_mail(receiver, username, subject, &body, mailer)
 }

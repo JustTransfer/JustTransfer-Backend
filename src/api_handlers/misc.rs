@@ -1,7 +1,7 @@
 use aws_sdk_s3::Client;
 use diesel::{r2d2, PgConnection};
 use diesel::r2d2::ConnectionManager;
-use validator::ValidationError;
+use validator::{ValidationError, Validate};
 use crate::consts::{MAX_FILE_SIZE_ANONYMOUS, MAX_FILE_SIZE_CONNECTED, MAX_LENGTH_USERNAME, MAX_VALUE_INT, MIN_LENGTH_USERNAME};
 
 pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
@@ -58,6 +58,17 @@ pub fn validate_username(username: &str) -> Result<(), ValidationError> {
     }
 
     Ok(())
+}
+
+pub fn validate_email(email: &str) -> Result<(), ValidationError> {
+    #[derive(Validate)]
+    struct EmailValidation<'a> {
+        #[validate(email)]
+        email: &'a str,
+    }
+
+    let email_validation = EmailValidation { email };
+    email_validation.validate().map_err(|_| ValidationError::new("invalid_email"))
 }
 
 pub fn validate_file_size_connected(size: i64) -> Result<(), ValidationError> {

@@ -231,7 +231,7 @@ pub async fn register_user_end_update(
             })
         }).collect();
     
-    let server_registration_finish = server::connected::server_registration_finish_update(
+    let keys = server::connected::server_registration_finish_update(
         client_registration_finish,
         &*claims_jwt.username,
         decoded_keys.map_err(|_| ApiError::ServerError)?,
@@ -239,7 +239,7 @@ pub async fn register_user_end_update(
         &state.mailer,
     )?;
 
-    let keys_encoded: Vec<KeyPairsEncoded> = server_registration_finish.into_iter().map(|k| {
+    let keys_encoded: Vec<KeyPairsEncoded> = keys.into_iter().map(|k| {
         KeyPairsEncoded {
             id: k.id,
             owner_id: k.owner_id,
@@ -276,6 +276,105 @@ pub async fn verify_email(
         &state.db,
     )?;
 
+    Ok(StatusCode::OK)
+}
+
+///
+/// Request Password Reset
+///
+
+#[instrument(skip(state), err(Debug))]
+pub async fn request_password_reset(
+    Path(email): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate the email
+    validate_email(&email).map_err(|_| ApiError::InputValidation)?;
+
+    server::connected::request_password_reset(
+        &*email,
+        &state.db,
+        &state.mailer,
+    )?;
+
+    Ok(StatusCode::OK)
+}
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct ResetPasswordEnd {
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_finish: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    cpriv_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_priv_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    pub_enc: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    cpriv_sign: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_priv_sign: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    pub_sign: String,
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn finish_password_reset(
+    Path(token): Path<Uuid>,
+    State(state): State<AppState>,
+    Json(payload): Json<ResetPasswordEnd>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    // Decode the base64 encoded client registration finish message
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_finish)
+        .map_err(|_| ApiError::Base64)?;
+
+    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
+
+    // Decode the base64 encoded keys
+    let cpriv_enc = URL_SAFE_NO_PAD
+        .decode(&payload.cpriv_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let nonce_priv_enc = URL_SAFE_NO_PAD
+        .decode(&payload.nonce_priv_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let pub_enc = URL_SAFE_NO_PAD
+        .decode(&payload.pub_enc)
+        .map_err(|_| ApiError::Base64)?;
+    let cpriv_sign = URL_SAFE_NO_PAD
+        .decode(&payload.cpriv_sign)
+        .map_err(|_| ApiError::Base64)?;
+    let nonce_priv_sign = URL_SAFE_NO_PAD
+        .decode(&payload.nonce_priv_sign)
+        .map_err(|_| ApiError::Base64)?;
+    let pub_sign = URL_SAFE_NO_PAD
+        .decode(&payload.pub_sign)
+        .map_err(|_| ApiError::Base64)?;
+    
+    let key = KeyPairsdUpdate {
+        id: Uuid::new_v4(),
+        enc_public_key: pub_enc.clone(),
+        enc_nonce_private_key: nonce_priv_enc.clone(),
+        enc_cipher_private_key: cpriv_enc.clone(),
+        sign_public_key: pub_sign.clone(),
+        sign_nonce_private_key: nonce_priv_sign.clone(),
+        sign_cipher_private_key: cpriv_sign.clone(),
+    };
+
+    server::connected::server_registration_finish_password_reset(
+        token,
+        req,
+        key,
+        &state.db,
+        &state.mailer,
+    )?;
+    
     Ok(StatusCode::OK)
 }
 

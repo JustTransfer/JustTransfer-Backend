@@ -31,6 +31,9 @@ pub const AUTH_KEY: &str = "username";
 pub const AUTH_KEY_ROLE: &str = "role";
 pub const AUTH_KEY_CREATED_AT: &str = "created_at";
 
+/// Const for Reset Password
+pub const RESET_PASSWORD_TOKEN_DURATION_MINUTES: i64 = 15; // 15 minutes
+
 
 /// Const for Anonymous Transfer
 pub const MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT: i64 = 10;

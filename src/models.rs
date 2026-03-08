@@ -178,6 +178,21 @@ pub struct NewUser<'a> {
 }
 
 ///
+/// Reset tokens
+/// 
+
+#[derive(Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::reset_tokens)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+#[diesel(belongs_to(User, foreign_key = account_id))]
+pub struct ResetToken {
+    pub id: Uuid,
+    pub account_id: Uuid,
+    pub token: Uuid,
+    pub expires_at: chrono::DateTime<Utc>,
+}
+
+///
 /// Messages
 ///
 #[derive(Queryable, Selectable, Identifiable, Insertable)]
