@@ -1,17 +1,6 @@
 # JustTransfer
 
-
-| Sender    | Receiver  | Method                                       |
-|-----------|-----------|----------------------------------------------|
-| anonymous | anonymous | Passphrase to get the symmetric key          |
-| login     | anonymous | Passphrase to get the symmetric key          |
-| anonymous | login     | Use the public key of the receiver -> remove |
-| login     | login     | Use the public key of the receiver           |
-
-
-## Price plan
-- Free, limit in size (10 GB, 100 files, max 15 days, max downloads)
-- Premium, no size limit, no time limit, etc.
+JustTransfer is a simple file transfer application built using Rust and Diesel.
 
 ## Features
 - TODO
