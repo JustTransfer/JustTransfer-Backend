@@ -130,6 +130,13 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
             ServerError::Internal
         })?;
 
+    // Start monthly task
+    server::cron::start_monthly_task(state.clone())
+        .map_err(|e| {
+            error!("Failed to start monthly task: {}", e);
+            ServerError::Internal
+        })?;
+
     Ok(state)
 }
 
