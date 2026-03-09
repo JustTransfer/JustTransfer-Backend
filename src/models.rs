@@ -3,13 +3,6 @@ use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid};
 
-use diesel::deserialize::{self, FromSql};
-use diesel::pg::Pg;
-use diesel::serialize::{self, Output, ToSql};
-use diesel::sql_types::Text;
-use std::io::Write;
-use crate::schema::users::email_verified;
-
 ///
 /// Opaque settings
 ///

@@ -1,7 +1,6 @@
-use std::io;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
@@ -17,7 +16,7 @@ use crate::models::{AnonymousMessage, AnonymousMessageMetadata, Message, NewAnon
 use crate::schema::anonymousmessages::dsl::anonymousmessages;
 use crate::schema::messages::dsl::messages;
 use crate::api_handlers::misc::DbPool;
-use crate::error::{ApiError, ServerError};
+use crate::error::ServerError;
 use crate::schema::users;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_anonymous};
 
@@ -61,6 +60,186 @@ async fn delete_invalid_anonymous_message(
 
     Ok(())
 }
+
+///
+/// Download anonymous message
+///
+
+pub async fn login_start_anonymous(
+    id_param: Uuid,
+    client_login_start_result: CredentialRequest<DefaultCipherSuite>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<CredentialResponse<DefaultCipherSuite>, ServerError> {
+    use crate::schema::anonymousmessages;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete invalid messages
+    delete_invalid_anonymous_message(pool, s3, id_param).await?;
+
+    let annonymous_message_opt = anonymousmessages::table
+        .filter(anonymousmessages::id.eq(id_param))
+        .first::<AnonymousMessage>(&mut conn)
+        .optional()?;
+
+    let password_file_param = if let Some(annonymous_message) = &annonymous_message_opt {
+        let password_file_bytes = annonymous_message.password_file.clone();
+
+        Some(
+            ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
+                .map_err(|_| ServerError::Internal)?
+        )
+    } else {
+        // Deserialize a dummy password file to prevent user enumeration
+        ServerRegistration::<DefaultCipherSuite>::deserialize(&DUMMY_PASSWORD_FILE)
+            .map_err(|_| ServerError::Internal)?;
+
+        None
+    };
+
+    let mut server_rng = OsRng;
+    let server_opaque = get_opaque_settings(pool).map_err(|_| ServerError::Internal)?;
+    let server_login_start_result = ServerLogin::start(
+        &mut server_rng,
+        &server_opaque,
+        password_file_param,
+        client_login_start_result,
+        id_param.as_bytes(),
+        ServerLoginParameters::default(),
+    )
+        .map_err(|_| ServerError::Internal)?;
+
+    // Use dummy id if the message does not exist to prevent user enumeration
+    let anonymous_message_id = if annonymous_message_opt.is_some() {
+        id_param
+    } else {
+        DUMMY_ANONYMOUS_MESSAGE_ID
+    };
+
+    diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(anonymous_message_id)))
+        .set(anonymousmessages::server_login.eq(Some(
+            server_login_start_result.state.serialize().to_vec(),
+        )))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(server_login_start_result.message)
+}
+
+pub async fn login_end_anonymous(
+    id_param: Uuid,
+    client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::anonymousmessages;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Load the ServerLogin state from the DB
+    let server_login_start_result = {
+        let server_login_state_bytes = anonymousmessages::table
+            .filter(anonymousmessages::id.eq(id_param))
+            .select(anonymousmessages::server_login)
+            .first::<Option<Vec<u8>>>(&mut conn)
+            .optional()?
+            .ok_or(ServerError::Internal)?
+            .ok_or(ServerError::Internal)?;
+
+        diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
+            .set(anonymousmessages::server_login.eq::<Option<Vec<u8>>>(None))
+            .execute(&mut conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        ServerLogin::deserialize(&server_login_state_bytes)
+            .map_err(|_| ServerError::Internal)?
+    };
+
+    server_login_start_result
+        .finish(
+            client_login_finish_result,
+            ServerLoginParameters::default(),
+        ).map_err(|_| ServerError::Internal)?;
+
+
+    Ok(())
+}
+
+pub async fn anonymous_get_message_metadata(
+    id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<AnonymousMessageMetadata, ServerError> {
+    use crate::schema::anonymousmessages;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let messages_get = anonymousmessages::table
+        .filter(anonymousmessages::id.eq(id_param))
+        .select((
+            anonymousmessages::id,
+            anonymousmessages::cfilename,
+            anonymousmessages::nonce_filename,
+            anonymousmessages::file_id,
+            anonymousmessages::header,
+            anonymousmessages::max_downloads,
+            anonymousmessages::lifetime,
+            anonymousmessages::creation_time,
+            anonymousmessages::number_downloads,
+            anonymousmessages::file_size,
+            anonymousmessages::chunk_size,
+        ))
+        .first::<AnonymousMessageMetadata>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    Ok(messages_get)
+}
+
+pub async fn anonymous_get_message(
+    id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<String, ServerError> {
+    use crate::schema::anonymousmessages;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete invalid messages
+    delete_invalid_anonymous_message(pool, s3, id_param).await?;
+
+    // Get the message
+    let anonymousmessage = anonymousmessages
+        .filter(anonymousmessages::id.eq(id_param))
+        .first::<AnonymousMessage>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    // Increment the message download count
+    diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
+        .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Generate a presigned URL for the file in S3
+    // Generate pre-signed S3 download URL
+    let presigned_url = s3
+        .get_object()
+        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .key(anonymousmessage.file_id.to_string())
+        .presigned(
+            PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
+                .map_err(|_| ServerError::Internal)?
+        )
+        .await
+        .map_err(|_| ServerError::Internal)?
+        .uri()
+        .to_string();
+
+    Ok(presigned_url)
+}
+
+///
+/// Send anonymous message
+///
 
 pub fn anonymous_send_message_start(
     id_param: Uuid,
@@ -218,178 +397,4 @@ pub async fn anonymous_send_message_end(
     delete_invalid_file_size_anonymous(pool, s3, &file_id_param).await?;
 
     Ok(())
-}
-
-pub async fn server_login_start_anonymous(
-    id_param: Uuid,
-    client_login_start_result: CredentialRequest<DefaultCipherSuite>,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<CredentialResponse<DefaultCipherSuite>, ServerError> {
-    use crate::schema::anonymousmessages;
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Delete invalid messages
-    delete_invalid_anonymous_message(pool, s3, id_param).await?;
-
-    let annonymous_message_opt = anonymousmessages::table
-        .filter(anonymousmessages::id.eq(id_param))
-        .first::<AnonymousMessage>(&mut conn)
-        .optional()?;
-
-    let password_file_param = if let Some(annonymous_message) = &annonymous_message_opt {
-        let password_file_bytes = annonymous_message.password_file.clone();
-
-        Some(
-            ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
-                .map_err(|_| ServerError::Internal)?
-        )
-    } else {
-        // Deserialize a dummy password file to prevent user enumeration
-        ServerRegistration::<DefaultCipherSuite>::deserialize(&DUMMY_PASSWORD_FILE)
-            .map_err(|_| ServerError::Internal)?;
-
-        None
-    };
-
-    let mut server_rng = OsRng;
-    let server_opaque = get_opaque_settings(pool).map_err(|_| ServerError::Internal)?;
-    let server_login_start_result = ServerLogin::start(
-        &mut server_rng,
-        &server_opaque,
-        password_file_param,
-        client_login_start_result,
-        id_param.as_bytes(),
-        ServerLoginParameters::default(),
-    )
-        .map_err(|_| ServerError::Internal)?;
-
-    // Use dummy id if the message does not exist to prevent user enumeration
-    let anonymous_message_id = if annonymous_message_opt.is_some() {
-        id_param
-    } else {
-        DUMMY_ANONYMOUS_MESSAGE_ID
-    };
-
-    diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(anonymous_message_id)))
-        .set(anonymousmessages::server_login.eq(Some(
-            server_login_start_result.state.serialize().to_vec(),
-        )))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    Ok(server_login_start_result.message)
-}
-
-pub async fn server_login_end_anonymous(
-    id_param: Uuid,
-    client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<(), ServerError> {
-    use crate::schema::anonymousmessages;
-
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Load the ServerLogin state from the DB
-    let server_login_start_result = {
-        let server_login_state_bytes = anonymousmessages::table
-            .filter(anonymousmessages::id.eq(id_param))
-            .select(anonymousmessages::server_login)
-            .first::<Option<Vec<u8>>>(&mut conn)
-            .optional()?
-            .ok_or(ServerError::Internal)?
-            .ok_or(ServerError::Internal)?;
-
-        diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
-            .set(anonymousmessages::server_login.eq::<Option<Vec<u8>>>(None))
-            .execute(&mut conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        ServerLogin::deserialize(&server_login_state_bytes)
-            .map_err(|_| ServerError::Internal)?
-    };
-
-    let server_login_finish_result = server_login_start_result
-        .finish(
-            client_login_finish_result,
-            ServerLoginParameters::default(),
-        ).map_err(|_| ServerError::Internal)?;
-
-
-    Ok(())
-}
-
-pub async fn anonymous_get_message_metadata(
-    id_param: Uuid,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<AnonymousMessageMetadata, ServerError> {
-    use crate::schema::anonymousmessages;
-
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    let messages_get = anonymousmessages::table
-        .filter(anonymousmessages::id.eq(id_param))
-        .select((
-            anonymousmessages::id,
-            anonymousmessages::cfilename,
-            anonymousmessages::nonce_filename,
-            anonymousmessages::file_id,
-            anonymousmessages::header,
-            anonymousmessages::max_downloads,
-            anonymousmessages::lifetime,
-            anonymousmessages::creation_time,
-            anonymousmessages::number_downloads,
-            anonymousmessages::file_size,
-            anonymousmessages::chunk_size,
-        ))
-        .first::<AnonymousMessageMetadata>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
-    Ok(messages_get)
-}
-
-pub async fn anonymous_get_message(
-    id_param: Uuid,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<String, ServerError> {
-    use crate::schema::anonymousmessages;
-
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Delete invalid messages
-    delete_invalid_anonymous_message(pool, s3, id_param).await?;
-
-    // Get the message
-    let anonymousmessage = anonymousmessages
-        .filter(anonymousmessages::id.eq(id_param))
-        .first::<AnonymousMessage>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
-    // Increment the message download count
-    let updated_rows = diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
-        .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    // Generate a presigned URL for the file in S3
-    // Generate pre-signed S3 download URL
-    let presigned_url = s3
-        .get_object()
-        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
-        .key(anonymousmessage.file_id.to_string())
-        .presigned(
-            PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
-                .map_err(|_| ServerError::Internal)?
-        )
-        .await
-        .map_err(|_| ServerError::Internal)?
-        .uri()
-        .to_string();
-
-    Ok(presigned_url)
 }

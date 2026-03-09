@@ -1,10 +1,9 @@
-use std::io;
-use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Extension, Json};
+use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Extension, Json};
 use serde::{Deserialize, Serialize};
-use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
+use tower_sessions::{Session};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{Duration, Utc};
+use chrono::{ Utc };
 use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate};
@@ -17,54 +16,6 @@ use crate::api_handlers::auth::{Claims};
 use crate::consts::*;
 use crate::models::*;
 use crate::error::*;
-
-///
-/// User
-///
-
-#[derive(Serialize)]
-pub struct UserInfoResult {
-    username: String,
-    email: String,
-    role: String,
-    number_transfers: i32,
-}
-#[instrument(skip(state), err(Debug))]
-pub async fn get_user_info(
-    Extension(claims_jwt): Extension<Claims>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    let user_info = server::connected::get_user(&*claims_jwt.username, &state.db)?;
-
-    Ok((StatusCode::OK, Json(UserInfoResult {
-        username: user_info.username,
-        email: user_info.email,
-        role: user_info.role,
-        number_transfers: user_info.number_transfers,
-    })))
-}
-
-#[instrument(skip(state), err(Debug))]
-pub async fn delete_user(
-    Extension(claims_jwt): Extension<Claims>,
-    Path(username): Path<String>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    // Validate the username
-    validate_username(&username).map_err(|_| ApiError::InputValidation)?;
-
-    // Check if the username is the same as the one in the JWT claims
-    if *claims_jwt.username != username {
-        return Err(ApiError::Forbidden);
-    }
-
-    server::connected::delete_user(&*claims_jwt.username, &state.db)?;
-
-    Ok(StatusCode::NO_CONTENT)
-}
-
 
 ///
 /// Registration
@@ -99,7 +50,7 @@ pub async fn register_user_start(
         .map_err(|_| ApiError::Opaque)?;
 
     let server_registration_start_result =
-        server::connected::server_registration_start(&*payload.username, req, &state.db)?;
+        server::connected::registration_start(&*payload.username, req, &state.db)?;
 
     Ok((
         StatusCode::OK,
@@ -141,7 +92,6 @@ pub struct RegisterEndResult {
 #[instrument(skip(state), err(Debug))]
 pub async fn register_user_end(
     State(state): State<AppState>,
-    session: Session,
     Json(payload): Json<RegisterUserEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -177,7 +127,7 @@ pub async fn register_user_end(
         .map_err(|_| ApiError::Base64)?;
 
     
-    let server_registration_finish = server::connected::server_registration_finish(
+    let server_registration_finish = server::connected::registration_finish(
         req,
         &*payload.username,
         &*payload.email,
@@ -193,6 +143,10 @@ pub async fn register_user_end(
 
     Ok(StatusCode::OK)
 }
+
+///
+/// Registration Update (change password)
+///
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEndUpdate {
@@ -231,7 +185,7 @@ pub async fn register_user_end_update(
             })
         }).collect();
     
-    let keys = server::connected::server_registration_finish_update(
+    let keys = server::connected::registration_finish_update(
         client_registration_finish,
         &*claims_jwt.username,
         decoded_keys.map_err(|_| ApiError::ServerError)?,
@@ -280,7 +234,7 @@ pub async fn verify_email(
 }
 
 ///
-/// Request Password Reset
+/// Password Reset
 ///
 
 #[instrument(skip(state), err(Debug))]
@@ -367,7 +321,7 @@ pub async fn finish_password_reset(
         sign_cipher_private_key: cpriv_sign.clone(),
     };
 
-    server::connected::server_registration_finish_password_reset(
+    server::connected::registration_finish_password_reset(
         token,
         req,
         key,
@@ -409,7 +363,7 @@ pub async fn login_user_start(
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
     
-    let server_login_start = server::connected::server_login_start(
+    let server_login_start = server::connected::login_start(
         &*payload.username,
         req,
         &state.db,
@@ -453,7 +407,7 @@ pub async fn login_user_end(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
     
-    let server_login_finish = server::connected::server_login_finish(
+    let server_login_finish = server::connected::login_finish(
         &*payload.username,
         req,
         &state.db,
@@ -503,15 +457,61 @@ pub async fn login_user_end(
     ))
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(err(Debug))]
 pub async fn logout(
-    State(state): State<AppState>,
     session: Session,
 ) -> Result<impl IntoResponse, ApiError> {
 
     session.flush().await.map_err(|_| ApiError::ServerError)?;
 
     Ok(StatusCode::OK)
+}
+
+///
+/// User
+///
+
+#[derive(Serialize)]
+pub struct UserInfoResult {
+    username: String,
+    email: String,
+    role: String,
+    number_transfers: i32,
+}
+#[instrument(skip(state), err(Debug))]
+pub async fn get_user_info(
+    Extension(claims_jwt): Extension<Claims>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    let user_info = server::connected::get_user(&*claims_jwt.username, &state.db)?;
+
+    Ok((StatusCode::OK, Json(UserInfoResult {
+        username: user_info.username,
+        email: user_info.email,
+        role: user_info.role,
+        number_transfers: user_info.number_transfers,
+    })))
+}
+
+#[instrument(skip(state), err(Debug))]
+pub async fn delete_user(
+    Extension(claims_jwt): Extension<Claims>,
+    Path(username): Path<String>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate the username
+    validate_username(&username).map_err(|_| ApiError::InputValidation)?;
+
+    // Check if the username is the same as the one in the JWT claims
+    if *claims_jwt.username != username {
+        return Err(ApiError::Forbidden);
+    }
+
+    server::connected::delete_user(&*claims_jwt.username, &state.db)?;
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 ///
@@ -815,6 +815,10 @@ pub async fn upload_message_finish_multipart(
 
     Ok(StatusCode::OK)
 }
+
+///
+/// Delete Messages
+///
 
 #[instrument(skip(state), err(Debug))]
 pub async fn delete_message(

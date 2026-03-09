@@ -1,18 +1,13 @@
-use axum::{http::StatusCode, response::Response, RequestExt};
+use axum::{http::StatusCode, response::Response};
 use serde::{Deserialize, Serialize};
-use axum::extract::{Request, Path};
 use axum::middleware::Next;
 use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
 
 use chrono::Utc;
-use uuid::Uuid;
 use std::fmt;
 use tracing::{info, instrument, warn};
 
 use crate::consts::*;
-use crate::{api_handlers, consts};
-use crate::api_handlers::auth;
-use crate::models::*;
 use crate::error::*;
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -183,7 +178,7 @@ pub async  fn require_auth_anonymous(
 // Check if the iat of the session is recent
 pub async  fn require_fresh_login(
     session: Session,
-    mut req: axum::http::Request<axum::body::Body>,
+    req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
 

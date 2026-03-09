@@ -9,16 +9,12 @@ use axum::{
     BoxError, Router,
 };
 
-use crate::consts::SERVER_MODE;
 use crate::server::init::init_server;
 use axum::body::Body;
-use chrono::{Datelike, TimeZone, Timelike, Utc};
 use http::Response;
 use std::any::Any;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
-use tower_sessions::cookie::time::Duration;
-use tracing_subscriber::fmt::layer;
 
 pub mod api_handlers;
 pub mod consts;
@@ -41,79 +37,6 @@ async fn main() {
     // Init server
     let state = init_server().await.expect("Server initialization failed");
 
-    // Spawn a background task to run monthly tasks at the 1st of every month at 00:00:00 UTC
-    let server_mode = consts::SERVER_MODE
-        .get()
-        .unwrap()
-        .to_string();
-
-    if server_mode == "slave" {
-        tracing::info!("Server mode is 'slave', monthly task will not run");
-    } else {
-        let db_clone = state.db.clone();
-        tokio::spawn(async move {
-            loop {
-
-                let duration = match server_mode.as_str() {
-
-                    "development" => std::time::Duration::from_secs(60), // For testing, run the task every minute
-
-                    "master" => {
-                        let now = Utc::now();
-
-                        // Calculate next 1st of month at 00:00:00 UTC
-                        let next_run = {
-                            let year = if now.month() == 12 {
-                                now.year() + 1
-                            } else {
-                                now.year()
-                            };
-                            let month = if now.month() == 12 {
-                                1
-                            } else {
-                                now.month() + 1
-                            };
-
-                            Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).unwrap()
-                        };
-
-                        let time_next_month = (next_run - now)
-                            .to_std()
-                            .unwrap_or(std::time::Duration::from_secs(0));
-
-                        tracing::info!(
-                            "Server mode is 'master'. Monthly task will run in {:?} at {}",
-                            time_next_month,
-                            next_run
-                        );
-
-                        time_next_month
-                    }
-                    _ => {
-                        tracing::error!(
-                            "Unknown server mode: {}. Monthly task will not run.",
-                            server_mode
-                        );
-                        panic!(
-                            "Unknown server mode: {}. Monthly task will not run.",
-                            server_mode
-                        );
-                    }
-                };
-
-                tokio::time::sleep(duration).await;
-
-                // Run the monthly task
-                if let Err(e) = server::connected::reset_transfer_counter_all_users(&db_clone).await
-                {
-                    tracing::error!("Error running monthly task: {:?}", e);
-                } else {
-                    tracing::info!("Monthly task completed successfully");
-                }
-            }
-        });
-    }
-
     use tower_http::cors::{Any, CorsLayer};
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -123,10 +46,17 @@ async fn main() {
     let session_layer = api_handlers::auth::get_session_layer();
     let anonymous_session_layer = api_handlers::auth::get_session_layer();
 
-    // build our application with a route
+    // Public routes (no authentication required)
     let public_app = Router::new()
-        .route("/api/config", get(api_handlers::anonymous::config));
+        .route("/api/config", get(api_handlers::anonymous::config))
+        .route("/api/register/start", post(api_handlers::connected::register_user_start))
+        .route("/api/register/end", post(api_handlers::connected::register_user_end))
+        .route("/api/login/start", post(api_handlers::connected::login_user_start))
+        .route("/api/verify-email/{id}", post(api_handlers::connected::verify_email))
+        .route("/api/reset-password/request/{email}", post(api_handlers::connected::request_password_reset))
+        .route("/api/reset-password/end/{token}", post(api_handlers::connected::finish_password_reset));
 
+    // Routes for authenticated users
     let account_app = Router::new()
         .route("/api/user", get(api_handlers::connected::get_user_info))
         .route("/api/logout", post(api_handlers::connected::logout))
@@ -140,16 +70,11 @@ async fn main() {
         .route("/api/message/uploadfinish/{file_id}", post(api_handlers::connected::upload_message_finish_multipart))
         .layer(middleware::from_fn(api_handlers::auth::require_auth))
 
-        .route("/api/register/start", post(api_handlers::connected::register_user_start))
-        .route("/api/register/end", post(api_handlers::connected::register_user_end))
-        .route("/api/login/start", post(api_handlers::connected::login_user_start))
+        // Routes with session middleware required but no auth
         .route("/api/login/end", post(api_handlers::connected::login_user_end))
-        .route("/api/verify-email/{id}", post(api_handlers::connected::verify_email))
-        .route("/api/reset-password/request/{email}", post(api_handlers::connected::request_password_reset))
-        .route("/api/reset-password/end/{token}", post(api_handlers::connected::finish_password_reset))
-
         .layer(session_layer.clone());
 
+    // Routes that require a fresh login (e.g., for sensitive operations)
     let account_app_fresh_login = Router::new()
         .route("/api/user/{username}", delete(api_handlers::connected::delete_user))
         .route("/api/user/addkey", put(api_handlers::connected::add_key))
@@ -158,12 +83,13 @@ async fn main() {
         .layer(middleware::from_fn(api_handlers::auth::require_auth))
         .layer(session_layer);
 
-
+    // Routes for anonymous transfers
     let anonymous_app = Router::new()
         .route("/api/anonymous/message/{id}/metadata", get(api_handlers::anonymous::anonymous_message_get_one_metadata))
         .route("/api/anonymous/message/{id}", get(api_handlers::anonymous::anonymous_message_get_download_url))
         .layer(middleware::from_fn(api_handlers::auth::require_auth_anonymous))
 
+        // Routes for creating an anonymous message (no authentication required)
         .route("/api/anonymous/message/start", post(api_handlers::anonymous::anonymous_message_send_start))
         .route("/api/anonymous/message", post(api_handlers::anonymous::upload_anonymous_message))
         .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::anonymous::upload_anonymous_message_finish_multipart))
