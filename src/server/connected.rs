@@ -144,6 +144,10 @@ pub fn server_registration_finish(
     Ok(())
 }
 
+///
+/// Register update (password change)
+/// 
+
 pub fn server_registration_finish_update(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     username_param: &str,
@@ -236,7 +240,7 @@ pub fn verify_email(
 }
 
 ///
-/// Password reset
+/// Password Reset
 ///
 
 pub fn request_password_reset(
@@ -523,98 +527,6 @@ pub fn server_login_finish(
 }
 
 ///
-/// Keys
-///
-
-fn delete_old_keys_for_user(
-    pool: &DbPool,
-    user_id_param: Uuid,
-) -> Result<(), ServerError> {
-    use crate::schema::key_pairs;
-    use diesel::sql_types::Bool;
-
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Delete all keys that are not active and not used referenced by any message
-    diesel::delete(
-        key_pairs::table
-            .filter(key_pairs::owner_id.eq(user_id_param))
-            .filter(key_pairs::is_active.eq(false))
-            .filter(sql::<Bool>(
-                "NOT EXISTS (
-                    SELECT 1
-                    FROM messages
-                    WHERE sender_key_id = key_pairs.id
-                       OR receiver_key_id = key_pairs.id
-                )"
-            ))
-    )
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    Ok(())
-}
-
-pub fn add_key (
-    username_param: &str,
-    key: NewKeyPairsDecoded,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<Vec<KeyPairs>, ServerError> {
-    use crate::schema::users;
-
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    let user = users::table
-        .filter(users::username.eq(username_param))
-        .first::<User>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
-    let new_key = NewKeyPairs {
-        id: &Uuid::new_v4(),
-        owner_id: &user.id,
-
-        enc_public_key: &key.enc_public_key,
-        enc_nonce_private_key: &key.enc_nonce_private_key,
-        enc_cipher_private_key: &key.enc_cipher_private_key,
-
-        sign_public_key: &key.sign_public_key,
-        sign_nonce_private_key: &key.sign_nonce_private_key,
-        sign_cipher_private_key: &key.sign_cipher_private_key,
-
-        is_active: &true,
-        revoked_at: None,
-    };
-
-    diesel::insert_into(crate::schema::key_pairs::table)
-        .values(&new_key)
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    // Invalid all other valid keys of the user and set the revoked_at date
-    diesel::update(crate::schema::key_pairs::table)
-        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
-        .filter(crate::schema::key_pairs::id.ne(new_key.id))
-        .filter(crate::schema::key_pairs::is_active.eq(true))
-        .set((
-            crate::schema::key_pairs::is_active.eq(false),
-            crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
-        ))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    // Delete old keys that are not active and not used by any message
-    delete_old_keys_for_user(pool, user.id)?;
-
-    let keys = crate::schema::key_pairs::table
-        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
-        .load::<KeyPairs>(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    Ok(keys)
-}
-
-///
 /// Users
 ///
 
@@ -682,6 +594,106 @@ pub fn delete_user(
     Ok(())
 }
 
+///
+/// Keys
+///
+
+fn delete_old_keys_for_user(
+    pool: &DbPool,
+    user_id_param: Uuid,
+) -> Result<(), ServerError> {
+    use crate::schema::key_pairs;
+    use diesel::sql_types::Bool;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete all keys that are not active and not used referenced by any message
+    diesel::delete(
+        key_pairs::table
+            .filter(key_pairs::owner_id.eq(user_id_param))
+            .filter(key_pairs::is_active.eq(false))
+            .filter(sql::<Bool>(
+                "NOT EXISTS (
+                    SELECT 1
+                    FROM messages
+                    WHERE sender_key_id = key_pairs.id
+                       OR receiver_key_id = key_pairs.id
+                )"
+            ))
+    )
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
+///
+/// Add Key
+/// 
+
+pub fn add_key (
+    username_param: &str,
+    key: NewKeyPairsDecoded,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<Vec<KeyPairs>, ServerError> {
+    use crate::schema::users;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let user = users::table
+        .filter(users::username.eq(username_param))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let new_key = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: &user.id,
+
+        enc_public_key: &key.enc_public_key,
+        enc_nonce_private_key: &key.enc_nonce_private_key,
+        enc_cipher_private_key: &key.enc_cipher_private_key,
+
+        sign_public_key: &key.sign_public_key,
+        sign_nonce_private_key: &key.sign_nonce_private_key,
+        sign_cipher_private_key: &key.sign_cipher_private_key,
+
+        is_active: &true,
+        revoked_at: None,
+    };
+
+    diesel::insert_into(crate::schema::key_pairs::table)
+        .values(&new_key)
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Invalid all other valid keys of the user and set the revoked_at date
+    diesel::update(crate::schema::key_pairs::table)
+        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+        .filter(crate::schema::key_pairs::id.ne(new_key.id))
+        .filter(crate::schema::key_pairs::is_active.eq(true))
+        .set((
+            crate::schema::key_pairs::is_active.eq(false),
+            crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
+        ))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Delete old keys that are not active and not used by any message
+    delete_old_keys_for_user(pool, user.id)?;
+
+    let keys = crate::schema::key_pairs::table
+        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+        .load::<KeyPairs>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(keys)
+}
+
+///
+/// Get Public Keys
+///
+
 pub fn get_pub_key(
     key_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -725,8 +737,175 @@ pub fn get_pub_key_user(
 }
 
 ///
-/// Messages
+/// Download Messages
 ///
+
+pub async fn get_messages(
+    username_param: &str,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<Vec<MessageWithUsernames>, ServerError> {
+    use crate::schema::users;
+    use crate::schema::messages;
+    use crate::schema::key_pairs;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete invalid messages
+    delete_invalid_messages_for_user(pool, s3, username_param).await?;
+
+    let user_id = users
+        .filter(users::username.eq(username_param))
+        .select(users::id)
+        .first::<Uuid>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let (sender_key, receiver_key) = alias!(key_pairs as sender_key, key_pairs as receiver_key);
+    let (sender_user, receiver_user) = alias!(users as sender_user, users as receiver_user);
+
+    let messages_get = messages::table
+        .inner_join(sender_key.on(messages::sender_key_id.eq(sender_key.field(key_pairs::id))))
+        .inner_join(receiver_key.on(messages::receiver_key_id.eq(receiver_key.field(key_pairs::id))))
+        .inner_join(sender_user.on(sender_key.field(key_pairs::owner_id).eq(sender_user.field(users::id))))
+        .inner_join(receiver_user.on(receiver_key.field(key_pairs::owner_id).eq(receiver_user.field(users::id))))
+        .filter(receiver_user.field(users::id).eq(user_id))
+        .filter(messages::signature.is_not_null())
+        .select((
+            messages::id,
+            sender_user.field(users::username),
+            receiver_user.field(users::username),
+            messages::sender_key_id,
+            messages::receiver_key_id,
+            messages::cfilename,
+            messages::nonce_filename,
+            messages::file_id,
+            messages::nonce_message,
+            messages::max_downloads,
+            messages::lifetime,
+            messages::creation_time,
+            messages::signature,
+            messages::number_downloads,
+            messages::file_size,
+            messages::chunk_size,
+        ))
+        .order(messages::creation_time.desc())
+        .load::<MessageWithUsernames>(&mut conn)?;
+
+    Ok(messages_get)
+}
+
+pub async fn get_messages_sent(
+    username_param: &str,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<Vec<MessageSentWithUsernames>, ServerError> {
+    use crate::schema::users;
+    use crate::schema::messages;
+    use crate::schema::key_pairs;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete invalid messages
+    delete_invalid_messages_for_user(pool, s3, username_param).await?;
+
+    let (sender_key, receiver_key) = alias!(key_pairs as sender_key, key_pairs as receiver_key);
+    let (sender_user, receiver_user) = alias!(users as sender_user, users as receiver_user);
+
+    let messages_get = messages::table
+        .inner_join(sender_key.on(messages::sender_key_id.eq(sender_key.field(key_pairs::id))))
+        .inner_join(receiver_key.on(messages::receiver_key_id.eq(receiver_key.field(key_pairs::id))))
+        .inner_join(sender_user.on(sender_key.field(key_pairs::owner_id).eq(sender_user.field(users::id))))
+        .inner_join(receiver_user.on(receiver_key.field(key_pairs::owner_id).eq(receiver_user.field(users::id))))
+        .filter(sender_user.field(users::username).eq(username_param))
+        .filter(messages::signature.is_not_null()) // Only get messages with signature
+        .select((
+            messages::id,
+            sender_user.field(users::username),
+            receiver_user.field(users::username),
+            messages::max_downloads,
+            messages::lifetime,
+            messages::creation_time,
+            messages::file_size,
+        ))
+        .order_by(messages::creation_time.desc())
+        .load::<MessageSentWithUsernames>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    Ok(messages_get)
+}
+
+pub async fn get_message(
+    username_param: &str,
+    message_id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<String, ServerError> {
+    use crate::schema::users;
+    use crate::schema::messages;
+    use crate::schema::key_pairs;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete invalid messages
+    delete_invalid_messages_for_user(pool, s3, username_param).await?;
+
+    // Get the message
+    let mut message = messages
+        .filter(messages::file_id.eq(message_id_param))
+        .first::<Message>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    // Check if the message belongs to the user
+    /*if message.receiver_id != users
+        .filter(users::username.eq(username_param))
+        .select(users::id)
+        .first::<Uuid>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Unauthorized)? {
+        return Err(ServerError::Unauthorized);
+    }*/
+
+    // Check if the receiver key belongs to the user
+    let exists = users::table
+        .inner_join(key_pairs::table.on(key_pairs::owner_id.eq(users::id)))
+        .filter(users::username.eq(username_param))
+        .filter(key_pairs::id.eq(message.receiver_key_id))
+        .select(key_pairs::id)
+        .first::<Uuid>(&mut conn)
+        .optional()
+        .map_err(|_| ServerError::Internal)?;
+
+    if exists.is_none() {
+        return Err(ServerError::Unauthorized);
+    }
+
+    // Increment the message download count
+    let updated_rows = diesel::update(messages.filter(messages::id.eq(message.id)))
+        .set(messages::number_downloads.eq(messages::number_downloads + 1))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Generate pre-signed S3 download URL
+    let presigned_url = s3
+        .get_object()
+        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+        .key(message.file_id.to_string())
+        .presigned(
+            PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
+                .map_err(|_| ServerError::Internal)?,
+        )
+        .await
+        .map_err(|_| ServerError::Internal)?
+        .uri()
+        .to_string();
+
+    Ok(presigned_url)
+}
+
+///
+/// Upload Message
+/// 
 
 pub async fn send_message(
     sender: &str,
@@ -914,6 +1093,10 @@ pub fn update_message_signature(
     Ok(())
 }
 
+///
+/// Delete Messages
+///
+
 async fn delete_invalid_messages_for_user(
     pool: &DbPool,
     s3: &aws_sdk_s3::Client,
@@ -978,169 +1161,6 @@ async fn delete_invalid_messages_for_user(
     Ok(())
 }
 
-pub async fn get_messages(
-    username_param: &str,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<Vec<MessageWithUsernames>, ServerError> {
-    use crate::schema::users;
-    use crate::schema::messages;
-    use crate::schema::key_pairs;
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Delete invalid messages
-    delete_invalid_messages_for_user(pool, s3, username_param).await?;
-
-    let user_id = users
-        .filter(users::username.eq(username_param))
-        .select(users::id)
-        .first::<Uuid>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
-    let (sender_key, receiver_key) = alias!(key_pairs as sender_key, key_pairs as receiver_key);
-    let (sender_user, receiver_user) = alias!(users as sender_user, users as receiver_user);
-
-    let messages_get = messages::table
-        .inner_join(sender_key.on(messages::sender_key_id.eq(sender_key.field(key_pairs::id))))
-        .inner_join(receiver_key.on(messages::receiver_key_id.eq(receiver_key.field(key_pairs::id))))
-        .inner_join(sender_user.on(sender_key.field(key_pairs::owner_id).eq(sender_user.field(users::id))))
-        .inner_join(receiver_user.on(receiver_key.field(key_pairs::owner_id).eq(receiver_user.field(users::id))))
-        .filter(receiver_user.field(users::id).eq(user_id))
-        .filter(messages::signature.is_not_null())
-        .select((
-            messages::id,
-            sender_user.field(users::username),
-            receiver_user.field(users::username),
-            messages::sender_key_id,
-            messages::receiver_key_id,
-            messages::cfilename,
-            messages::nonce_filename,
-            messages::file_id,
-            messages::nonce_message,
-            messages::max_downloads,
-            messages::lifetime,
-            messages::creation_time,
-            messages::signature,
-            messages::number_downloads,
-            messages::file_size,
-            messages::chunk_size,
-        ))
-        .order(messages::creation_time.desc())
-        .load::<MessageWithUsernames>(&mut conn)?;
-
-    Ok(messages_get)
-}
-
-pub async fn get_messages_sent(
-    username_param: &str,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<Vec<MessageSentWithUsernames>, ServerError> {
-    use crate::schema::users;
-    use crate::schema::messages;
-    use crate::schema::key_pairs;
-
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Delete invalid messages
-    delete_invalid_messages_for_user(pool, s3, username_param).await?;
-
-    let (sender_key, receiver_key) = alias!(key_pairs as sender_key, key_pairs as receiver_key);
-    let (sender_user, receiver_user) = alias!(users as sender_user, users as receiver_user);
-
-    let messages_get = messages::table
-        .inner_join(sender_key.on(messages::sender_key_id.eq(sender_key.field(key_pairs::id))))
-        .inner_join(receiver_key.on(messages::receiver_key_id.eq(receiver_key.field(key_pairs::id))))
-        .inner_join(sender_user.on(sender_key.field(key_pairs::owner_id).eq(sender_user.field(users::id))))
-        .inner_join(receiver_user.on(receiver_key.field(key_pairs::owner_id).eq(receiver_user.field(users::id))))
-        .filter(sender_user.field(users::username).eq(username_param))
-        .filter(messages::signature.is_not_null()) // Only get messages with signature
-        .select((
-            messages::id,
-            sender_user.field(users::username),
-            receiver_user.field(users::username),
-            messages::max_downloads,
-            messages::lifetime,
-            messages::creation_time,
-            messages::file_size,
-        ))
-        .order_by(messages::creation_time.desc())
-        .load::<MessageSentWithUsernames>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
-    Ok(messages_get)
-}
-
-pub async fn get_message(
-    username_param: &str,
-    message_id_param: Uuid,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<String, ServerError> {
-    use crate::schema::users;
-    use crate::schema::messages;
-    use crate::schema::key_pairs;
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Delete invalid messages
-    delete_invalid_messages_for_user(pool, s3, username_param).await?;
-
-    // Get the message
-    let mut message = messages
-        .filter(messages::file_id.eq(message_id_param))
-        .first::<Message>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
-    // Check if the message belongs to the user
-    /*if message.receiver_id != users
-        .filter(users::username.eq(username_param))
-        .select(users::id)
-        .first::<Uuid>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Unauthorized)? {
-        return Err(ServerError::Unauthorized);
-    }*/
-
-    // Check if the receiver key belongs to the user
-    let exists = users::table
-        .inner_join(key_pairs::table.on(key_pairs::owner_id.eq(users::id)))
-        .filter(users::username.eq(username_param))
-        .filter(key_pairs::id.eq(message.receiver_key_id))
-        .select(key_pairs::id)
-        .first::<Uuid>(&mut conn)
-        .optional()
-        .map_err(|_| ServerError::Internal)?;
-
-    if exists.is_none() {
-        return Err(ServerError::Unauthorized);
-    }
-
-    // Increment the message download count
-    let updated_rows = diesel::update(messages.filter(messages::id.eq(message.id)))
-        .set(messages::number_downloads.eq(messages::number_downloads + 1))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    // Generate pre-signed S3 download URL
-    let presigned_url = s3
-        .get_object()
-        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
-        .key(message.file_id.to_string())
-        .presigned(
-            PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
-                .map_err(|_| ServerError::Internal)?,
-        )
-        .await
-        .map_err(|_| ServerError::Internal)?
-        .uri()
-        .to_string();
-
-    Ok(presigned_url)
-}
-
 pub async fn delete_message (
     username_param: &str,
     message_id_param: Uuid,
@@ -1188,6 +1208,10 @@ pub async fn delete_message (
 
     Ok(())
 }
+
+///
+/// Admin
+/// 
 
 pub async fn reset_transfer_counter_all_users(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,

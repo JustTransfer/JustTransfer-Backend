@@ -62,163 +62,9 @@ async fn delete_invalid_anonymous_message(
     Ok(())
 }
 
-pub fn anonymous_send_message_start(
-    id_param: Uuid,
-    client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<RegistrationResponse<DefaultCipherSuite>, ServerError> {
-
-    let server_opaque = get_opaque_settings(pool)
-        .map_err(|_| ServerError::Internal)?;
-
-    let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
-        &server_opaque,
-        client_registration_start_result,
-        id_param.as_bytes(),
-    )
-        .map_err(|_| ServerError::Internal)?;
-
-    Ok(server_registration_start_result.message)
-}
-
-pub async fn anonymous_send_message(
-    client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
-    id_transfer: Uuid,
-    filename_param: Vec<u8>,
-    nonce_filename_param: Vec<u8>,
-    file_id_param: Uuid,
-    header_param: Vec<u8>,
-    max_downloads_param: i32,
-    lifetime_param: i32,
-    creation_time_param: chrono::DateTime<Utc>,
-    file_size_param: i64,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<(Vec<String>, String), ServerError> {
-    use crate::schema::anonymousmessages;
-
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    let password_file_param =
-        ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
-
-    let new_message = NewAnonymousMessage {
-        id: &id_transfer,
-        password_file: &password_file_param.serialize().to_vec(),
-        cfilename: &filename_param,
-        nonce_filename: &nonce_filename_param,
-        file_id: &file_id_param,
-        header: &header_param,
-        max_downloads: &max_downloads_param,
-        lifetime: &lifetime_param,
-        creation_time: &creation_time_param,
-        number_downloads: &0,
-        file_size: &file_size_param,
-        chunk_size: &CHUNK_SIZE_ANONYMOUS,
-    };
-
-    conn.transaction::<_, ServerError, _>(|conn| {
-
-        // Count the number of anonymous messages
-        let sent_messages_count: i64 = anonymousmessages::table
-            .count()
-            .get_result(conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        // Enforce limit
-        if let Some(max) = Role::Anonymous.max_messages() {
-            if sent_messages_count >= max {
-                return Err(ServerError::InsufficientStorage);
-            }
-        } else {
-            return Err(ServerError::Internal);
-        }
-
-        // Insert the new message into the database
-        diesel::insert_into(anonymousmessages::table)
-            .values(&new_message)
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        Ok(())
-    })?;
-
-
-    // Calculate the Number of chunks
-    let num_chunks = (file_size_param as f64 / CHUNK_SIZE_ANONYMOUS as f64).ceil() as i32;
-
-    // Create multipart upload
-    let create_multipart_upload_output = s3.create_multipart_upload()
-        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
-        .key(file_id_param.to_string())
-        .send()
-        .await
-        .map_err(|_| ServerError::Internal)?;
-
-    let upload_id = create_multipart_upload_output
-        .upload_id()
-        .ok_or(ServerError::Internal)?;
-
-    // Generate pre-signed S3 upload URLs for each chunk
-    let mut upload_urls: Vec<String> = Vec::new();
-
-    for part_number in 1..=num_chunks {
-        let upload_url = s3.upload_part()
-            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
-            .key(file_id_param.to_string())
-            .part_number(part_number)
-            .upload_id(upload_id)
-            .presigned(
-                PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
-                    .map_err(|_| ServerError::Internal)?
-            )
-            .await
-            .map_err(|_| ServerError::Internal)?
-            .uri()
-            .to_string();
-
-        upload_urls.push(upload_url.clone());
-    }
-
-    Ok((upload_urls, upload_id.parse().unwrap()))
-}
-
-pub async fn anonymous_send_message_end(
-    file_id_param: Uuid,
-    upload_id_param: String,
-    etags_param: Vec<String>,
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-) -> Result<(), ServerError> {
-
-    // Prepare the parts for completing the multipart upload
-    let parts = etags_param.iter().map(|p| {
-        CompletedPart::builder()
-            .part_number(etags_param.iter().position(|x| x == p).unwrap() as i32 + 1)
-            .e_tag(p.clone())
-            .build()
-    }).collect::<Vec<_>>();
-
-    // Complete multipart upload
-    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
-        .set_parts(Some(parts))
-        .build();
-
-    let _complete_multipart_upload_res = s3
-        .complete_multipart_upload()
-        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
-        .key(file_id_param.to_string())
-        .multipart_upload(completed_multipart_upload)
-        .upload_id(upload_id_param)
-        .send()
-        .await
-        .map_err(|_| ServerError::Internal)?;
-
-    // Check if the file size match the one store in DB
-    delete_invalid_file_size_anonymous(pool, s3, &file_id_param).await?;
-
-    Ok(())
-}
+///
+/// Download anonymous message
+///
 
 pub async fn server_login_start_anonymous(
     id_param: Uuid,
@@ -392,4 +238,166 @@ pub async fn anonymous_get_message(
         .to_string();
 
     Ok(presigned_url)
+}
+
+///
+/// Send anonymous message
+///
+
+pub fn anonymous_send_message_start(
+    id_param: Uuid,
+    client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<RegistrationResponse<DefaultCipherSuite>, ServerError> {
+
+    let server_opaque = get_opaque_settings(pool)
+        .map_err(|_| ServerError::Internal)?;
+
+    let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
+        &server_opaque,
+        client_registration_start_result,
+        id_param.as_bytes(),
+    )
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(server_registration_start_result.message)
+}
+
+pub async fn anonymous_send_message(
+    client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
+    id_transfer: Uuid,
+    filename_param: Vec<u8>,
+    nonce_filename_param: Vec<u8>,
+    file_id_param: Uuid,
+    header_param: Vec<u8>,
+    max_downloads_param: i32,
+    lifetime_param: i32,
+    creation_time_param: chrono::DateTime<Utc>,
+    file_size_param: i64,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<(Vec<String>, String), ServerError> {
+    use crate::schema::anonymousmessages;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let password_file_param =
+        ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
+
+    let new_message = NewAnonymousMessage {
+        id: &id_transfer,
+        password_file: &password_file_param.serialize().to_vec(),
+        cfilename: &filename_param,
+        nonce_filename: &nonce_filename_param,
+        file_id: &file_id_param,
+        header: &header_param,
+        max_downloads: &max_downloads_param,
+        lifetime: &lifetime_param,
+        creation_time: &creation_time_param,
+        number_downloads: &0,
+        file_size: &file_size_param,
+        chunk_size: &CHUNK_SIZE_ANONYMOUS,
+    };
+
+    conn.transaction::<_, ServerError, _>(|conn| {
+
+        // Count the number of anonymous messages
+        let sent_messages_count: i64 = anonymousmessages::table
+            .count()
+            .get_result(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Enforce limit
+        if let Some(max) = Role::Anonymous.max_messages() {
+            if sent_messages_count >= max {
+                return Err(ServerError::InsufficientStorage);
+            }
+        } else {
+            return Err(ServerError::Internal);
+        }
+
+        // Insert the new message into the database
+        diesel::insert_into(anonymousmessages::table)
+            .values(&new_message)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(())
+    })?;
+
+
+    // Calculate the Number of chunks
+    let num_chunks = (file_size_param as f64 / CHUNK_SIZE_ANONYMOUS as f64).ceil() as i32;
+
+    // Create multipart upload
+    let create_multipart_upload_output = s3.create_multipart_upload()
+        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .key(file_id_param.to_string())
+        .send()
+        .await
+        .map_err(|_| ServerError::Internal)?;
+
+    let upload_id = create_multipart_upload_output
+        .upload_id()
+        .ok_or(ServerError::Internal)?;
+
+    // Generate pre-signed S3 upload URLs for each chunk
+    let mut upload_urls: Vec<String> = Vec::new();
+
+    for part_number in 1..=num_chunks {
+        let upload_url = s3.upload_part()
+            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+            .key(file_id_param.to_string())
+            .part_number(part_number)
+            .upload_id(upload_id)
+            .presigned(
+                PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
+                    .map_err(|_| ServerError::Internal)?
+            )
+            .await
+            .map_err(|_| ServerError::Internal)?
+            .uri()
+            .to_string();
+
+        upload_urls.push(upload_url.clone());
+    }
+
+    Ok((upload_urls, upload_id.parse().unwrap()))
+}
+
+pub async fn anonymous_send_message_end(
+    file_id_param: Uuid,
+    upload_id_param: String,
+    etags_param: Vec<String>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<(), ServerError> {
+
+    // Prepare the parts for completing the multipart upload
+    let parts = etags_param.iter().map(|p| {
+        CompletedPart::builder()
+            .part_number(etags_param.iter().position(|x| x == p).unwrap() as i32 + 1)
+            .e_tag(p.clone())
+            .build()
+    }).collect::<Vec<_>>();
+
+    // Complete multipart upload
+    let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
+        .set_parts(Some(parts))
+        .build();
+
+    let _complete_multipart_upload_res = s3
+        .complete_multipart_upload()
+        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .key(file_id_param.to_string())
+        .multipart_upload(completed_multipart_upload)
+        .upload_id(upload_id_param)
+        .send()
+        .await
+        .map_err(|_| ServerError::Internal)?;
+
+    // Check if the file size match the one store in DB
+    delete_invalid_file_size_anonymous(pool, s3, &file_id_param).await?;
+
+    Ok(())
 }
