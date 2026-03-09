@@ -31,6 +31,7 @@ pub const AUTH_KEY: &str = "username";
 pub const AUTH_KEY_ROLE: &str = "role";
 pub const AUTH_KEY_CREATED_AT: &str = "created_at";
 
+
 /// Const for Reset Password
 pub const RESET_PASSWORD_TOKEN_DURATION_MINUTES: i64 = 15; // 15 minutes
 
@@ -41,6 +42,10 @@ pub const MAX_LIFETIME_ANONYMOUS: i32 = 3; // days
 pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 500 * 1024 * 1024; // 500 MiB
 pub const CHUNK_SIZE_ANONYMOUS: i64 = 10 * 1024 * 1024; // 10 MiB
 pub const MAX_DOWNLOADS_ANONYMOUS: i32 = 3;
+
+
+/// Const for Accounts
+pub const MAX_NUMBER_ACCOUNTS: i64 = 2;
 
 
 /// Const for Connected Transfer

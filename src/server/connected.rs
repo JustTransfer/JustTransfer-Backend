@@ -66,6 +66,12 @@ pub fn server_registration_finish(
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
+    // Check if max user number is reached
+    let user_count = users::table.count().get_result::<i64>(&mut conn).map_err(|_| ServerError::Internal)?;
+    if user_count >= MAX_NUMBER_ACCOUNTS {
+        return Err(ServerError::InsufficientStorage);
+    }
+
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
@@ -686,7 +692,7 @@ pub fn get_pub_key(
         .filter(crate::schema::key_pairs::id.eq(key_id_param))
         .first::<KeyPairs>(&mut conn)
         .optional()?
-        .ok_or(ServerError::Internal)?;
+        .ok_or(ServerError::NotFound)?;
 
     Ok((
             keys.id,
@@ -709,7 +715,7 @@ pub fn get_pub_key_user(
         .select(crate::schema::key_pairs::all_columns)
         .first::<KeyPairs>(&mut conn)
         .optional()?
-        .ok_or(ServerError::Internal)?;
+        .ok_or(ServerError::NotFound)?;
 
     Ok((
         keys.id,
