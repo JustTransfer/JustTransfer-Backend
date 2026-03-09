@@ -141,7 +141,6 @@ pub struct RegisterEndResult {
 #[instrument(skip(state), err(Debug))]
 pub async fn register_user_end(
     State(state): State<AppState>,
-    session: Session,
     Json(payload): Json<RegisterUserEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
 
