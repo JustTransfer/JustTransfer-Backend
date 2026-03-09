@@ -1,19 +1,13 @@
-use std::io;
-use axum::{body::Body, extract::{Multipart, Path, State}, http::StatusCode, response::IntoResponse, response::Response, Json, debug_handler, Extension};
-use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
+use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Json};
+use tower_sessions::{Session};
 
 use serde::{Deserialize, Serialize};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use opaque_ke::*;
 use uuid::Uuid;
-use validator::{Validate, ValidationError};
+use validator::{Validate};
 
-use aws_sdk_s3::presigning::PresigningConfig;
-use std::time::Duration;
-use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use chrono::Utc;
-use tokio::net::unix::pid_t;
 use tower::ServiceExt;
 use tracing::{info, instrument};
 
@@ -135,7 +129,7 @@ pub async fn anonymous_message_login_end(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    server::anonymous::login_end_anonymous(id, req, &state.db, &state.s3)
+    server::anonymous::login_end_anonymous(id, req, &state.db)
         .await?;
 
     // Create session
@@ -157,7 +151,7 @@ pub async fn anonymous_message_get_one_metadata(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let message = server::anonymous::anonymous_get_message_metadata(id, &state.db, &state.s3)
+    let message = server::anonymous::anonymous_get_message_metadata(id, &state.db)
         .await?;
 
     let resp = Json(AnonymousGetMessageResult {

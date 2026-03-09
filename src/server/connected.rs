@@ -1,8 +1,5 @@
-use std::io;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{Duration, Utc};
 use diesel::{alias, r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
@@ -18,12 +15,11 @@ use uuid::Uuid;
 
 use crate::consts::*;
 use crate::models::*;
-use crate::{api_handlers, schema, server};
+use crate::server;
 use crate::schema::messages::dsl::messages;
 use crate::schema::users::dsl::users;
-use crate::schema::users::*;
 use crate::api_handlers::misc::DbPool;
-use crate::error::{ApiError, ServerError};
+use crate::error::ServerError;
 use crate::schema::key_pairs::dsl::key_pairs;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_connected};
 
@@ -86,7 +82,7 @@ pub fn registration_finish(
         email_verified: false,
     };
 
-    let result = diesel::insert_into(users::table)
+    diesel::insert_into(users::table)
         .values(&new_user)
         .execute(&mut conn)
         .map_err(|e| {
@@ -501,7 +497,7 @@ pub fn login_finish(
             .map_err(|_| ServerError::Internal)?
     };
 
-    let server_login_finish_result = server_login_start_result.finish(
+    server_login_start_result.finish(
         client_login_finish_result,
         ServerLoginParameters::default(),
     ).map_err(|_| ServerError::Internal)?;
@@ -850,7 +846,7 @@ pub async fn get_message(
     delete_invalid_messages_for_user(pool, s3, username_param).await?;
 
     // Get the message
-    let mut message = messages
+    let message = messages
         .filter(messages::file_id.eq(message_id_param))
         .first::<Message>(&mut conn)
         .optional()?
@@ -871,7 +867,7 @@ pub async fn get_message(
     }
 
     // Increment the message download count
-    let updated_rows = diesel::update(messages.filter(messages::id.eq(message.id)))
+    diesel::update(messages.filter(messages::id.eq(message.id)))
         .set(messages::number_downloads.eq(messages::number_downloads + 1))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
@@ -1073,7 +1069,7 @@ pub fn update_message_signature(
     use crate::schema::messages;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-    let updated_rows = diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
+    diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
         .set(messages::signature.eq(Some(signature_param)))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
@@ -1136,7 +1132,7 @@ async fn delete_invalid_messages_for_user(
             )
             .send()
             .await
-            .map_err(|e| ServerError::Internal)?;
+            .map_err(|_| ServerError::Internal)?;
 
         // Delete from DB
         let message_ids_to_delete: Vec<Uuid> = messages_to_delete.iter().map(|m| m.id).collect();
@@ -1157,7 +1153,6 @@ pub async fn delete_message (
 ) -> Result<(), ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
-    use crate::schema::key_pairs;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Get the message

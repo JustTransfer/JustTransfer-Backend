@@ -1,4 +1,4 @@
-use chrono::{Datelike, TimeZone, Timelike, Utc};
+use chrono::{Datelike, TimeZone, Utc};
 
 use crate::api_handlers::misc::AppState;
 use crate::consts::SERVER_MODE;

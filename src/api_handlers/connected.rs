@@ -1,9 +1,9 @@
-use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, response::Response, Extension, Json};
+use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Extension, Json};
 use serde::{Deserialize, Serialize};
-use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer};
+use tower_sessions::{Session};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
-use chrono::{Duration, Utc};
+use chrono::{ Utc };
 use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate};
@@ -146,7 +146,7 @@ pub async fn register_user_end(
 
 ///
 /// Registration Update (change password)
-/// 
+///
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEndUpdate {
@@ -457,9 +457,8 @@ pub async fn login_user_end(
     ))
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(err(Debug))]
 pub async fn logout(
-    State(state): State<AppState>,
     session: Session,
 ) -> Result<impl IntoResponse, ApiError> {
 

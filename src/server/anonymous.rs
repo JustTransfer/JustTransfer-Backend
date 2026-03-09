@@ -1,7 +1,6 @@
-use std::io;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
@@ -17,7 +16,7 @@ use crate::models::{AnonymousMessage, AnonymousMessageMetadata, Message, NewAnon
 use crate::schema::anonymousmessages::dsl::anonymousmessages;
 use crate::schema::messages::dsl::messages;
 use crate::api_handlers::misc::DbPool;
-use crate::error::{ApiError, ServerError};
+use crate::error::ServerError;
 use crate::schema::users;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_anonymous};
 
@@ -131,7 +130,6 @@ pub async fn login_end_anonymous(
     id_param: Uuid,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
     use crate::schema::anonymousmessages;
 
@@ -156,7 +154,7 @@ pub async fn login_end_anonymous(
             .map_err(|_| ServerError::Internal)?
     };
 
-    let server_login_finish_result = server_login_start_result
+    server_login_start_result
         .finish(
             client_login_finish_result,
             ServerLoginParameters::default(),
@@ -169,7 +167,6 @@ pub async fn login_end_anonymous(
 pub async fn anonymous_get_message_metadata(
     id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
 ) -> Result<AnonymousMessageMetadata, ServerError> {
     use crate::schema::anonymousmessages;
 
@@ -217,7 +214,7 @@ pub async fn anonymous_get_message(
         .ok_or(ServerError::Internal)?;
 
     // Increment the message download count
-    let updated_rows = diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
+    diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
         .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;

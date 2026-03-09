@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::io;
 use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Builder, Credentials, Region};
 use chrono::Utc;
@@ -389,7 +388,7 @@ pub async fn delete_invalid_file_size_connected (
         .ok_or(ServerError::Internal)?;
 
     let diff = (uploaded_file_size - message.file_size).abs();
-    let tolerance = (message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT);
+    let tolerance = message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT;
 
     // Check if the uploaded file size matches the expected file size with tolerance 1%
     if diff as f64 > tolerance {
@@ -441,7 +440,7 @@ pub async fn delete_invalid_file_size_anonymous (
         .ok_or(ServerError::Internal)?;
 
     let diff = (uploaded_file_size - anonymous_message.file_size).abs();
-    let tolerance = (anonymous_message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT);
+    let tolerance = anonymous_message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT;
 
     // Check if the uploaded file size matches the expected file size with tolerance 1%
     if diff as f64 > tolerance {
