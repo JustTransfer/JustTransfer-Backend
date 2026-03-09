@@ -50,7 +50,7 @@ pub async fn register_user_start(
         .map_err(|_| ApiError::Opaque)?;
 
     let server_registration_start_result =
-        server::connected::server_registration_start(&*payload.username, req, &state.db)?;
+        server::connected::registration_start(&*payload.username, req, &state.db)?;
 
     Ok((
         StatusCode::OK,
@@ -127,7 +127,7 @@ pub async fn register_user_end(
         .map_err(|_| ApiError::Base64)?;
 
     
-    let server_registration_finish = server::connected::server_registration_finish(
+    let server_registration_finish = server::connected::registration_finish(
         req,
         &*payload.username,
         &*payload.email,
@@ -185,7 +185,7 @@ pub async fn register_user_end_update(
             })
         }).collect();
     
-    let keys = server::connected::server_registration_finish_update(
+    let keys = server::connected::registration_finish_update(
         client_registration_finish,
         &*claims_jwt.username,
         decoded_keys.map_err(|_| ApiError::ServerError)?,
@@ -321,7 +321,7 @@ pub async fn finish_password_reset(
         sign_cipher_private_key: cpriv_sign.clone(),
     };
 
-    server::connected::server_registration_finish_password_reset(
+    server::connected::registration_finish_password_reset(
         token,
         req,
         key,
@@ -363,7 +363,7 @@ pub async fn login_user_start(
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
     
-    let server_login_start = server::connected::server_login_start(
+    let server_login_start = server::connected::login_start(
         &*payload.username,
         req,
         &state.db,
@@ -407,7 +407,7 @@ pub async fn login_user_end(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
     
-    let server_login_finish = server::connected::server_login_finish(
+    let server_login_finish = server::connected::login_finish(
         &*payload.username,
         req,
         &state.db,

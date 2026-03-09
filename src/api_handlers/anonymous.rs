@@ -97,7 +97,7 @@ pub async fn anonymous_message_login_start(
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let server_login_start = server::anonymous::server_login_start_anonymous(
+    let server_login_start = server::anonymous::login_start_anonymous(
         id,
         req,
         &state.db,
@@ -135,7 +135,7 @@ pub async fn anonymous_message_login_end(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    server::anonymous::server_login_end_anonymous(id, req, &state.db, &state.s3)
+    server::anonymous::login_end_anonymous(id, req, &state.db, &state.s3)
         .await?;
 
     // Create session

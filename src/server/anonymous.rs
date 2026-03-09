@@ -66,7 +66,7 @@ async fn delete_invalid_anonymous_message(
 /// Download anonymous message
 ///
 
-pub async fn server_login_start_anonymous(
+pub async fn login_start_anonymous(
     id_param: Uuid,
     client_login_start_result: CredentialRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -127,7 +127,7 @@ pub async fn server_login_start_anonymous(
     Ok(server_login_start_result.message)
 }
 
-pub async fn server_login_end_anonymous(
+pub async fn login_end_anonymous(
     id_param: Uuid,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,

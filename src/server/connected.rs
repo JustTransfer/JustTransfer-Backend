@@ -31,7 +31,7 @@ use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invali
 /// Register
 ///
 
-pub fn server_registration_start(
+pub fn registration_start(
     username_param: &str,
     client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -50,7 +50,7 @@ pub fn server_registration_start(
     Ok(server_registration_start_result.message)
 }
 
-pub fn server_registration_finish(
+pub fn registration_finish(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     username_param: &str,
     email_param: &str,
@@ -146,9 +146,9 @@ pub fn server_registration_finish(
 
 ///
 /// Register update (password change)
-/// 
+///
 
-pub fn server_registration_finish_update(
+pub fn registration_finish_update(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     username_param: &str,
     keys: Vec<KeyPairsdUpdate>,
@@ -308,7 +308,7 @@ pub fn request_password_reset(
     Ok(())
 }
 
-pub fn server_registration_finish_password_reset(
+pub fn registration_finish_password_reset(
     token: Uuid,
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     key: KeyPairsdUpdate,
@@ -413,7 +413,7 @@ pub fn server_registration_finish_password_reset(
 /// Login
 ///
 
-pub fn server_login_start(
+pub fn login_start(
     username_param: &str,
     client_login_start_result: CredentialRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -473,7 +473,7 @@ pub fn server_login_start(
     Ok(server_login_start_result.message)
 }
 
-pub fn server_login_finish(
+pub fn login_finish(
     username_param: &str,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -629,7 +629,7 @@ fn delete_old_keys_for_user(
 
 ///
 /// Add Key
-/// 
+///
 
 pub fn add_key (
     username_param: &str,
@@ -856,16 +856,6 @@ pub async fn get_message(
         .optional()?
         .ok_or(ServerError::Internal)?;
 
-    // Check if the message belongs to the user
-    /*if message.receiver_id != users
-        .filter(users::username.eq(username_param))
-        .select(users::id)
-        .first::<Uuid>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Unauthorized)? {
-        return Err(ServerError::Unauthorized);
-    }*/
-
     // Check if the receiver key belongs to the user
     let exists = users::table
         .inner_join(key_pairs::table.on(key_pairs::owner_id.eq(users::id)))
@@ -905,7 +895,7 @@ pub async fn get_message(
 
 ///
 /// Upload Message
-/// 
+///
 
 pub async fn send_message(
     sender: &str,
@@ -919,7 +909,6 @@ pub async fn send_message(
     max_downloads_param: i32,
     lifetime_param: i32,
     creation_time_param: chrono::DateTime<Utc>,
-    //signature_param: Vec<u8>,
     file_size_param: i64,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
@@ -949,7 +938,6 @@ pub async fn send_message(
         max_downloads: &max_downloads_param,
         lifetime: &lifetime_param,
         creation_time: &creation_time_param,
-        //signature: &signature_param,
         number_downloads: &0,
         file_size: &file_size_param,
         chunk_size: &CHUNK_SIZE_CONNECTED,
@@ -1211,7 +1199,7 @@ pub async fn delete_message (
 
 ///
 /// Admin
-/// 
+///
 
 pub async fn reset_transfer_counter_all_users(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
