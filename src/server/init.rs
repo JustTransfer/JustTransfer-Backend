@@ -29,75 +29,21 @@ impl CipherSuite for DefaultCipherSuite {
 
 pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> {
 
-    // Check if the environment variables exist
-    for var in ENV_VARS {
-        if std::env::var(var).is_err() {
-            error!("Environment variable {} is not set", var);
+    // Check if the environment variables exist and set them in the corresponding OnceCell
+    for (key, cell) in ENV_CELLS {
+
+        let value = std::env::var(key).map_err(|_| {
+            error!("Environment variable {} is not set", key);
+            ServerError::Internal
+        })?;
+
+        if key == "SERVER_MODE" && !matches!(value.as_str(), "master" | "slave" | "development") {
+            error!("Invalid server mode: {}", value);
             return Err(ServerError::Internal);
         }
 
-        // Set the corresponding constant
-        match var {
-            "FRONTEND_URL" => {
-                FRONTEND_URL.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "POSTGRESQL_USERNAME" => {
-                POSTGRESQL_USERNAME.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "DATABASE_URL" => {
-                DATABASE_URL.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "MINIO_ROOT_USER" => {
-                MINIO_ROOT_USER.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "MINIO_ROOT_PASSWORD" => {
-                MINIO_ROOT_PASSWORD.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "MINIO_URL" => {
-                MINIO_URL.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "S3_BUCKET_NAME" => {
-                S3_BUCKET_NAME_CONNECTED.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "S3_BUCKET_NAME_ANONYMOUS" => {
-                S3_BUCKET_NAME_ANONYMOUS.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "JWT_SECRET_KEY" => {
-                JWT_SECRET_KEY.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "SERVER_MODE" => {
-                // Validate server mode
-                let mode = std::env::var(var).unwrap();
-                if mode != "master" && mode != "slave" && mode != "development" {
-                    error!("Invalid server mode: {}. Must be 'master', 'slave' or 'development'", mode);
-                    return Err(ServerError::Internal);
-                }
-                SERVER_MODE.set(mode)
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "SMTP_HOST" => {
-                SMTP_HOST.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "SMTP_MAIL" => {
-                SMTP_MAIL.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            "SMTP_PASSWORD" => {
-                SMTP_PASSWORD.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
-            _ => {}
-        }
+        cell.set(value)
+            .map_err(|_| ServerError::Internal)?;
     }
 
     let db_pool = server_init_db()?;
@@ -164,7 +110,7 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Serve
         .optional()
         .map_err(|_| ServerError::Internal)?;
 
-    let server_setup = if let Some(s) = setting {
+    let _ = if let Some(s) = setting {
         // Deserialize settings
         ServerSetup::<DefaultCipherSuite>::deserialize(&s.settings)
             .map_err(|_| ServerError::Internal)?

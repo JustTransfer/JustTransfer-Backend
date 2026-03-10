@@ -12,12 +12,10 @@ use tracing::info;
 use uuid::Uuid;
 use crate::api_handlers::auth::Role;
 use crate::consts::*;
-use crate::models::{AnonymousMessage, AnonymousMessageMetadata, Message, NewAnonymousMessage};
+use crate::models::{AnonymousMessage, AnonymousMessageMetadata, NewAnonymousMessage};
 use crate::schema::anonymousmessages::dsl::anonymousmessages;
-use crate::schema::messages::dsl::messages;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
-use crate::schema::users;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_anonymous};
 
 ///

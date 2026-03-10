@@ -157,7 +157,7 @@ pub struct RegisterUserEndUpdate {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn register_user_end_update(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -187,7 +187,7 @@ pub async fn register_user_end_update(
     
     let keys = server::connected::registration_finish_update(
         client_registration_finish,
-        &*claims_jwt.username,
+        &*claims_session.username,
         decoded_keys.map_err(|_| ApiError::ServerError)?,
         &state.db,
         &state.mailer,
@@ -480,11 +480,11 @@ pub struct UserInfoResult {
 }
 #[instrument(skip(state), err(Debug))]
 pub async fn get_user_info(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let user_info = server::connected::get_user(&*claims_jwt.username, &state.db)?;
+    let user_info = server::connected::get_user(&*claims_session.username, &state.db)?;
 
     Ok((StatusCode::OK, Json(UserInfoResult {
         username: user_info.username,
@@ -496,7 +496,7 @@ pub async fn get_user_info(
 
 #[instrument(skip(state), err(Debug))]
 pub async fn delete_user(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     Path(username): Path<String>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -504,12 +504,12 @@ pub async fn delete_user(
     // Validate the username
     validate_username(&username).map_err(|_| ApiError::InputValidation)?;
 
-    // Check if the username is the same as the one in the JWT claims
-    if *claims_jwt.username != username {
+    // Check if the username is the same as the one in the session
+    if *claims_session.username != username {
         return Err(ApiError::Forbidden);
     }
 
-    server::connected::delete_user(&*claims_jwt.username, &state.db)?;
+    server::connected::delete_user(&*claims_session.username, &state.db)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -530,7 +530,7 @@ pub struct AddKeyResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn add_key(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<AddKeyParam>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -549,7 +549,7 @@ pub async fn add_key(
     };
 
     let keys = server::connected::add_key(
-        &*claims_jwt.username,
+        &*claims_session.username,
         decoded_key,
         &state.db,
     )?;
@@ -632,11 +632,11 @@ pub struct GetMessageResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_messages(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
     
-    let messages: Vec<MessageWithUsernames> = server::connected::get_messages(&*claims_jwt.username, &state.db, &state.s3)
+    let messages: Vec<MessageWithUsernames> = server::connected::get_messages(&*claims_session.username, &state.db, &state.s3)
         .await?;
 
     // Convert the fields of each messages to base64
@@ -671,11 +671,11 @@ pub struct GetMessageSentResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_messages_sent(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let messages: Vec<MessageSentWithUsernames> = server::connected::get_messages_sent(&*claims_jwt.username, &state.db, &state.s3)
+    let messages: Vec<MessageSentWithUsernames> = server::connected::get_messages_sent(&*claims_session.username, &state.db, &state.s3)
         .await?;
 
     Ok((StatusCode::OK, Json(GetMessageSentResult { messages: messages })))
@@ -688,12 +688,12 @@ pub struct GetOneMessageResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_one_message(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let presigned_url = server::connected::get_message(&*claims_jwt.username, id, &state.db, &state.s3)
+    let presigned_url = server::connected::get_message(&*claims_session.username, id, &state.db, &state.s3)
         .await?;
 
     Ok((StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url })))
@@ -735,7 +735,7 @@ pub struct UploadMessageResult {
 
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_message(
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<UploadMessage>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -746,10 +746,10 @@ pub async fn upload_message(
     let file_id = Uuid::new_v4();
 
     // Authorize the upload based on the user role and the provided parameters
-    claims_jwt.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+    claims_session.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
 
     let (upload_urls, upload_id) = server::connected::send_message(
-        &claims_jwt.username,
+        &claims_session.username,
         payload.sender_key_id,
         payload.receiver_key_id,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
@@ -824,11 +824,11 @@ pub async fn upload_message_finish_multipart(
 pub async fn delete_message(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
-    Extension(claims_jwt): Extension<Claims>,
+    Extension(claims_session): Extension<Claims>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     server::connected::delete_message(
-        &*claims_jwt.username,
+        &*claims_session.username,
         id,
         &state.db,
         &state.s3,
