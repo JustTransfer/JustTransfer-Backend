@@ -70,10 +70,6 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
                 S3_BUCKET_NAME_ANONYMOUS.set(std::env::var(var).unwrap())
                     .map_err(|_| ServerError::Internal)?;
             }
-            "JWT_SECRET_KEY" => {
-                JWT_SECRET_KEY.set(std::env::var(var).unwrap())
-                    .map_err(|_| ServerError::Internal)?;
-            }
             "SERVER_MODE" => {
                 // Validate server mode
                 let mode = std::env::var(var).unwrap();
