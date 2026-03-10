@@ -90,20 +90,21 @@ pub const SIGN_KEY_LEN_PRIV: usize = crypto_sign_SECRETKEYBYTES as usize;
 pub const SIGN_LEN_NONCE: usize = crypto_secretbox_NONCEBYTES as usize;
 pub const SIGN_LEN_SIGNATURE: usize = crypto_sign_BYTES  as usize;
 
-/// Environment variable list
-pub const ENV_VARS: [&str; 12] = [
-    "FRONTEND_URL",
-    "POSTGRESQL_USERNAME",
-    "DATABASE_URL",
-    "MINIO_ROOT_USER",
-    "MINIO_ROOT_PASSWORD",
-    "MINIO_URL",
-    "S3_BUCKET_NAME",
-    "S3_BUCKET_NAME_ANONYMOUS",
-    "SERVER_MODE",
-    "SMTP_HOST",
-    "SMTP_MAIL",
-    "SMTP_PASSWORD"
+
+/// Environment variable list with their corresponding OnceCell keys
+pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 12] = [
+    ("FRONTEND_URL", &FRONTEND_URL),
+    ("POSTGRESQL_USERNAME", &POSTGRESQL_USERNAME),
+    ("DATABASE_URL", &DATABASE_URL),
+    ("MINIO_ROOT_USER", &MINIO_ROOT_USER),
+    ("MINIO_ROOT_PASSWORD", &MINIO_ROOT_PASSWORD),
+    ("MINIO_URL", &MINIO_URL),
+    ("S3_BUCKET_NAME", &S3_BUCKET_NAME_CONNECTED),
+    ("S3_BUCKET_NAME_ANONYMOUS", &S3_BUCKET_NAME_ANONYMOUS),
+    ("SERVER_MODE", &SERVER_MODE),
+    ("SMTP_HOST", &SMTP_HOST),
+    ("SMTP_MAIL", &SMTP_MAIL),
+    ("SMTP_PASSWORD", &SMTP_PASSWORD),
 ];
 
 /// Env variables once_cell key
