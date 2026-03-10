@@ -8,7 +8,6 @@ use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate};
 
-use tower::ServiceExt;
 use tracing::{info, instrument};
 
 use crate::api_handlers::*;

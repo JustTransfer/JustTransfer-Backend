@@ -110,7 +110,7 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Serve
         .optional()
         .map_err(|_| ServerError::Internal)?;
 
-    let server_setup = if let Some(s) = setting {
+    let _ = if let Some(s) = setting {
         // Deserialize settings
         ServerSetup::<DefaultCipherSuite>::deserialize(&s.settings)
             .map_err(|_| ServerError::Internal)?
