@@ -135,31 +135,28 @@ pub async fn login_end_anonymous(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Load the ServerLogin state from the DB
-    let server_login_start_result = {
-
-        // TODO wrap it in transaction
+    // Transaction to get the server login state and delete it from the DB
+    let transaction_result = conn.transaction::<ServerLogin<DefaultCipherSuite>, ServerError, _>(|conn| {
         let server_login_state_bytes = anonymousmessages::table
             .filter(anonymousmessages::id.eq(id_param))
             .select(anonymousmessages::server_login)
-            .first::<Option<Vec<u8>>>(&mut conn)
+            .first::<Option<Vec<u8>>>(conn)
             .optional()?
             .ok_or(ServerError::Internal)?
             .ok_or(ServerError::Internal)?;
 
         diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
             .set(anonymousmessages::server_login.eq::<Option<Vec<u8>>>(None))
-            .execute(&mut conn)
+            .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
-        ServerLogin::deserialize(&server_login_state_bytes)
-            .map_err(|_| ServerError::Internal)?
-    };
+        Ok(ServerLogin::deserialize(&server_login_state_bytes).map_err(|_| ServerError::Internal)?)
+    })?;
 
-    server_login_start_result
-        .finish(
+    transaction_result.finish(
             client_login_finish_result,
             ServerLoginParameters::default(),
-        ).map_err(|_| ServerError::Internal)?;
+    ).map_err(|_| ServerError::Internal)?;
 
 
     Ok(())
@@ -207,26 +204,31 @@ pub async fn anonymous_get_message(
     // Delete invalid messages
     delete_invalid_anonymous_message(pool, s3, id_param).await?;
 
-    // TODO wrap it in transaction
-    // Get the message
-    let anonymousmessage = anonymousmessages
-        .filter(anonymousmessages::id.eq(id_param))
-        .first::<AnonymousMessage>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
 
-    // Increment the message download count
-    diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
-        .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+    let transaction_result = conn.transaction::<AnonymousMessage, ServerError, _>(|conn| {
+
+        // Get the message
+        let anonymousmessage = anonymousmessages
+            .filter(anonymousmessages::id.eq(id_param))
+            .first::<AnonymousMessage>(conn)
+            .optional()?
+            .ok_or(ServerError::Internal)?;
+
+        // Increment the message download count
+        diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
+            .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(anonymousmessage)
+    })?;
 
     // Generate a presigned URL for the file in S3
     // Generate pre-signed S3 download URL
     let presigned_url = s3
         .get_object()
         .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
-        .key(anonymousmessage.file_id.to_string())
+        .key(transaction_result.file_id.to_string())
         .presigned(
             PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
                 .map_err(|_| ServerError::Internal)?
