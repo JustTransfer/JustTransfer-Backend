@@ -234,11 +234,14 @@ pub fn verify_email(
         .ok_or(ServerError::Internal)?;
 
     if user.email_verified {
-        return Err(ServerError::Internal);
+        return Ok(())
     }
 
     diesel::update(users.find(user.id))
-        .set(users::email_verified.eq(true))
+        .set((
+                 users::email_verified.eq(true),
+                 users::registration_token.eq::<Uuid>(Uuid::new_v4()), // Invalidate the old registration toke
+             ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
