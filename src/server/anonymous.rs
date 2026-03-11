@@ -51,6 +51,7 @@ async fn delete_invalid_anonymous_message(
             .await
             .map_err(|_| ServerError::Internal)?;
 
+        // TODO delete first from S3 then DB
         // Delete from DB
         diesel::delete(anonymousmessages.filter(anonymousmessages::id.eq(id_param)))
             .execute(&mut conn)?;
@@ -135,6 +136,8 @@ pub async fn login_end_anonymous(
 
     // Load the ServerLogin state from the DB
     let server_login_start_result = {
+
+        // TODO wrap it in transaction
         let server_login_state_bytes = anonymousmessages::table
             .filter(anonymousmessages::id.eq(id_param))
             .select(anonymousmessages::server_login)
@@ -204,6 +207,7 @@ pub async fn anonymous_get_message(
     // Delete invalid messages
     delete_invalid_anonymous_message(pool, s3, id_param).await?;
 
+    // TODO wrap it in transaction
     // Get the message
     let anonymousmessage = anonymousmessages
         .filter(anonymousmessages::id.eq(id_param))
