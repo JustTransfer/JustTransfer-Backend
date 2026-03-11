@@ -11,10 +11,11 @@ use axum::{
 
 use crate::server::init::init_server;
 use axum::body::Body;
-use http::Response;
+use http::{Method, Response};
 use std::any::Any;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
+use crate::consts::FRONTEND_URL;
 
 pub mod api_handlers;
 pub mod consts;
@@ -39,8 +40,8 @@ async fn main() {
 
     use tower_http::cors::{Any, CorsLayer};
     let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
+        .allow_origin(FRONTEND_URL.get().unwrap().parse::<http::HeaderValue>().unwrap())
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
         .allow_headers(Any);
 
     let session_layer = api_handlers::auth::get_session_layer();
