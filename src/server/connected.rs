@@ -82,25 +82,6 @@ pub fn registration_finish(
         email_verified: false,
     };
 
-    diesel::insert_into(users::table)
-        .values(&new_user)
-        .execute(&mut conn)
-        .map_err(|e| {
-            if let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = &e {
-                let msg = info.constraint_name().unwrap_or("");
-
-                if msg.contains("username") {
-                    ServerError::UsernameTaken
-                } else if msg.contains("email") {
-                    ServerError::EmailTaken
-                } else {
-                    ServerError::Internal
-                }
-            } else {
-                ServerError::Internal
-            }
-        })?;
-
     // Create new keys
     let key_enc = NewKeyPairs {
         id: &Uuid::new_v4(),
@@ -118,10 +99,35 @@ pub fn registration_finish(
         revoked_at: None,
     };
 
-    let _ = diesel::insert_into(crate::schema::key_pairs::table)
-        .values(&key_enc)
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+
+    // Create user and insert keys in one transaction
+    let transaction_result = conn.transaction::<_, ServerError, _>(|conn| {
+        diesel::insert_into(users::table)
+            .values(&new_user)
+            .execute(conn)
+            .map_err(|e| {
+                if let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = &e {
+                    let msg = info.constraint_name().unwrap_or("");
+
+                    if msg.contains("username") {
+                        ServerError::UsernameTaken
+                    } else if msg.contains("email") {
+                        ServerError::EmailTaken
+                    } else {
+                        ServerError::Internal
+                    }
+                } else {
+                    ServerError::Internal
+                }
+            })?;
+
+        diesel::insert_into(crate::schema::key_pairs::table)
+            .values(&key_enc)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(())
+    })?;
 
     // Email verification
     let url = format!(
@@ -129,6 +135,7 @@ pub fn registration_finish(
         FRONTEND_URL.get().unwrap(),
         new_user.registration_token
     );
+
     server::mail::send_verification_email(
         new_user.email.as_str(),
         new_user.username.as_str(),
@@ -159,51 +166,60 @@ pub fn registration_finish_update(
 
     let password_file_bytes = password_file_param.serialize();
 
-    let user_id = users::table
-        .filter(users::username.eq(username_param))
-        .select(users::id)
-        .first::<Uuid>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
+    let result = conn.transaction::<(Vec<KeyPairs>, String), ServerError, _>(|conn| {
+        let user_id = users::table
+            .filter(users::username.eq(username_param))
+            .select(users::id)
+            .first::<Uuid>(conn)
+            .optional()?
+            .ok_or(ServerError::Internal)?;
 
-    let user = diesel::update(users.find(user_id))
-        .set((
-            users::password_file.eq(password_file_bytes.to_vec()),
-        ))
-        .returning(User::as_returning())
-        .get_result(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    // Update keys
-    for key in keys {
-        diesel::update(crate::schema::key_pairs::table)
-            .filter(crate::schema::key_pairs::id.eq(key.id))
+        let user = diesel::update(users.find(user_id))
             .set((
-                crate::schema::key_pairs::enc_public_key.eq(key.enc_public_key),
-                crate::schema::key_pairs::enc_nonce_private_key.eq(key.enc_nonce_private_key),
-                crate::schema::key_pairs::enc_cipher_private_key.eq(key.enc_cipher_private_key),
-                crate::schema::key_pairs::sign_public_key.eq(key.sign_public_key),
-                crate::schema::key_pairs::sign_nonce_private_key.eq(key.sign_nonce_private_key),
-                crate::schema::key_pairs::sign_cipher_private_key.eq(key.sign_cipher_private_key),
+                users::password_file.eq(password_file_bytes.to_vec()),
             ))
-            .execute(&mut conn)
+            .returning(User::as_returning())
+            .get_result(conn)
             .map_err(|_| ServerError::Internal)?;
-    }
+
+        // Update keys
+        for key in keys {
+            let updated = diesel::update(crate::schema::key_pairs::table)
+                .filter(crate::schema::key_pairs::id.eq(key.id))
+                .filter(crate::schema::key_pairs::owner_id.eq(user_id))
+                .set((
+                    crate::schema::key_pairs::enc_public_key.eq(key.enc_public_key),
+                    crate::schema::key_pairs::enc_nonce_private_key.eq(key.enc_nonce_private_key),
+                    crate::schema::key_pairs::enc_cipher_private_key.eq(key.enc_cipher_private_key),
+                    crate::schema::key_pairs::sign_public_key.eq(key.sign_public_key),
+                    crate::schema::key_pairs::sign_nonce_private_key.eq(key.sign_nonce_private_key),
+                    crate::schema::key_pairs::sign_cipher_private_key.eq(key.sign_cipher_private_key),
+                ))
+                .execute(conn)
+                .map_err(|_| ServerError::Internal)?;
+
+            if updated == 0 {
+                return Err(ServerError::Forbidden);
+            }
+        }
+
+        let keys = crate::schema::key_pairs::table
+            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+            .load::<KeyPairs>(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok((keys, user.email))
+    }).map_err(|_| ServerError::Internal)?;
 
     // Email notification of password change
     server::mail::send_password_changed_notification_email(
-        user.email.as_str(),
-        user.username.as_str(),
+        result.1.as_str(),
+        username_param,
         mailer,
     )
         .map_err(|_| ServerError::Internal)?;
 
-    let keys = crate::schema::key_pairs::table
-        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
-        .load::<KeyPairs>(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-
-    Ok(keys)
+    Ok(result.0)
 }
 
 ///
@@ -224,11 +240,14 @@ pub fn verify_email(
         .ok_or(ServerError::Internal)?;
 
     if user.email_verified {
-        return Err(ServerError::Internal);
+        return Ok(())
     }
 
     diesel::update(users.find(user.id))
-        .set(users::email_verified.eq(true))
+        .set((
+                 users::email_verified.eq(true),
+                 users::registration_token.eq::<Uuid>(Uuid::new_v4()), // Invalidate the old registration toke
+             ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -328,76 +347,78 @@ pub fn registration_finish_password_reset(
         return Err(ServerError::Forbidden);
     }
 
-    // Get the user of the token
-    let user = users::table
-        .filter(users::id.eq(reset_token.account_id))
-        .first::<User>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
+    let transaction_result = conn.transaction::<User, ServerError, _>(|conn| {
 
-    // Delete the token to prevent reuse
-    diesel::delete(crate::schema::reset_tokens::table)
-        .filter(crate::schema::reset_tokens::token.eq(token))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Get the user of the token
+        let user = users::table
+            .filter(users::id.eq(reset_token.account_id))
+            .first::<User>(conn)
+            .optional()?
+            .ok_or(ServerError::Internal)?;
 
-    let password_file_param =
-        ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
+        // Create new keys
+        let new_key = NewKeyPairs {
+            id: &Uuid::new_v4(),
+            owner_id: &user.id,
 
-    let password_file_bytes = password_file_param.serialize();
+            enc_public_key: &key.enc_public_key,
+            enc_nonce_private_key: &key.enc_nonce_private_key,
+            enc_cipher_private_key: &key.enc_cipher_private_key,
 
-    let user = diesel::update(users.find(user.id))
-        .set((
-            users::password_file.eq(password_file_bytes.to_vec()),
-        ))
-        .returning(User::as_returning())
-        .get_result(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+            sign_public_key: &key.sign_public_key,
+            sign_nonce_private_key: &key.sign_nonce_private_key,
+            sign_cipher_private_key: &key.sign_cipher_private_key,
 
-    // Delete all sent and received messages of the user to prevent access with old keys
-    diesel::delete(messages.filter(messages::sender_key_id.eq_any(
-        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
-    )))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+            is_active: &true,
+            revoked_at: None,
+        };
 
-    diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
-        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
-    )))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Delete the token to prevent reuse
+        diesel::delete(crate::schema::reset_tokens::table)
+            .filter(crate::schema::reset_tokens::token.eq(token))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-    // Delete all keys of the user to prevent access with old keys
-    diesel::delete(crate::schema::key_pairs::table.filter(crate::schema::key_pairs::owner_id.eq(user.id)))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Update password file
+        let password_file_bytes = ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result).serialize();
+        let user = diesel::update(users.find(user.id))
+            .set((
+                users::password_file.eq(password_file_bytes.to_vec()),
+            ))
+            .returning(User::as_returning())
+            .get_result(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-    // Create new keys
-    let new_key = NewKeyPairs {
-        id: &Uuid::new_v4(),
-        owner_id: &user.id,
+        // Delete all sent and received messages of the user to prevent access with old keys
+        diesel::delete(messages.filter(messages::sender_key_id.eq_any(
+            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+        )))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-        enc_public_key: &key.enc_public_key,
-        enc_nonce_private_key: &key.enc_nonce_private_key,
-        enc_cipher_private_key: &key.enc_cipher_private_key,
+        diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
+            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+        )))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-        sign_public_key: &key.sign_public_key,
-        sign_nonce_private_key: &key.sign_nonce_private_key,
-        sign_cipher_private_key: &key.sign_cipher_private_key,
+        // Delete all keys of the user to prevent access with old keys
+        diesel::delete(crate::schema::key_pairs::table.filter(crate::schema::key_pairs::owner_id.eq(user.id)))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-        is_active: &true,
-        revoked_at: None,
-    };
+        let _ = diesel::insert_into(crate::schema::key_pairs::table)
+            .values(&new_key)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-    let _ = diesel::insert_into(crate::schema::key_pairs::table)
-        .values(&new_key)
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        Ok(user)
+    }).map_err(|_| ServerError::Internal)?;
 
     // Email notification of password change
     server::mail::send_password_reset_confirmation_email(
-        user.email.as_str(),
-        user.username.as_str(),
+        transaction_result.email.as_str(),
+        transaction_result.username.as_str(),
         mailer,
     )
         .map_err(|_| ServerError::Internal)?;
@@ -557,35 +578,42 @@ pub fn delete_user(
     use crate::schema::key_pairs;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-    let user = users::table
-        .filter(users::username.eq(username_param))
-        .first::<User>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
 
-    // Delete all sent messages of the user
-    diesel::delete(messages.filter(messages::sender_key_id.eq_any(
-        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
-    )))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+    let transaction_result = conn.transaction::<(), ServerError, _>(|conn| {
 
-    // Delete all received messages of the user
-    diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
-        key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
-    )))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Get the user
+        let user = users::table
+            .filter(users::username.eq(username_param))
+            .first::<User>(conn)
+            .optional()?
+            .ok_or(ServerError::Internal)?;
 
-    // Delete all keys of the user
-    diesel::delete(key_pairs.filter(key_pairs::owner_id.eq(user.id)))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Delete all sent messages of the user
+        diesel::delete(messages.filter(messages::sender_key_id.eq_any(
+            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+        )))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-    // Delete the user
-    diesel::delete(users.filter(users::id.eq(user.id)))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Delete all received messages of the user
+        diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
+            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+        )))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Delete all keys of the user
+        diesel::delete(key_pairs.filter(key_pairs::owner_id.eq(user.id)))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Delete the user
+        diesel::delete(users.filter(users::id.eq(user.id)))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(())
+    })?;
 
     Ok(())
 }
@@ -658,32 +686,38 @@ pub fn add_key (
         revoked_at: None,
     };
 
-    diesel::insert_into(crate::schema::key_pairs::table)
-        .values(&new_key)
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+    let transaction_result = conn.transaction::<Vec<KeyPairs>, ServerError, _>(|conn| {
 
-    // Invalid all other valid keys of the user and set the revoked_at date
-    diesel::update(crate::schema::key_pairs::table)
-        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
-        .filter(crate::schema::key_pairs::id.ne(new_key.id))
-        .filter(crate::schema::key_pairs::is_active.eq(true))
-        .set((
-            crate::schema::key_pairs::is_active.eq(false),
-            crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
-        ))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Insert the new key
+        diesel::insert_into(crate::schema::key_pairs::table)
+            .values(&new_key)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-    // Delete old keys that are not active and not used by any message
-    delete_old_keys_for_user(pool, user.id)?;
+        // Invalid all other valid keys of the user and set the revoked_at date
+        diesel::update(crate::schema::key_pairs::table)
+            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+            .filter(crate::schema::key_pairs::id.ne(new_key.id))
+            .filter(crate::schema::key_pairs::is_active.eq(true))
+            .set((
+                crate::schema::key_pairs::is_active.eq(false),
+                crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
+            ))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-    let keys = crate::schema::key_pairs::table
-        .filter(crate::schema::key_pairs::owner_id.eq(user.id))
-        .load::<KeyPairs>(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        // Delete old keys that are not active and not used by any message
+        delete_old_keys_for_user(pool, user.id)?;
 
-    Ok(keys)
+        let keys = crate::schema::key_pairs::table
+            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+            .load::<KeyPairs>(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(keys)
+    })?;
+
+    Ok(transaction_result)
 }
 
 ///
@@ -845,38 +879,44 @@ pub async fn get_message(
     // Delete invalid messages
     delete_invalid_messages_for_user(pool, s3, username_param).await?;
 
-    // Get the message
-    let message = messages
-        .filter(messages::file_id.eq(message_id_param))
-        .first::<Message>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
+    // Transaction to get the message and update the download count
+    let transaction_result = conn.transaction(|conn| {
 
-    // Check if the receiver key belongs to the user
-    let exists = users::table
-        .inner_join(key_pairs::table.on(key_pairs::owner_id.eq(users::id)))
-        .filter(users::username.eq(username_param))
-        .filter(key_pairs::id.eq(message.receiver_key_id))
-        .select(key_pairs::id)
-        .first::<Uuid>(&mut conn)
-        .optional()
-        .map_err(|_| ServerError::Internal)?;
+        // Get the message
+        let message = messages
+            .filter(messages::file_id.eq(message_id_param))
+            .first::<Message>(conn)
+            .optional()?
+            .ok_or(ServerError::Internal)?;
 
-    if exists.is_none() {
-        return Err(ServerError::Unauthorized);
-    }
+        // Check if the receiver key belongs to the user
+        let exists = users::table
+            .inner_join(key_pairs::table.on(key_pairs::owner_id.eq(users::id)))
+            .filter(users::username.eq(username_param))
+            .filter(key_pairs::id.eq(message.receiver_key_id))
+            .select(key_pairs::id)
+            .first::<Uuid>(conn)
+            .optional()
+            .map_err(|_| ServerError::Internal)?;
 
-    // Increment the message download count
-    diesel::update(messages.filter(messages::id.eq(message.id)))
-        .set(messages::number_downloads.eq(messages::number_downloads + 1))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+        if exists.is_none() {
+            return Err(ServerError::Unauthorized);
+        }
+
+        // Increment the message download count
+        diesel::update(messages.filter(messages::id.eq(message.id)))
+            .set(messages::number_downloads.eq(messages::number_downloads + 1))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok(message)
+    })?;
 
     // Generate pre-signed S3 download URL
     let presigned_url = s3
         .get_object()
         .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
-        .key(message.file_id.to_string())
+        .key(transaction_result.file_id.to_string())
         .presigned(
             PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
                 .map_err(|_| ServerError::Internal)?,
@@ -1112,6 +1152,11 @@ async fn delete_invalid_messages_for_user(
     // Delete files from S3 if there are any
     if !messages_to_delete.is_empty() {
 
+        // Delete from DB
+        let message_ids_to_delete: Vec<Uuid> = messages_to_delete.iter().map(|m| m.id).collect();
+        diesel::delete(messages.filter(messages::id.eq_any(message_ids_to_delete)))
+            .execute(&mut conn)?;
+
         // Collect the object identifiers for S3 deletion
         let mut delete_object_ids: Vec<aws_sdk_s3::types::ObjectIdentifier> = vec![];
         for message in &messages_to_delete {
@@ -1133,11 +1178,6 @@ async fn delete_invalid_messages_for_user(
             .send()
             .await
             .map_err(|_| ServerError::Internal)?;
-
-        // Delete from DB
-        let message_ids_to_delete: Vec<Uuid> = messages_to_delete.iter().map(|m| m.id).collect();
-        diesel::delete(messages.filter(messages::id.eq_any(message_ids_to_delete)))
-            .execute(&mut conn)?;
 
         info!("Deleted {} invalid messages for user {}", messages_to_delete.len(), username_param);
     }
