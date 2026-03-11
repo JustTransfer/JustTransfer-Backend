@@ -88,12 +88,12 @@ async fn main() {
     let anonymous_app = Router::new()
         .route("/api/anonymous/message/{id}/metadata", get(api_handlers::anonymous::anonymous_message_get_one_metadata))
         .route("/api/anonymous/message/{id}", get(api_handlers::anonymous::anonymous_message_get_download_url))
+        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::anonymous::upload_anonymous_message_finish_multipart))
         .layer(middleware::from_fn(api_handlers::auth::require_auth_anonymous))
 
         // Routes for creating an anonymous message (no authentication required)
         .route("/api/anonymous/message/start", post(api_handlers::anonymous::anonymous_message_send_start))
         .route("/api/anonymous/message", post(api_handlers::anonymous::upload_anonymous_message))
-        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::anonymous::upload_anonymous_message_finish_multipart))
         .route("/api/anonymous/message/{id}/login/start", post(api_handlers::anonymous::anonymous_message_login_start))
         .route("/api/anonymous/message/{id}/login/end", post(api_handlers::anonymous::anonymous_message_login_end))
 
