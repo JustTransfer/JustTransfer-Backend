@@ -1152,6 +1152,11 @@ async fn delete_invalid_messages_for_user(
     // Delete files from S3 if there are any
     if !messages_to_delete.is_empty() {
 
+        // Delete from DB
+        let message_ids_to_delete: Vec<Uuid> = messages_to_delete.iter().map(|m| m.id).collect();
+        diesel::delete(messages.filter(messages::id.eq_any(message_ids_to_delete)))
+            .execute(&mut conn)?;
+
         // Collect the object identifiers for S3 deletion
         let mut delete_object_ids: Vec<aws_sdk_s3::types::ObjectIdentifier> = vec![];
         for message in &messages_to_delete {
@@ -1173,12 +1178,6 @@ async fn delete_invalid_messages_for_user(
             .send()
             .await
             .map_err(|_| ServerError::Internal)?;
-
-        // TODO delete first from DB, then S3 to avoid msg without file
-        // Delete from DB
-        let message_ids_to_delete: Vec<Uuid> = messages_to_delete.iter().map(|m| m.id).collect();
-        diesel::delete(messages.filter(messages::id.eq_any(message_ids_to_delete)))
-            .execute(&mut conn)?;
 
         info!("Deleted {} invalid messages for user {}", messages_to_delete.len(), username_param);
     }

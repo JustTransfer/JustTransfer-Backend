@@ -41,7 +41,9 @@ async fn delete_invalid_anonymous_message(
 
     if let Some(message) = message_opt {
 
-        info!("Deleting expired/max downloaded anonymous message with id: {}", message.id);
+        // Delete from DB
+        diesel::delete(anonymousmessages.filter(anonymousmessages::id.eq(id_param)))
+            .execute(&mut conn)?;
 
         // Delete file from S3
         s3.delete_object()
@@ -51,10 +53,7 @@ async fn delete_invalid_anonymous_message(
             .await
             .map_err(|_| ServerError::Internal)?;
 
-        // TODO delete first from S3 then DB
-        // Delete from DB
-        diesel::delete(anonymousmessages.filter(anonymousmessages::id.eq(id_param)))
-            .execute(&mut conn)?;
+        info!("Deleted expired/max downloaded anonymous message with id: {}", message.id);
     }
 
     Ok(())
