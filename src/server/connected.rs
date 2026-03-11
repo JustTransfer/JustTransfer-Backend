@@ -981,25 +981,38 @@ pub async fn send_message(
 
     conn.transaction::<_, ServerError, _>(|conn| {
 
-        // Get the sender role and lock the sender
+        // Check if the sender key belongs to user
+        let exists = users::table
+            .inner_join(crate::schema::key_pairs::table.on(crate::schema::key_pairs::owner_id.eq(users::id)))
+            .filter(users::username.eq(sender.username))
+            .filter(crate::schema::key_pairs::id.eq(sender_key_id_param))
+            .select(crate::schema::key_pairs::id)
+            .first::<Uuid>(conn)
+            .optional()
+            .map_err(|_| ServerError::Internal)?;
+
+        if exists.is_none() {
+            return Err(ServerError::Unauthorized);
+        }
+
+        // Get the number of sent messages by the sender
+        let sent_messages_count = users::table
+            .filter(users::id.eq(sender.id))
+            .select(users::number_transfers)
+            .first::<i32>(conn)? as i64;
+
+        // Get the sender role
         let sender_role = users::table
             .filter(users::id.eq(sender.id))
             .for_update()
             .select(users::role)
             .first::<String>(conn)?;
 
-        // Enforce max sent messages limit
-        let sent_messages_count = users::table
-            .filter(users::id.eq(sender.id))
-            .select(users::number_transfers)
-            .first::<i32>(conn)? as i64;
-
-
         // Convert DB string into Role enum
         let user_role = crate::api_handlers::auth::Role::try_from(sender_role.as_str())
             .map_err(|_| ServerError::Internal)?;
 
-        // Enforce limit
+        // Enforce limit max sent messages limit
         if let Some(max) = user_role.max_messages() {
             if sent_messages_count >= max {
                 return Err(ServerError::Forbidden);
