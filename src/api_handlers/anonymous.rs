@@ -278,10 +278,7 @@ pub async fn upload_anonymous_message(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    // Create session
-    session.insert(AUTH_KEY_ANONYMOUS, payload.id.to_string())
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+    // Create claims with provided parameters
     let claims = Claims {
         username: payload.id.to_string(),
         role: auth::Role::Anonymous,
@@ -317,6 +314,11 @@ pub async fn upload_anonymous_message(
         &state.s3,
     )
         .await?;
+
+    // Create session
+    session.insert(AUTH_KEY_ANONYMOUS, payload.id.to_string())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
 
     Ok((
         StatusCode::OK, Json(UploadAnonymousMessageFinishResult {
