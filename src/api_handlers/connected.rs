@@ -424,7 +424,7 @@ pub async fn login_user_end(
     session.insert(AUTH_KEY, &user.username)
         .await
         .map_err(|_| ApiError::ServerError)?;
-    session.insert(AUTH_KEY_ROLE, api_handlers::auth::Role::User.to_string())
+    session.insert(AUTH_KEY_ROLE, role.to_string())
         .await
         .map_err(|_| ApiError::ServerError)?;
     session.insert(AUTH_KEY_CREATED_AT, Utc::now().timestamp())
@@ -721,7 +721,7 @@ pub struct UploadMessage {
     creation_time: chrono::DateTime<chrono::Utc>,
     //#[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     // signature: String,
-    #[validate(custom(function = "validate_file_size_connected"))]
+    #[validate(custom(function = "validate_int_param_64"))]
     file_size: i64,
 }
 

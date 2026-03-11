@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 /// Const for Server
 pub const URL: &str = "0.0.0.0:80";
-pub const MAX_BODY_SIZE: usize = 100 * 1024 * 1024 * 1024; // 100 GiB
+pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10 MiB
 pub const MAX_TIME_MARGIN: i64 = 1; // minute
 pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.01; // 1%
 
@@ -69,6 +69,7 @@ pub const MAX_LENGTH_USERNAME: usize = 32;
 pub const MIN_LENGTH_BASE64: u64 = 16;
 pub const MAX_LENGTH_BASE64: u64 = 4096;
 pub const MAX_VALUE_INT: i32 = 1000;
+pub const MAX_VALUE_INT_FILE_SIZE: i64 = 1000 * 1024 * 1024 * 1024; // 1000 GiB
 
 
 /// Const for sym encryption
