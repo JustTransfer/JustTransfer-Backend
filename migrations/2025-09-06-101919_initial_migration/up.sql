@@ -55,6 +55,8 @@ CREATE TABLE messages
 (
     id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
 
+    upload_id               TEXT        NOT NULL,
+
     sender_key_id           UUID        NOT NULL REFERENCES key_pairs (id),
     receiver_key_id         UUID        NOT NULL REFERENCES key_pairs (id),
 

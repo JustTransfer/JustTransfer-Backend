@@ -373,6 +373,8 @@ pub async fn anonymous_send_message_end(
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
 
+    // TODO check if upload_id and file_id correspond for the message id in session
+
     // Prepare the parts for completing the multipart upload
     let parts = etags_param.iter().map(|p| {
         CompletedPart::builder()

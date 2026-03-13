@@ -743,12 +743,10 @@ pub async fn upload_message(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let file_id = Uuid::new_v4();
-
     // Authorize the upload based on the user role and the provided parameters
     claims_session.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
 
-    let (upload_urls, upload_id) = server::connected::send_message(
+    let (upload_urls, upload_id, file_id) = server::connected::send_message(
         &claims_session.username,
         payload.sender_key_id,
         payload.receiver_key_id,
@@ -756,7 +754,6 @@ pub async fn upload_message(
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
             .map_err(|_| ApiError::Base64)?,
-        file_id,
         URL_SAFE_NO_PAD.decode(&payload.nonce_message)
             .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
@@ -780,7 +777,7 @@ pub async fn upload_message(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessageFinishMultipart {
-    // TODO validate upload ID
+    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     upload_id: String,
     etags: Vec<String>,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -790,6 +787,7 @@ pub struct UploadMessageFinishMultipart {
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_message_finish_multipart(
     Path(file_id): Path<Uuid>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<UploadMessageFinishMultipart>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -798,6 +796,7 @@ pub async fn upload_message_finish_multipart(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     server::connected::send_message_finish_multipart(
+        &claims_session.username,
         file_id,
         payload.upload_id,
         payload.etags,

@@ -37,6 +37,7 @@ diesel::table! {
 diesel::table! {
     messages (id) {
         id -> Uuid,
+        upload_id -> Text,
         sender_key_id -> Uuid,
         receiver_key_id -> Uuid,
         cfilename -> Bytea,

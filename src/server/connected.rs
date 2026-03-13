@@ -940,7 +940,6 @@ pub async fn send_message(
     receiver_key_id_param: Uuid,
     filename_param: Vec<u8>,
     nonce_filename_param: Vec<u8>,
-    file_id_param: Uuid,
     nonce_message_param: Vec<u8>,
     max_downloads_param: i32,
     lifetime_param: i32,
@@ -948,7 +947,7 @@ pub async fn send_message(
     file_size_param: i64,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-) -> Result<(Vec<String>, String), ServerError> {
+) -> Result<(Vec<String>, String, Uuid), ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
 
@@ -960,16 +959,21 @@ pub async fn send_message(
         .optional()?
         .ok_or(ServerError::Internal)?;
 
+    // Generate new file ID
+    let file_id = Uuid::new_v4();
+
     // Generate a new message id
     let new_message = NewMessage {
         id: &Uuid::new_v4(),
+
+        upload_id: &"".to_string(), // Updated after
 
         sender_key_id: &sender_key_id_param,
         receiver_key_id: &receiver_key_id_param,
 
         cfilename: &filename_param,
         nonce_filename: &nonce_filename_param,
-        file_id: &file_id_param,
+        file_id: &file_id,
         nonce_message: &nonce_message_param,
         max_downloads: &max_downloads_param,
         lifetime: &lifetime_param,
@@ -1043,7 +1047,7 @@ pub async fn send_message(
     // Create multipart upload
     let create_multipart_upload_output = s3.create_multipart_upload()
         .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
-        .key(file_id_param.to_string())
+        .key(file_id.to_string())
         .send()
         .await
         .map_err(|_| ServerError::Internal)?;
@@ -1052,13 +1056,19 @@ pub async fn send_message(
         .ok_or(ServerError::Internal)?
         .to_string();
 
+    // Store the upload_id in the DB
+    diesel::update(messages::table.filter(messages::file_id.eq(file_id)))
+        .set(messages::upload_id.eq(upload_id.clone()))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
     // Generate pre-signed S3 upload URLs for each chunk
     let mut upload_urls: Vec<String> = Vec::new();
 
     for part_number in 1..=num_chunks {
         let upload_url = s3.upload_part()
             .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
-            .key(file_id_param.to_string())
+            .key(file_id.to_string())
             .part_number(part_number)
             .upload_id(upload_id.clone())
             .presigned(
@@ -1073,16 +1083,49 @@ pub async fn send_message(
         upload_urls.push(upload_url.clone());
     }
 
-    Ok((upload_urls, upload_id))
+    Ok((upload_urls, upload_id, file_id))
 }
 
 pub async fn send_message_finish_multipart(
+    sender: &str,
     file_id_param: Uuid,
     upload_id_param: String,
     etags_param: Vec<String>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
+    use crate::schema::messages;
+    use crate::schema::users;
+    use crate::schema::key_pairs;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Check if the upload_id and file_id correspond to a message of the sender
+    let user = users::table
+        .filter(users::username.eq(sender))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let exists = messages::table
+        .inner_join(key_pairs::table.on(messages::sender_key_id.eq(key_pairs::id)))
+        .filter(key_pairs::owner_id.eq(user.id))
+        .filter(messages::file_id.eq(file_id_param))
+        .filter(messages::upload_id.eq(upload_id_param.clone()))
+        .select(messages::id)
+        .first::<Uuid>(&mut conn)
+        .optional()
+        .map_err(|_| ServerError::Internal)?;
+
+    if exists.is_none() {
+        return Err(ServerError::Unauthorized);
+    }
+
+    // Erase the upload_id
+    diesel::update(messages::table.filter(messages::file_id.eq(file_id_param)))
+        .set(messages::upload_id.eq::<String>("".to_string()))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
 
     // Prepare the parts for completing the multipart upload
     let parts = etags_param.iter().map(|p| {

@@ -196,6 +196,8 @@ pub struct ResetToken {
 pub struct Message {
     pub id: Uuid,
 
+    pub upload_id: String,
+
     pub sender_key_id: Uuid,
     pub receiver_key_id: Uuid,
 
@@ -216,6 +218,8 @@ pub struct Message {
 #[diesel(table_name = crate::schema::messages)]
 pub struct NewMessage<'a> {
     pub id: &'a Uuid,
+
+    pub upload_id: &'a String,
 
     pub sender_key_id: &'a Uuid,
     pub receiver_key_id: &'a Uuid,
