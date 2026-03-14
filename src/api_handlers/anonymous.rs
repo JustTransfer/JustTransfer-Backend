@@ -1,4 +1,4 @@
-use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Json};
+use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Extension, Json};
 use tower_sessions::{Session};
 
 use serde::{Deserialize, Serialize};
@@ -332,7 +332,7 @@ pub async fn upload_anonymous_message(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadAnonymousMessageFinishMultipart {
-    // TODO validate upload ID
+    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     upload_id: String,
     etags: Vec<String>,
 }
@@ -340,6 +340,7 @@ pub struct UploadAnonymousMessageFinishMultipart {
 #[instrument(skip(state), err(Debug))]
 pub async fn upload_anonymous_message_finish_multipart(
     Path(file_id): Path<Uuid>,
+    Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<UploadAnonymousMessageFinishMultipart>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -347,7 +348,12 @@ pub async fn upload_anonymous_message_finish_multipart(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
+    // Message ID
+    let message_id = Uuid::parse_str(&claims_session.username)
+        .map_err(|_| ApiError::InputValidation)?;
+
     server::anonymous::anonymous_send_message_end(
+        message_id,
         file_id,
         payload.upload_id,
         payload.etags,

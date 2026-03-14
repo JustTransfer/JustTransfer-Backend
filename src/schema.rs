@@ -3,6 +3,7 @@
 diesel::table! {
     anonymousmessages (id) {
         id -> Uuid,
+        upload_id -> Text,
         password_file -> Bytea,
         server_login -> Nullable<Bytea>,
         cfilename -> Bytea,
@@ -37,6 +38,7 @@ diesel::table! {
 diesel::table! {
     messages (id) {
         id -> Uuid,
+        upload_id -> Text,
         sender_key_id -> Uuid,
         receiver_key_id -> Uuid,
         cfilename -> Bytea,

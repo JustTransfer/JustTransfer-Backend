@@ -281,6 +281,7 @@ async fn generate_dummy_anonymous_transfer(
     if existing_message.is_none() {
         let new_message = NewAnonymousMessage {
             id: &DUMMY_ANONYMOUS_MESSAGE_ID,
+            upload_id: &"".to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
             cfilename: &vec![0; 16],
             nonce_filename: &vec![0; SYM_LEN_NONCE],
