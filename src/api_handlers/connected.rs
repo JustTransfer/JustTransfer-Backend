@@ -524,8 +524,19 @@ pub async fn delete_user(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct AddKeyParam {
-    // The type already validates that the provided input is valid
-    key: NewKeyPairsEncoded
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    enc_public_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    enc_nonce_private_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    enc_cipher_private_key: String,
+
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    sign_public_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    sign_nonce_private_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    sign_cipher_private_key: String,
 }
 
 #[derive(Serialize)]
@@ -545,12 +556,12 @@ pub async fn add_key(
 
     // Decode the base64 encoded keys
     let decoded_key = NewKeyPairsDecoded {
-        enc_public_key: URL_SAFE_NO_PAD.decode(payload.key.enc_public_key).map_err(|_| ApiError::Base64)?,
-        enc_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
-        enc_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
-        sign_public_key: URL_SAFE_NO_PAD.decode(payload.key.sign_public_key).map_err(|_| ApiError::Base64)?,
-        sign_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
-        sign_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
+        enc_public_key: URL_SAFE_NO_PAD.decode(payload.enc_public_key).map_err(|_| ApiError::Base64)?,
+        enc_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        enc_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
+        sign_public_key: URL_SAFE_NO_PAD.decode(payload.sign_public_key).map_err(|_| ApiError::Base64)?,
+        sign_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        sign_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
     };
 
     let keys = server::connected::add_key(
