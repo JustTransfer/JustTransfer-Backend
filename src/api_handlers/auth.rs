@@ -3,8 +3,10 @@ use serde::{Deserialize, Serialize};
 use axum::middleware::Next;
 use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
 
+use uuid::Uuid;
 use chrono::Utc;
 use std::fmt;
+use tower::ServiceExt;
 use tracing::{info, instrument, warn};
 
 use crate::consts::*;
@@ -85,9 +87,10 @@ impl Role {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
+    pub id: Uuid,
     pub username: String,
     pub role: Role,
-    pub iat: usize, // issued at, as a timestamp in seconds since the epoch
+    pub iat: i64,
 }
 
 impl Claims {
@@ -133,22 +136,40 @@ pub async fn require_auth(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if session.get::<String>(AUTH_KEY).await.unwrap_or(None).is_none() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
 
     // Extend the request with the user's role and username for later use in handlers
-    if let Some(username) = session.get::<String>(AUTH_KEY).await.unwrap_or(None) {
-        let role = session.get::<String>(AUTH_KEY_ROLE).await.unwrap_or(None).unwrap_or("user".to_string());
-        let created_at_str = session.get::<String>(AUTH_KEY_CREATED_AT).await.unwrap_or(None).unwrap_or("0".to_string());
-        let created_at = created_at_str.parse::<usize>().unwrap_or(0);
+    let username = session
+        .get::<String>(AUTH_KEY_USERNAME)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
-        req.extensions_mut().insert(Claims {
-            username,
+    let user_id = session
+        .get::<Uuid>(AUTH_KEY_USER_ID)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let role = session
+        .get::<String>(AUTH_KEY_ROLE)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    let created_at = session
+        .get::<i64>(AUTH_KEY_CREATED_AT)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
+    req.extensions_mut().insert(
+        Claims {
+            id: user_id,
+            username: username,
             role: Role::try_from(role.as_str()).unwrap_or(Role::User),
             iat: created_at,
-        });
-    }
+        }
+    );
 
     Ok(next.run(req).await)
 }
@@ -158,19 +179,20 @@ pub async  fn require_auth_anonymous(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    if session.get::<String>(AUTH_KEY_ANONYMOUS).await.unwrap_or(None).is_none() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+
+    let message_id = session
+        .get::<Uuid>(AUTH_KEY_ANONYMOUS)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Extend the request with the anonymous message ID for later use in handlers
-    if let Some(message_id) = session.get::<String>(AUTH_KEY_ANONYMOUS).await.unwrap_or(None) {
-
-        req.extensions_mut().insert(Claims {
-            username: message_id,
-            role: Role::Anonymous,
-            iat: 0,
-        });
-    }
+    req.extensions_mut().insert(Claims {
+        id: message_id,
+        username: "".to_string(),
+        role: Role::Anonymous,
+        iat: 0,
+    });
 
     Ok(next.run(req).await)
 }
@@ -182,9 +204,12 @@ pub async  fn require_fresh_login(
     next: Next,
 ) -> Result<Response, StatusCode> {
 
-    if session.get::<String>(AUTH_KEY).await.unwrap_or(None).is_none() {
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    // Check if the user is connected
+    let user_id = session
+        .get::<Uuid>(AUTH_KEY_USER_ID)
+        .await
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let created_at: Option<i64> = session.get(AUTH_KEY_CREATED_AT).await.unwrap_or(None);
 
