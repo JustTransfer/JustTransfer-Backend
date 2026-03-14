@@ -78,6 +78,8 @@ CREATE TABLE anonymousMessages
 (
     id                      UUID        PRIMARY KEY,
 
+    upload_id               TEXT        NOT NULL,
+
     password_file           BYTEA       NOT NULL,
     server_login            BYTEA,
 

@@ -302,6 +302,7 @@ pub struct MessageWithUsernamesEncoded {
 #[diesel(check_for_backend(diesel::pg::Pg))]
 pub struct AnonymousMessage {
     pub id: Uuid,
+    pub upload_id: String,
     pub password_file: Vec<u8>,
     pub server_login: Option<Vec<u8>>,
     pub cfilename: Vec<u8>,
@@ -320,6 +321,7 @@ pub struct AnonymousMessage {
 #[diesel(table_name = crate::schema::anonymousmessages)]
 pub struct NewAnonymousMessage<'a> {
     pub id: &'a Uuid,
+    pub upload_id: &'a String,
     pub password_file: &'a Vec<u8>,
     pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,

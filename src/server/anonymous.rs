@@ -286,6 +286,7 @@ pub async fn anonymous_send_message(
 
     let new_message = NewAnonymousMessage {
         id: &id_transfer,
+        upload_id: &"".to_string(), // Empty string to be updated after
         password_file: &password_file_param.serialize().to_vec(),
         cfilename: &filename_param,
         nonce_filename: &nonce_filename_param,
@@ -340,6 +341,12 @@ pub async fn anonymous_send_message(
     let upload_id = create_multipart_upload_output
         .upload_id()
         .ok_or(ServerError::Internal)?;
+    
+    // Put the upload_id in the DB
+    diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_transfer)))
+        .set(anonymousmessages::upload_id.eq(upload_id))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
 
     // Generate pre-signed S3 upload URLs for each chunk
     let mut upload_urls: Vec<String> = Vec::new();
@@ -366,14 +373,37 @@ pub async fn anonymous_send_message(
 }
 
 pub async fn anonymous_send_message_end(
+    message_id: Uuid,
     file_id_param: Uuid,
     upload_id_param: String,
     etags_param: Vec<String>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
+    use crate::schema::anonymousmessages;
 
-    // TODO check if upload_id and file_id correspond for the message id in session
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Check if upload_id and file_id correspond for the message id in session
+    let message = anonymousmessages::table
+        .filter(anonymousmessages::id.eq(message_id))
+        .first::<AnonymousMessage>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    if message.file_id != file_id_param {
+        return Err(ServerError::Unauthorized);
+    }
+
+    if message.upload_id != upload_id_param {
+        return Err(ServerError::Unauthorized);
+    }
+
+    // Set the upload_id to empty string
+    diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(message_id)))
+        .set(anonymousmessages::upload_id.eq("")) // Set to empty string to prevent reuse
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
 
     // Prepare the parts for completing the multipart upload
     let parts = etags_param.iter().map(|p| {
