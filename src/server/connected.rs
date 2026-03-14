@@ -570,7 +570,7 @@ pub fn get_user(
 }
 
 pub fn delete_user(
-    username_param: &str,
+    user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
@@ -581,34 +581,27 @@ pub fn delete_user(
 
     let transaction_result = conn.transaction::<(), ServerError, _>(|conn| {
 
-        // Get the user
-        let user = users::table
-            .filter(users::username.eq(username_param))
-            .first::<User>(conn)
-            .optional()?
-            .ok_or(ServerError::Internal)?;
-
         // Delete all sent messages of the user
         diesel::delete(messages.filter(messages::sender_key_id.eq_any(
-            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+            key_pairs.filter(key_pairs::owner_id.eq(user_id_param)).select(key_pairs::id)
         )))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
         // Delete all received messages of the user
         diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
-            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
+            key_pairs.filter(key_pairs::owner_id.eq(user_id_param)).select(key_pairs::id)
         )))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
         // Delete all keys of the user
-        diesel::delete(key_pairs.filter(key_pairs::owner_id.eq(user.id)))
+        diesel::delete(key_pairs.filter(key_pairs::owner_id.eq(user_id_param)))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
         // Delete the user
-        diesel::delete(users.filter(users::id.eq(user.id)))
+        diesel::delete(users.filter(users::id.eq(user_id_param)))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
@@ -656,7 +649,7 @@ fn delete_old_keys_for_user(
 ///
 
 pub fn add_key (
-    username_param: &str,
+    user_id_param: Uuid,
     key: NewKeyPairsDecoded,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<Vec<KeyPairs>, ServerError> {
@@ -664,15 +657,9 @@ pub fn add_key (
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    let user = users::table
-        .filter(users::username.eq(username_param))
-        .first::<User>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
     let new_key = NewKeyPairs {
         id: &Uuid::new_v4(),
-        owner_id: &user.id,
+        owner_id: &user_id_param,
 
         enc_public_key: &key.enc_public_key,
         enc_nonce_private_key: &key.enc_nonce_private_key,
@@ -696,7 +683,7 @@ pub fn add_key (
 
         // Invalid all other valid keys of the user and set the revoked_at date
         diesel::update(crate::schema::key_pairs::table)
-            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+            .filter(crate::schema::key_pairs::owner_id.eq(user_id_param))
             .filter(crate::schema::key_pairs::id.ne(new_key.id))
             .filter(crate::schema::key_pairs::is_active.eq(true))
             .set((
@@ -707,10 +694,10 @@ pub fn add_key (
             .map_err(|_| ServerError::Internal)?;
 
         // Delete old keys that are not active and not used by any message
-        delete_old_keys_for_user(pool, user.id)?;
+        delete_old_keys_for_user(pool, user_id_param)?;
 
         let keys = crate::schema::key_pairs::table
-            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+            .filter(crate::schema::key_pairs::owner_id.eq(user_id_param))
             .load::<KeyPairs>(conn)
             .map_err(|_| ServerError::Internal)?;
 
@@ -771,7 +758,7 @@ pub fn get_pub_key_user(
 ///
 
 pub async fn get_messages(
-    username_param: &str,
+    user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<Vec<MessageWithUsernames>, ServerError> {
@@ -781,14 +768,7 @@ pub async fn get_messages(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
-    delete_invalid_messages_for_user(pool, s3, username_param).await?;
-
-    let user_id = users
-        .filter(users::username.eq(username_param))
-        .select(users::id)
-        .first::<Uuid>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
+    delete_invalid_messages_for_user(pool, s3, user_id_param).await?;
 
     let (sender_key, receiver_key) = alias!(key_pairs as sender_key, key_pairs as receiver_key);
     let (sender_user, receiver_user) = alias!(users as sender_user, users as receiver_user);
@@ -798,7 +778,7 @@ pub async fn get_messages(
         .inner_join(receiver_key.on(messages::receiver_key_id.eq(receiver_key.field(key_pairs::id))))
         .inner_join(sender_user.on(sender_key.field(key_pairs::owner_id).eq(sender_user.field(users::id))))
         .inner_join(receiver_user.on(receiver_key.field(key_pairs::owner_id).eq(receiver_user.field(users::id))))
-        .filter(receiver_user.field(users::id).eq(user_id))
+        .filter(receiver_user.field(users::id).eq(user_id_param))
         .filter(messages::signature.is_not_null())
         .select((
             messages::id,
@@ -825,7 +805,7 @@ pub async fn get_messages(
 }
 
 pub async fn get_messages_sent(
-    username_param: &str,
+    user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<Vec<MessageSentWithUsernames>, ServerError> {
@@ -836,7 +816,7 @@ pub async fn get_messages_sent(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
-    delete_invalid_messages_for_user(pool, s3, username_param).await?;
+    delete_invalid_messages_for_user(pool, s3, user_id_param).await?;
 
     let (sender_key, receiver_key) = alias!(key_pairs as sender_key, key_pairs as receiver_key);
     let (sender_user, receiver_user) = alias!(users as sender_user, users as receiver_user);
@@ -846,7 +826,7 @@ pub async fn get_messages_sent(
         .inner_join(receiver_key.on(messages::receiver_key_id.eq(receiver_key.field(key_pairs::id))))
         .inner_join(sender_user.on(sender_key.field(key_pairs::owner_id).eq(sender_user.field(users::id))))
         .inner_join(receiver_user.on(receiver_key.field(key_pairs::owner_id).eq(receiver_user.field(users::id))))
-        .filter(sender_user.field(users::username).eq(username_param))
+        .filter(sender_user.field(users::id).eq(user_id_param))
         .filter(messages::signature.is_not_null()) // Only get messages with signature
         .select((
             messages::id,
@@ -866,7 +846,7 @@ pub async fn get_messages_sent(
 }
 
 pub async fn get_message(
-    username_param: &str,
+    user_id_param: Uuid,
     message_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
@@ -877,7 +857,7 @@ pub async fn get_message(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
-    delete_invalid_messages_for_user(pool, s3, username_param).await?;
+    delete_invalid_messages_for_user(pool, s3, user_id_param).await?;
 
     // Transaction to get the message and update the download count
     let transaction_result = conn.transaction(|conn| {
@@ -892,7 +872,7 @@ pub async fn get_message(
         // Check if the receiver key belongs to the user
         let exists = users::table
             .inner_join(key_pairs::table.on(key_pairs::owner_id.eq(users::id)))
-            .filter(users::username.eq(username_param))
+            .filter(users::id.eq(user_id_param))
             .filter(key_pairs::id.eq(message.receiver_key_id))
             .select(key_pairs::id)
             .first::<Uuid>(conn)
@@ -1087,7 +1067,7 @@ pub async fn send_message(
 }
 
 pub async fn send_message_finish_multipart(
-    sender: &str,
+    sender_id: Uuid,
     file_id_param: Uuid,
     upload_id_param: String,
     etags_param: Vec<String>,
@@ -1101,15 +1081,9 @@ pub async fn send_message_finish_multipart(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the upload_id and file_id correspond to a message of the sender
-    let user = users::table
-        .filter(users::username.eq(sender))
-        .first::<User>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
     let exists = messages::table
         .inner_join(key_pairs::table.on(messages::sender_key_id.eq(key_pairs::id)))
-        .filter(key_pairs::owner_id.eq(user.id))
+        .filter(key_pairs::owner_id.eq(sender_id))
         .filter(messages::file_id.eq(file_id_param))
         .filter(messages::upload_id.eq(upload_id_param.clone()))
         .select(messages::id)
@@ -1180,7 +1154,7 @@ pub fn update_message_signature(
 async fn delete_invalid_messages_for_user(
     pool: &DbPool,
     s3: &aws_sdk_s3::Client,
-    username_param: &str,
+    user_id_param: Uuid,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
     use crate::schema::messages;
@@ -1188,16 +1162,9 @@ async fn delete_invalid_messages_for_user(
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    let user_id = users
-        .filter(users::username.eq(username_param))
-        .select(users::id)
-        .first::<Uuid>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
     let messages_to_delete = messages
         .inner_join(key_pairs::table.on(messages::receiver_key_id.eq(key_pairs::id)))
-        .filter(key_pairs::owner_id.eq(user_id))
+        .filter(key_pairs::owner_id.eq(user_id_param))
         .filter(messages::number_downloads.ge(messages::max_downloads).or(
             sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
         ))
@@ -1235,14 +1202,14 @@ async fn delete_invalid_messages_for_user(
             .await
             .map_err(|_| ServerError::Internal)?;
 
-        info!("Deleted {} invalid messages for user {}", messages_to_delete.len(), username_param);
+        info!("Deleted {} invalid messages for user {}", messages_to_delete.len(), user_id_param);
     }
 
     Ok(())
 }
 
 pub async fn delete_message (
-    username_param: &str,
+    user_id_param: Uuid,
     message_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
@@ -1261,7 +1228,7 @@ pub async fn delete_message (
     // Check if the message belongs to the user
     let exists = users::table
         .inner_join(crate::schema::key_pairs::table.on(crate::schema::key_pairs::owner_id.eq(users::id)))
-        .filter(users::username.eq(username_param))
+        .filter(users::id.eq(user_id_param))
         .filter(crate::schema::key_pairs::id.eq(message.receiver_key_id))
         .select(crate::schema::key_pairs::id)
         .first::<Uuid>(&mut conn)

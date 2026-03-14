@@ -122,7 +122,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-fn handle_panic(err: Box<dyn Any + Send + 'static>) -> Response<Body> {
+fn handle_panic(_err: Box<dyn Any + Send + 'static>) -> Response<Body> {
     Response::builder()
         .status(StatusCode::INTERNAL_SERVER_ERROR)
         .body(Body::empty())

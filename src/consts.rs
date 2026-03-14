@@ -27,7 +27,8 @@ pub const DUMMY_ANONYMOUS_MESSAGE_ID: Uuid = Uuid::from_u128(0x12345678123456781
 pub const SESSION_DURATION_HOURS: i64 = 72; // 3 days
 pub const FRESH_SESSION_DURATION_MINUTES: i64 = 1; // 5 minutes
 pub const AUTH_KEY_ANONYMOUS: &str = "anonymous_message_id";
-pub const AUTH_KEY: &str = "username";
+pub const AUTH_KEY_USER_ID: &str = "id";
+pub const AUTH_KEY_USERNAME: &str = "username";
 pub const AUTH_KEY_ROLE: &str = "role";
 pub const AUTH_KEY_CREATED_AT: &str = "created_at";
 

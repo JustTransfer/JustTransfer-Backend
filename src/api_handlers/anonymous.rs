@@ -132,7 +132,7 @@ pub async fn anonymous_message_login_end(
         .await?;
 
     // Create session
-    session.insert(AUTH_KEY_ANONYMOUS, id.to_string())
+    session.insert(AUTH_KEY_ANONYMOUS, id)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -240,7 +240,7 @@ pub async fn anonymous_message_send_start(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadAnonymousMessageFinish {
-    // TODO validate UUID
+    // The type already validates that the provided input is valid
     id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
@@ -254,7 +254,7 @@ pub struct UploadAnonymousMessageFinish {
     max_downloads: i32,
     #[validate(custom(function = "validate_int_param"))]
     lifetime: i32,
-    // TODO validate creation time
+    // The type already validates that the provided input is valid
     creation_time: chrono::DateTime<chrono::Utc>,
     #[validate(custom(function = "validate_file_size_anonymous"))]
     file_size: i64,
@@ -280,7 +280,8 @@ pub async fn upload_anonymous_message(
 
     // Create claims with provided parameters
     let claims = Claims {
-        username: payload.id.to_string(),
+        id: payload.id,
+        username: "".to_string(),
         role: auth::Role::Anonymous,
         iat: 0, // Not used in this case to validate the following
     };
@@ -316,7 +317,7 @@ pub async fn upload_anonymous_message(
         .await?;
 
     // Create session
-    session.insert(AUTH_KEY_ANONYMOUS, payload.id.to_string())
+    session.insert(AUTH_KEY_ANONYMOUS, payload.id)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -334,6 +335,7 @@ pub async fn upload_anonymous_message(
 pub struct UploadAnonymousMessageFinishMultipart {
     #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     upload_id: String,
+    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     etags: Vec<String>,
 }
 
@@ -348,12 +350,8 @@ pub async fn upload_anonymous_message_finish_multipart(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    // Message ID
-    let message_id = Uuid::parse_str(&claims_session.username)
-        .map_err(|_| ApiError::InputValidation)?;
-
     server::anonymous::anonymous_send_message_end(
-        message_id,
+        claims_session.id,
         file_id,
         payload.upload_id,
         payload.etags,

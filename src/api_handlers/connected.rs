@@ -152,6 +152,7 @@ pub async fn register_user_end(
 pub struct RegisterUserEndUpdate {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
+    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     keys: Vec<KeyPairsEncodedUpdate>
 }
 
@@ -421,7 +422,10 @@ pub async fn login_user_end(
         .map_err(|_| ApiError::ServerError)?;
 
     // Create session
-    session.insert(AUTH_KEY, &user.username)
+    session.insert(AUTH_KEY_USER_ID, user.id)
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session.insert(AUTH_KEY_USERNAME, &user.username)
         .await
         .map_err(|_| ApiError::ServerError)?;
     session.insert(AUTH_KEY_ROLE, role.to_string())
@@ -509,7 +513,7 @@ pub async fn delete_user(
         return Err(ApiError::Forbidden);
     }
 
-    server::connected::delete_user(&*claims_session.username, &state.db)?;
+    server::connected::delete_user(claims_session.id, &state.db)?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -520,7 +524,19 @@ pub async fn delete_user(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct AddKeyParam {
-    key: NewKeyPairsEncoded
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    enc_public_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    enc_nonce_private_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    enc_cipher_private_key: String,
+
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    sign_public_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    sign_nonce_private_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    sign_cipher_private_key: String,
 }
 
 #[derive(Serialize)]
@@ -540,16 +556,16 @@ pub async fn add_key(
 
     // Decode the base64 encoded keys
     let decoded_key = NewKeyPairsDecoded {
-        enc_public_key: URL_SAFE_NO_PAD.decode(payload.key.enc_public_key).map_err(|_| ApiError::Base64)?,
-        enc_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
-        enc_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
-        sign_public_key: URL_SAFE_NO_PAD.decode(payload.key.sign_public_key).map_err(|_| ApiError::Base64)?,
-        sign_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
-        sign_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.key.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
+        enc_public_key: URL_SAFE_NO_PAD.decode(payload.enc_public_key).map_err(|_| ApiError::Base64)?,
+        enc_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.enc_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        enc_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.enc_cipher_private_key).map_err(|_| ApiError::Base64)?,
+        sign_public_key: URL_SAFE_NO_PAD.decode(payload.sign_public_key).map_err(|_| ApiError::Base64)?,
+        sign_nonce_private_key: URL_SAFE_NO_PAD.decode(payload.sign_nonce_private_key).map_err(|_| ApiError::Base64)?,
+        sign_cipher_private_key: URL_SAFE_NO_PAD.decode(payload.sign_cipher_private_key).map_err(|_| ApiError::Base64)?,
     };
 
     let keys = server::connected::add_key(
-        &*claims_session.username,
+        claims_session.id,
         decoded_key,
         &state.db,
     )?;
@@ -636,7 +652,7 @@ pub async fn get_messages(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
     
-    let messages: Vec<MessageWithUsernames> = server::connected::get_messages(&*claims_session.username, &state.db, &state.s3)
+    let messages: Vec<MessageWithUsernames> = server::connected::get_messages(claims_session.id, &state.db, &state.s3)
         .await?;
 
     // Convert the fields of each messages to base64
@@ -675,7 +691,7 @@ pub async fn get_messages_sent(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let messages: Vec<MessageSentWithUsernames> = server::connected::get_messages_sent(&*claims_session.username, &state.db, &state.s3)
+    let messages: Vec<MessageSentWithUsernames> = server::connected::get_messages_sent(claims_session.id, &state.db, &state.s3)
         .await?;
 
     Ok((StatusCode::OK, Json(GetMessageSentResult { messages: messages })))
@@ -693,7 +709,7 @@ pub async fn get_one_message(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let presigned_url = server::connected::get_message(&*claims_session.username, id, &state.db, &state.s3)
+    let presigned_url = server::connected::get_message(claims_session.id, id, &state.db, &state.s3)
         .await?;
 
     Ok((StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url })))
@@ -705,7 +721,9 @@ pub async fn get_one_message(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessage {
+    // The type already validates that the provided input is valid
     sender_key_id: Uuid,
+    // The type already validates that the provided input is valid
     receiver_key_id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cfilename: String,
@@ -717,10 +735,8 @@ pub struct UploadMessage {
     max_downloads: i32,
     #[validate(custom(function = "validate_int_param"))]
     lifetime: i32,
-    // TODO validate creation time
+    // The type already validates that the provided input is valid
     creation_time: chrono::DateTime<chrono::Utc>,
-    //#[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    // signature: String,
     #[validate(custom(function = "validate_int_param_64"))]
     file_size: i64,
 }
@@ -779,6 +795,7 @@ pub async fn upload_message(
 pub struct UploadMessageFinishMultipart {
     #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     upload_id: String,
+    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     etags: Vec<String>,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     signature: String,
@@ -796,7 +813,7 @@ pub async fn upload_message_finish_multipart(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     server::connected::send_message_finish_multipart(
-        &claims_session.username,
+        claims_session.id,
         file_id,
         payload.upload_id,
         payload.etags,
@@ -827,7 +844,7 @@ pub async fn delete_message(
 ) -> Result<impl IntoResponse, ApiError> {
 
     server::connected::delete_message(
-        &*claims_session.username,
+        claims_session.id,
         id,
         &state.db,
         &state.s3,
