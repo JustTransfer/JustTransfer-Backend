@@ -152,6 +152,7 @@ pub async fn register_user_end(
 pub struct RegisterUserEndUpdate {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
+    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     keys: Vec<KeyPairsEncodedUpdate>
 }
 
@@ -523,6 +524,7 @@ pub async fn delete_user(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct AddKeyParam {
+    // The type already validates that the provided input is valid
     key: NewKeyPairsEncoded
 }
 
@@ -708,7 +710,9 @@ pub async fn get_one_message(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadMessage {
+    // The type already validates that the provided input is valid
     sender_key_id: Uuid,
+    // The type already validates that the provided input is valid
     receiver_key_id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cfilename: String,
@@ -720,10 +724,8 @@ pub struct UploadMessage {
     max_downloads: i32,
     #[validate(custom(function = "validate_int_param"))]
     lifetime: i32,
-    // TODO validate creation time
+    // The type already validates that the provided input is valid
     creation_time: chrono::DateTime<chrono::Utc>,
-    //#[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    // signature: String,
     #[validate(custom(function = "validate_int_param_64"))]
     file_size: i64,
 }

@@ -240,7 +240,7 @@ pub async fn anonymous_message_send_start(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct UploadAnonymousMessageFinish {
-    // TODO validate UUID
+    // The type already validates that the provided input is valid
     id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
@@ -254,7 +254,7 @@ pub struct UploadAnonymousMessageFinish {
     max_downloads: i32,
     #[validate(custom(function = "validate_int_param"))]
     lifetime: i32,
-    // TODO validate creation time
+    // The type already validates that the provided input is valid
     creation_time: chrono::DateTime<chrono::Utc>,
     #[validate(custom(function = "validate_file_size_anonymous"))]
     file_size: i64,

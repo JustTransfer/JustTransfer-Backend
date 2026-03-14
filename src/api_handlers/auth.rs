@@ -90,7 +90,7 @@ pub struct Claims {
     pub id: Uuid,
     pub username: String,
     pub role: Role,
-    pub iat: i64,
+    pub iat: i64, // Issued at timestamp
 }
 
 impl Claims {
