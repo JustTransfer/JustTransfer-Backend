@@ -44,7 +44,6 @@ diesel::table! {
         cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,
-        nonce_message -> Bytea,
         max_downloads -> Int4,
         lifetime -> Int4,
         creation_time -> Timestamptz,

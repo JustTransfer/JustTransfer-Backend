@@ -666,7 +666,6 @@ pub async fn get_messages(
             cfilename: URL_SAFE_NO_PAD.encode(m.cfilename),
             nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
             file_id: m.file_id,
-            nonce_message: URL_SAFE_NO_PAD.encode(m.nonce_message),
             max_downloads: m.max_downloads,
             lifetime: m.lifetime,
             creation_time: m.creation_time,
@@ -729,8 +728,6 @@ pub struct UploadMessage {
     cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    nonce_message: String,
     #[validate(custom(function = "validate_int_param"))]
     max_downloads: i32,
     #[validate(custom(function = "validate_int_param"))]
@@ -769,8 +766,6 @@ pub async fn upload_message(
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
-            .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_message)
             .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
         payload.lifetime,
