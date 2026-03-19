@@ -63,7 +63,6 @@ CREATE TABLE messages
     cfilename               BYTEA       NOT NULL,
     nonce_filename          BYTEA       NOT NULL,
     file_id                 UUID        NOT NULL UNIQUE,
-    nonce_message           BYTEA       NOT NULL,
     max_downloads           INT         NOT NULL,
     lifetime                INT         NOT NULL,
     creation_time           TIMESTAMPTZ NOT NULL,
