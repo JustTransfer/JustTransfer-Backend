@@ -57,13 +57,7 @@ Windows:
 cp .env.sample .env
 ```
 
-2) Start local PostgreSQL + MinIO (example):
-
-```bash
-docker network create justtransfer || true
-docker run -d --name jt-postgres --network justtransfer -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=just_transfer -p 5432:5432 postgres:17
-docker run -d --name jt-minio --network justtransfer -e MINIO_ROOT_USER=admin -e MINIO_ROOT_PASSWORD=password -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address ":9001"
-```
+2) Start local PostgreSQL + MinIO
 
 3) Update `.env` for host-run backend (typical local values):
 
