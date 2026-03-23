@@ -2,14 +2,14 @@
 
 Rust backend for JustTransfer, an encrypted file transfer service with two delivery modes:
 
-- **Connected transfer** (account-to-account)
-- **Anonymous transfer** (link/password-style flow)
+- **Account/Connected transfer** (account-to-account)
+- **Link/Anonymous transfer** (link/password-style flow)
 
 This repository contains the API server, database models/migrations, session/auth logic, and S3-compatible object storage integration.
 
 ## Current status
 
-This project is under active development (`v0.1.0`). API contracts and behavior may change.
+This project is under active development. API contracts and behavior may change.
 
 ## Core features
 
