@@ -48,7 +48,7 @@ pub fn validate_int_param_64(value: i64) -> Result<(), ValidationError> {
 ///
 
 pub fn validate_file_size_anonymous(size: i64) -> Result<(), ValidationError> {
-    if size == 0 || size > MAX_FILE_SIZE_ANONYMOUS {
+    if size == 0 || size > *MAX_FILE_SIZE_ANONYMOUS.get().unwrap() {
         return Err(ValidationError::new("invalid_file_size"));
     }
     Ok(())

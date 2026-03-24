@@ -47,39 +47,39 @@ impl fmt::Display for Role {
 }
 
 impl Role {
-    pub fn max_lifetime(&self) -> i32 {
+    pub fn max_lifetime(&self) -> i64 {
         match self {
-            Role::User => MAX_LIFETIME_CONNECTED,
-            Role::Premium => MAX_LIFETIME_CONNECTED_PREMIUM,
-            Role::Admin => MAX_LIFETIME_CONNECTED_PREMIUM,
-            Role::Anonymous => MAX_LIFETIME_ANONYMOUS,
+            Role::User => *MAX_LIFETIME_CONNECTED.get().unwrap(),
+            Role::Premium => *MAX_LIFETIME_CONNECTED_PREMIUM.get().unwrap(),
+            Role::Admin => *MAX_LIFETIME_CONNECTED_PREMIUM.get().unwrap(),
+            Role::Anonymous => *MAX_LIFETIME_ANONYMOUS.get().unwrap(),
         }
     }
 
     pub fn max_file_size(&self) -> i64 {
         match self {
-            Role::User => MAX_FILE_SIZE_CONNECTED,
-            Role::Premium => MAX_FILE_SIZE_CONNECTED_PREMIUM,
-            Role::Admin => MAX_FILE_SIZE_CONNECTED_PREMIUM,
-            Role::Anonymous => MAX_FILE_SIZE_ANONYMOUS,
+            Role::User => *MAX_FILE_SIZE_CONNECTED.get().unwrap(),
+            Role::Premium => *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap(),
+            Role::Admin => *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap(),
+            Role::Anonymous => *MAX_FILE_SIZE_ANONYMOUS.get().unwrap(),
         }
     }
 
-    pub fn max_downloads(&self) -> i32 {
+    pub fn max_downloads(&self) -> i64 {
         match self {
-            Role::User => MAX_DOWNLOADS_CONNECTED,
-            Role::Premium => MAX_DOWNLOADS_CONNECTED_PREMIUM,
-            Role::Admin => MAX_DOWNLOADS_CONNECTED_PREMIUM,
-            Role::Anonymous => MAX_DOWNLOADS_ANONYMOUS,
+            Role::User => *MAX_DOWNLOADS_CONNECTED.get().unwrap(),
+            Role::Premium => *MAX_DOWNLOADS_CONNECTED_PREMIUM.get().unwrap(),
+            Role::Admin => *MAX_DOWNLOADS_CONNECTED_PREMIUM.get().unwrap(),
+            Role::Anonymous => *MAX_DOWNLOADS_ANONYMOUS.get().unwrap(),
         }
     }
 
     pub fn max_messages(&self) -> Option<i64> {
         match self {
-            Role::User => Some(MAX_NUMBER_CONNECTED_TRANSFERS_MONTH),
-            Role::Premium => Some(MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH),
-            Role::Admin => Some(MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH),
-            Role::Anonymous => Some(MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT),
+            Role::User => Some(*MAX_NUMBER_CONNECTED_TRANSFERS_MONTH.get().unwrap()),
+            Role::Premium => Some(*MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH.get().unwrap()),
+            Role::Admin => Some(*MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH.get().unwrap()),
+            Role::Anonymous => Some(*MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT.get().unwrap()),
         }
     }
 }
@@ -94,7 +94,7 @@ pub struct Claims {
 }
 
 impl Claims {
-    pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i32, file_size: i64, max_downloads: i32) -> Result<(), ApiError> {
+    pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i64, file_size: i64, max_downloads: i64) -> Result<(), ApiError> {
         
         // Creation time
         let now = Utc::now();
@@ -126,7 +126,7 @@ pub fn get_session_layer() -> SessionManagerLayer<MemoryStore> {
     let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store)
         .with_secure(true)
-        .with_expiry(Expiry::OnInactivity(Duration::hours(SESSION_DURATION_HOURS)));
+        .with_expiry(Expiry::OnInactivity(Duration::minutes(*SESSION_DURATION_MINUTES.get().unwrap())));
 
     session_layer
 }
@@ -216,7 +216,7 @@ pub async  fn require_fresh_login(
     if let Some(ts) = created_at {
         let now = Utc::now().timestamp();
 
-        if (now - ts).abs() > (FRESH_SESSION_DURATION_MINUTES * 60) {
+        if (now - ts).abs() > (FRESH_SESSION_DURATION_MINUTES.get().unwrap() * 60) {
             warn!("Session is not fresh: created at {}, now is {}, difference is {} seconds", ts, now, (now - ts).abs());
             return Err(StatusCode::UNAUTHORIZED);
         }

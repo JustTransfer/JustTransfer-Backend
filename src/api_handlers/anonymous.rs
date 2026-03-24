@@ -26,16 +26,16 @@ use crate::models::*;
 #[derive(Serialize)]
 pub struct RootResponse {
     result: String,
-    max_lifetime_anonymous: i32,
+    max_lifetime_anonymous: i64,
     max_file_size_anonymous: i64,
-    max_downloads_anonymous: i32,
-    max_lifetime_connected: i32,
+    max_downloads_anonymous: i64,
+    max_lifetime_connected: i64,
     max_file_size_connected: i64,
-    max_downloads_connected: i32,
+    max_downloads_connected: i64,
     max_transfer_month_connected: i64,
-    max_lifetime_connected_premium: i32,
+    max_lifetime_connected_premium: i64,
     max_file_size_connected_premium: i64,
-    max_downloads_connected_premium: i32,
+    max_downloads_connected_premium: i64,
     max_transfer_month_connected_premium: i64,
 }
 
@@ -45,17 +45,17 @@ pub async fn config() -> Result<impl IntoResponse, ApiError> {
         StatusCode::OK,
         Json(RootResponse {
             result: "JustTransfer API is running".to_string(),
-            max_lifetime_anonymous: MAX_LIFETIME_ANONYMOUS,
-            max_file_size_anonymous: MAX_FILE_SIZE_ANONYMOUS,
-            max_downloads_anonymous: MAX_DOWNLOADS_ANONYMOUS,
-            max_lifetime_connected: MAX_LIFETIME_CONNECTED,
-            max_file_size_connected: MAX_FILE_SIZE_CONNECTED,
-            max_downloads_connected: MAX_DOWNLOADS_CONNECTED,
-            max_transfer_month_connected: MAX_NUMBER_CONNECTED_TRANSFERS_MONTH,
-            max_lifetime_connected_premium: MAX_LIFETIME_CONNECTED_PREMIUM,
-            max_file_size_connected_premium: MAX_FILE_SIZE_CONNECTED_PREMIUM,
-            max_downloads_connected_premium: MAX_DOWNLOADS_CONNECTED_PREMIUM,
-            max_transfer_month_connected_premium: MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH,
+            max_lifetime_anonymous: *MAX_LIFETIME_ANONYMOUS.get().unwrap(),
+            max_file_size_anonymous: *MAX_FILE_SIZE_ANONYMOUS.get().unwrap(),
+            max_downloads_anonymous: *MAX_DOWNLOADS_ANONYMOUS.get().unwrap(),
+            max_lifetime_connected: *MAX_LIFETIME_CONNECTED.get().unwrap(),
+            max_file_size_connected: *MAX_FILE_SIZE_CONNECTED.get().unwrap(),
+            max_downloads_connected: *MAX_DOWNLOADS_CONNECTED.get().unwrap(),
+            max_transfer_month_connected: *MAX_NUMBER_CONNECTED_TRANSFERS_MONTH.get().unwrap(),
+            max_lifetime_connected_premium: *MAX_LIFETIME_CONNECTED_PREMIUM.get().unwrap(),
+            max_file_size_connected_premium: *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap(),
+            max_downloads_connected_premium: *MAX_DOWNLOADS_CONNECTED_PREMIUM.get().unwrap(),
+            max_transfer_month_connected_premium: *MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH.get().unwrap(),
         }),
     ))
 }
@@ -233,7 +233,7 @@ pub async fn anonymous_message_send_start(
         Json(AnonymousSendMessageResultStart {
             id: id,
             result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
-            chunk_size: CHUNK_SIZE_ANONYMOUS,
+            chunk_size: *CHUNK_SIZE_ANONYMOUS.get().unwrap(),
         })),
     )
 }
@@ -250,10 +250,10 @@ pub struct UploadAnonymousMessageFinish {
     nonce_filename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     header: String,
-    #[validate(custom(function = "validate_int_param"))]
-    max_downloads: i32,
-    #[validate(custom(function = "validate_int_param"))]
-    lifetime: i32,
+    #[validate(custom(function = "validate_int_param_64"))]
+    max_downloads: i64,
+    #[validate(custom(function = "validate_int_param_64"))]
+    lifetime: i64,
     // The type already validates that the provided input is valid
     creation_time: chrono::DateTime<chrono::Utc>,
     #[validate(custom(function = "validate_file_size_anonymous"))]

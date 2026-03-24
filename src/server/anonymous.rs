@@ -270,8 +270,8 @@ pub async fn anonymous_send_message(
     nonce_filename_param: Vec<u8>,
     file_id_param: Uuid,
     header_param: Vec<u8>,
-    max_downloads_param: i32,
-    lifetime_param: i32,
+    max_downloads_param: i64,
+    lifetime_param: i64,
     creation_time_param: chrono::DateTime<Utc>,
     file_size_param: i64,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -297,7 +297,7 @@ pub async fn anonymous_send_message(
         creation_time: &creation_time_param,
         number_downloads: &0,
         file_size: &file_size_param,
-        chunk_size: &CHUNK_SIZE_ANONYMOUS,
+        chunk_size: &CHUNK_SIZE_ANONYMOUS.get().unwrap(),
     };
 
     conn.transaction::<_, ServerError, _>(|conn| {
@@ -328,7 +328,7 @@ pub async fn anonymous_send_message(
 
 
     // Calculate the Number of chunks
-    let num_chunks = (file_size_param as f64 / CHUNK_SIZE_ANONYMOUS as f64).ceil() as i32;
+    let num_chunks = (file_size_param as f64 / *CHUNK_SIZE_ANONYMOUS.get().unwrap() as f64).ceil() as i32;
 
     // Create multipart upload
     let create_multipart_upload_output = s3.create_multipart_upload()

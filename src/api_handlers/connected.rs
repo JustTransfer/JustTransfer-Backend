@@ -480,7 +480,7 @@ pub struct UserInfoResult {
     username: String,
     email: String,
     role: String,
-    number_transfers: i32,
+    number_transfers: i64,
 }
 #[instrument(skip(state), err(Debug))]
 pub async fn get_user_info(
@@ -728,10 +728,10 @@ pub struct UploadMessage {
     cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
-    #[validate(custom(function = "validate_int_param"))]
-    max_downloads: i32,
-    #[validate(custom(function = "validate_int_param"))]
-    lifetime: i32,
+    #[validate(custom(function = "validate_int_param_64"))]
+    max_downloads: i64,
+    #[validate(custom(function = "validate_int_param_64"))]
+    lifetime: i64,
     // The type already validates that the provided input is valid
     creation_time: chrono::DateTime<chrono::Utc>,
     #[validate(custom(function = "validate_int_param_64"))]
@@ -782,7 +782,7 @@ pub async fn upload_message(
         upload_urls: upload_urls,
         upload_id: upload_id,
         message_file_id: file_id,
-        chunk_size: CHUNK_SIZE_CONNECTED,
+        chunk_size: *CHUNK_SIZE_CONNECTED.get().unwrap(),
     })))
 }
 

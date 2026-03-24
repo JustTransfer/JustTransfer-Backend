@@ -15,7 +15,7 @@ use http::{Method, Response};
 use std::any::Any;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
-use crate::consts::FRONTEND_URL;
+use crate::consts::{BACKEND_URL, FRONTEND_URL};
 
 pub mod api_handlers;
 pub mod consts;
@@ -117,8 +117,8 @@ async fn main() {
                 .timeout(std::time::Duration::from_secs(30)),
         );
 
-    tracing::info!("Server running on {}", consts::URL);
-    let listener = tokio::net::TcpListener::bind(consts::URL).await.unwrap();
+    tracing::info!("Server running on {}", BACKEND_URL.get().unwrap());
+    let listener = tokio::net::TcpListener::bind(BACKEND_URL.get().unwrap()).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
