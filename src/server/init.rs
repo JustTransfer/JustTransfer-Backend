@@ -46,6 +46,21 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
             .map_err(|_| ServerError::Internal)?;
     }
 
+    // i64 values
+    for (key, cell) in ENV_CELLS_I64 {
+        let value = std::env::var(key).map_err(|_| {
+            error!("Environment variable {} is not set", key);
+            ServerError::Internal
+        })?;
+
+        let parsed = value.parse::<i64>().map_err(|_| {
+            error!("Invalid integer for {}: {}", key, value);
+            ServerError::Internal
+        })?;
+
+        cell.set(parsed).map_err(|_| ServerError::Internal)?;
+    }
+
     let db_pool = server_init_db()?;
     let s3_client = server_init_s3().await?;
 
@@ -292,7 +307,7 @@ async fn generate_dummy_anonymous_transfer(
             creation_time: &Utc::now(),
             number_downloads: &0,
             file_size: &0,
-            chunk_size: &CHUNK_SIZE_ANONYMOUS,
+            chunk_size: &CHUNK_SIZE_ANONYMOUS.get().unwrap(),
         };
 
         diesel::insert_into(anonymousmessages::table)

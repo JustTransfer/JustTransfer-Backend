@@ -64,7 +64,7 @@ pub fn registration_finish(
 
     // Check if max user number is reached
     let user_count = users::table.count().get_result::<i64>(&mut conn).map_err(|_| ServerError::Internal)?;
-    if user_count >= MAX_NUMBER_ACCOUNTS {
+    if user_count >= *MAX_NUMBER_ACCOUNTS.get().unwrap() {
         return Err(ServerError::InsufficientStorage);
     }
 
@@ -288,13 +288,13 @@ pub fn request_password_reset(
         .values((
             reset_tokens::account_id.eq(user_id),
             reset_tokens::token.eq(new_registration_token),
-            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(RESET_PASSWORD_TOKEN_DURATION_MINUTES))
+            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(*RESET_PASSWORD_TOKEN_DURATION_MINUTES.get().unwrap()))
         ))
         .on_conflict(reset_tokens::account_id)
         .do_update()
         .set((
             reset_tokens::token.eq(new_registration_token),
-            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(RESET_PASSWORD_TOKEN_DURATION_MINUTES))
+            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(*RESET_PASSWORD_TOKEN_DURATION_MINUTES.get().unwrap()))
         ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
@@ -919,8 +919,8 @@ pub async fn send_message(
     receiver_key_id_param: Uuid,
     filename_param: Vec<u8>,
     nonce_filename_param: Vec<u8>,
-    max_downloads_param: i32,
-    lifetime_param: i32,
+    max_downloads_param: i64,
+    lifetime_param: i64,
     creation_time_param: chrono::DateTime<Utc>,
     file_size_param: i64,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -957,7 +957,7 @@ pub async fn send_message(
         creation_time: &creation_time_param,
         number_downloads: &0,
         file_size: &file_size_param,
-        chunk_size: &CHUNK_SIZE_CONNECTED,
+        chunk_size: &CHUNK_SIZE_CONNECTED.get().unwrap(),
     };
 
     conn.transaction::<_, ServerError, _>(|conn| {
@@ -980,7 +980,7 @@ pub async fn send_message(
         let sent_messages_count = users::table
             .filter(users::id.eq(sender.id))
             .select(users::number_transfers)
-            .first::<i32>(conn)? as i64;
+            .first::<i64>(conn)?;
 
         // Get the sender role
         let sender_role = users::table
@@ -1019,7 +1019,7 @@ pub async fn send_message(
     })?;
 
     // Calculate the Number of chunks
-    let num_chunks = (file_size_param as f64 / CHUNK_SIZE_CONNECTED as f64).ceil() as i32;
+    let num_chunks = (file_size_param as f64 / *CHUNK_SIZE_CONNECTED.get().unwrap() as f64).ceil() as i32;
 
     // Create multipart upload
     let create_multipart_upload_output = s3.create_multipart_upload()

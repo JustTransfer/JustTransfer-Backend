@@ -14,7 +14,7 @@ CREATE TABLE users
     password_file           BYTEA       NOT NULL,
     server_login            BYTEA,
     role                    TEXT        NOT NULL CHECK (role IN ('user', 'premium', 'admin', 'anonymous')),
-    number_transfers        INT         NOT NULL DEFAULT 0,
+    number_transfers        BIGINT      NOT NULL DEFAULT 0,
 
     created_at              TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -63,11 +63,11 @@ CREATE TABLE messages
     cfilename               BYTEA       NOT NULL,
     nonce_filename          BYTEA       NOT NULL,
     file_id                 UUID        NOT NULL UNIQUE,
-    max_downloads           INT         NOT NULL,
-    lifetime                INT         NOT NULL,
+    max_downloads           BIGINT      NOT NULL,
+    lifetime                BIGINT      NOT NULL,
     creation_time           TIMESTAMPTZ NOT NULL,
     signature               BYTEA,
-    number_downloads        INT         DEFAULT 0 NOT NULL,
+    number_downloads        BIGINT      DEFAULT 0 NOT NULL,
     file_size               BIGINT      NOT NULL,
     chunk_size              BIGINT      NOT NULL
 );
@@ -86,10 +86,10 @@ CREATE TABLE anonymousMessages
     nonce_filename          BYTEA       NOT NULL,
     file_id                 UUID        NOT NULL UNIQUE,
     header                  BYTEA       NOT NULL,
-    max_downloads           INT         NOT NULL,
-    lifetime                INT         NOT NULL,
+    max_downloads           BIGINT      NOT NULL,
+    lifetime                BIGINT      NOT NULL,
     creation_time           TIMESTAMPTZ NOT NULL,
-    number_downloads        INT DEFAULT 0 NOT NULL,
+    number_downloads        BIGINT DEFAULT 0 NOT NULL,
     file_size               BIGINT        NOT NULL,
     chunk_size              BIGINT        NOT NULL
 );

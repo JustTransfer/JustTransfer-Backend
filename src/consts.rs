@@ -1,10 +1,10 @@
+use aws_sdk_s3::types::ObjectLockLegalHoldStatus::On;
 use libsodium_sys::*;
 use once_cell::sync::OnceCell;
 use uuid::Uuid;
 
 
 /// Const for Server
-pub const URL: &str = "0.0.0.0:80";
 pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10 MiB
 pub const MAX_TIME_MARGIN: i64 = 1; // minute
 pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.01; // 1%
@@ -24,44 +24,11 @@ pub const DUMMY_ANONYMOUS_MESSAGE_ID: Uuid = Uuid::from_u128(0x12345678123456781
 
 
 /// Const for Session
-pub const SESSION_DURATION_HOURS: i64 = 72; // 3 days
-pub const FRESH_SESSION_DURATION_MINUTES: i64 = 1; // 5 minutes
 pub const AUTH_KEY_ANONYMOUS: &str = "anonymous_message_id";
 pub const AUTH_KEY_USER_ID: &str = "id";
 pub const AUTH_KEY_USERNAME: &str = "username";
 pub const AUTH_KEY_ROLE: &str = "role";
 pub const AUTH_KEY_CREATED_AT: &str = "created_at";
-
-
-/// Const for Reset Password
-pub const RESET_PASSWORD_TOKEN_DURATION_MINUTES: i64 = 15; // 15 minutes
-
-
-/// Const for Anonymous Transfer
-pub const MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT: i64 = 10;
-pub const MAX_LIFETIME_ANONYMOUS: i32 = 3; // days
-pub const MAX_FILE_SIZE_ANONYMOUS: i64 = 500 * 1024 * 1024; // 500 MiB
-pub const CHUNK_SIZE_ANONYMOUS: i64 = 10 * 1024 * 1024; // 10 MiB
-pub const MAX_DOWNLOADS_ANONYMOUS: i32 = 3;
-
-
-/// Const for Accounts
-pub const MAX_NUMBER_ACCOUNTS: i64 = 2;
-
-
-/// Const for Connected Transfer
-pub const MAX_NUMBER_CONNECTED_TRANSFERS_MONTH: i64 = 2;
-pub const CHUNK_SIZE_CONNECTED: i64 = 10 * 1024 * 1024; // 10 MiB
-pub const MAX_LIFETIME_CONNECTED: i32 = 7; // days
-pub const MAX_FILE_SIZE_CONNECTED: i64 = 1 * 1024 * 1024 * 1024; // 1 GiB
-pub const MAX_DOWNLOADS_CONNECTED: i32 = 5;
-
-
-/// Const for Premium Connected Transfer
-pub const MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH: i64 = 10;
-pub const MAX_LIFETIME_CONNECTED_PREMIUM: i32 = 30; // days
-pub const MAX_FILE_SIZE_CONNECTED_PREMIUM: i64 = 20 * 1024 * 1024 * 1024; // 20 GiB
-pub const MAX_DOWNLOADS_CONNECTED_PREMIUM: i32 = 10;
 
 
 /// Const for Validation
@@ -94,7 +61,8 @@ pub const SIGN_LEN_SIGNATURE: usize = crypto_sign_BYTES  as usize;
 
 
 /// Environment variable list with their corresponding OnceCell keys
-pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 12] = [
+pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 13] = [
+    ("BACKEND_URL", &BACKEND_URL),
     ("FRONTEND_URL", &FRONTEND_URL),
     ("POSTGRESQL_USERNAME", &POSTGRESQL_USERNAME),
     ("DATABASE_URL", &DATABASE_URL),
@@ -109,7 +77,33 @@ pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 12] = [
     ("SMTP_PASSWORD", &SMTP_PASSWORD),
 ];
 
+pub const ENV_CELLS_I64: [(&str, &'static OnceCell<i64>); 18] = [
+    ("SESSION_DURATION_MINUTES", &SESSION_DURATION_MINUTES),
+    ("FRESH_SESSION_DURATION_MINUTES", &FRESH_SESSION_DURATION_MINUTES),
+    ("RESET_PASSWORD_TOKEN_DURATION_MINUTES", &RESET_PASSWORD_TOKEN_DURATION_MINUTES),
+    ("MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT", &MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT),
+    ("MAX_LIFETIME_ANONYMOUS", &MAX_LIFETIME_ANONYMOUS),
+    ("MAX_FILE_SIZE_ANONYMOUS", &MAX_FILE_SIZE_ANONYMOUS),
+    ("CHUNK_SIZE_ANONYMOUS", &CHUNK_SIZE_ANONYMOUS),
+    ("MAX_DOWNLOADS_ANONYMOUS", &MAX_DOWNLOADS_ANONYMOUS),
+    ("MAX_NUMBER_ACCOUNTS", &MAX_NUMBER_ACCOUNTS),
+    ("MAX_NUMBER_CONNECTED_TRANSFERS_MONTH", &MAX_NUMBER_CONNECTED_TRANSFERS_MONTH),
+    ("CHUNK_SIZE_CONNECTED", &CHUNK_SIZE_CONNECTED),
+    ("MAX_LIFETIME_CONNECTED", &MAX_LIFETIME_CONNECTED),
+    ("MAX_FILE_SIZE_CONNECTED", &MAX_FILE_SIZE_CONNECTED),
+    ("MAX_DOWNLOADS_CONNECTED", &MAX_DOWNLOADS_CONNECTED),
+    ("MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH", &MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH),
+    ("MAX_LIFETIME_CONNECTED_PREMIUM", &MAX_LIFETIME_CONNECTED_PREMIUM),
+    ("MAX_FILE_SIZE_CONNECTED_PREMIUM", &MAX_FILE_SIZE_CONNECTED_PREMIUM),
+    ("MAX_DOWNLOADS_CONNECTED_PREMIUM", &MAX_DOWNLOADS_CONNECTED_PREMIUM),
+];
+
+///
 /// Env variables once_cell key
+///
+
+/// Server Config
+pub static BACKEND_URL: OnceCell<String> = OnceCell::new();
 pub static FRONTEND_URL: OnceCell<String> = OnceCell::new();
 pub static POSTGRESQL_USERNAME: OnceCell<String> = OnceCell::new();
 pub static DATABASE_URL: OnceCell<String> = OnceCell::new();
@@ -122,3 +116,35 @@ pub static SERVER_MODE: OnceCell<String> = OnceCell::new();
 pub static SMTP_HOST: OnceCell<String> = OnceCell::new();
 pub static SMTP_MAIL: OnceCell<String> = OnceCell::new();
 pub static SMTP_PASSWORD: OnceCell<String> = OnceCell::new();
+
+/// Session Config
+pub static SESSION_DURATION_MINUTES: OnceCell<i64> = OnceCell::new();
+pub static FRESH_SESSION_DURATION_MINUTES: OnceCell<i64> = OnceCell::new();
+pub static RESET_PASSWORD_TOKEN_DURATION_MINUTES: OnceCell<i64> = OnceCell::new();
+
+
+/// Const for Anonymous Transfer
+pub static MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT: OnceCell<i64> = OnceCell::new();
+pub static MAX_LIFETIME_ANONYMOUS: OnceCell<i64> = OnceCell::new();
+pub static MAX_FILE_SIZE_ANONYMOUS: OnceCell<i64> = OnceCell::new();
+pub static CHUNK_SIZE_ANONYMOUS: OnceCell<i64> = OnceCell::new();
+pub static MAX_DOWNLOADS_ANONYMOUS: OnceCell<i64> = OnceCell::new();
+
+
+/// Const for Accounts
+pub static MAX_NUMBER_ACCOUNTS: OnceCell<i64> = OnceCell::new();
+
+
+/// Const for Connected Transfer
+pub static MAX_NUMBER_CONNECTED_TRANSFERS_MONTH: OnceCell<i64> = OnceCell::new();
+pub static CHUNK_SIZE_CONNECTED: OnceCell<i64> = OnceCell::new();
+pub static MAX_LIFETIME_CONNECTED: OnceCell<i64> = OnceCell::new();
+pub static MAX_FILE_SIZE_CONNECTED: OnceCell<i64> = OnceCell::new();
+pub static MAX_DOWNLOADS_CONNECTED: OnceCell<i64> = OnceCell::new();
+
+
+/// Const for Premium Connected Transfer
+pub static MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH: OnceCell<i64> = OnceCell::new();
+pub static MAX_LIFETIME_CONNECTED_PREMIUM: OnceCell<i64> = OnceCell::new();
+pub static MAX_FILE_SIZE_CONNECTED_PREMIUM: OnceCell<i64> = OnceCell::new();
+pub static MAX_DOWNLOADS_CONNECTED_PREMIUM: OnceCell<i64> = OnceCell::new();
