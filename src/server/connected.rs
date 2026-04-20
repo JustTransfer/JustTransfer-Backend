@@ -21,6 +21,7 @@ use crate::schema::users::dsl::users;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
 use crate::schema::key_pairs::dsl::key_pairs;
+use crate::schema::messages::{kem_ciphertext_file, kem_ciphertext_filename};
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_connected};
 
 ///
@@ -786,9 +787,11 @@ pub async fn get_messages(
             receiver_user.field(users::username),
             messages::sender_key_id,
             messages::receiver_key_id,
+            messages::kem_ciphertext_filename,
             messages::cfilename,
             messages::nonce_filename,
             messages::file_id,
+            messages::kem_ciphertext_file,
             messages::max_downloads,
             messages::lifetime,
             messages::creation_time,
@@ -917,8 +920,10 @@ pub async fn send_message(
     //receiver: &str,
     sender_key_id_param: Uuid,
     receiver_key_id_param: Uuid,
+    kem_ciphertext_filename_param: Vec<u8>,
     filename_param: Vec<u8>,
     nonce_filename_param: Vec<u8>,
+    kem_ciphertext_file_param: Vec<u8>,
     max_downloads_param: i64,
     lifetime_param: i64,
     creation_time_param: chrono::DateTime<Utc>,
@@ -948,10 +953,12 @@ pub async fn send_message(
 
         sender_key_id: &sender_key_id_param,
         receiver_key_id: &receiver_key_id_param,
-
+        
+        kem_ciphertext_filename: &kem_ciphertext_filename_param,
         cfilename: &filename_param,
         nonce_filename: &nonce_filename_param,
         file_id: &file_id,
+        kem_ciphertext_file: &kem_ciphertext_file_param,
         max_downloads: &max_downloads_param,
         lifetime: &lifetime_param,
         creation_time: &creation_time_param,

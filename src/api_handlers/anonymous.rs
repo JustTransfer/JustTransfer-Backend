@@ -159,7 +159,6 @@ pub async fn anonymous_message_get_one_metadata(
             cfilename: URL_SAFE_NO_PAD.encode(message.cfilename),
             nonce_filename: URL_SAFE_NO_PAD.encode(message.nonce_filename),
             file_id: message.file_id,
-            header: URL_SAFE_NO_PAD.encode(message.header),
             max_downloads: message.max_downloads,
             lifetime: message.lifetime,
             creation_time: message.creation_time,
@@ -248,8 +247,6 @@ pub struct UploadAnonymousMessageFinish {
     cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    header: String,
     #[validate(custom(function = "validate_int_param_64"))]
     max_downloads: i64,
     #[validate(custom(function = "validate_int_param_64"))]
@@ -305,8 +302,6 @@ pub async fn upload_anonymous_message(
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
             .map_err(|_| ApiError::Base64)?,
         file_id,
-        URL_SAFE_NO_PAD.decode(&payload.header)
-            .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,

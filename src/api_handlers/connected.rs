@@ -663,9 +663,11 @@ pub async fn get_messages(
             receiver: m.receiver,
             sender_key_id: m.sender_key_id,
             receiver_key_id: m.receiver_key_id,
+            kem_ciphertext_filename: URL_SAFE_NO_PAD.encode(m.kem_ciphertext_filename),
             cfilename: URL_SAFE_NO_PAD.encode(m.cfilename),
             nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
             file_id: m.file_id,
+            kem_ciphertext_file: URL_SAFE_NO_PAD.encode(m.kem_ciphertext_file),
             max_downloads: m.max_downloads,
             lifetime: m.lifetime,
             creation_time: m.creation_time,
@@ -725,9 +727,13 @@ pub struct UploadMessage {
     // The type already validates that the provided input is valid
     receiver_key_id: Uuid,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    kem_ciphertext_filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    kem_ciphertext_file: String,
     #[validate(custom(function = "validate_int_param_64"))]
     max_downloads: i64,
     #[validate(custom(function = "validate_int_param_64"))]
@@ -763,9 +769,13 @@ pub async fn upload_message(
         &claims_session.username,
         payload.sender_key_id,
         payload.receiver_key_id,
+        URL_SAFE_NO_PAD.decode(&payload.kem_ciphertext_filename)
+            .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.kem_ciphertext_file)
             .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
         payload.lifetime,
