@@ -301,7 +301,6 @@ async fn generate_dummy_anonymous_transfer(
             cfilename: &vec![0; 16],
             nonce_filename: &vec![0; SYM_LEN_NONCE],
             file_id: &Uuid::new_v4(),
-            header: &vec![0; 16],
             max_downloads: &0,
             lifetime: &0,
             creation_time: &Utc::now(),

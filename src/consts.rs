@@ -41,23 +41,23 @@ pub const MAX_VALUE_INT_FILE_SIZE: i64 = 1000 * 1024 * 1024 * 1024; // 1000 GiB
 
 
 /// Const for sym encryption
-pub const SYM_KEY_LEN: usize = crypto_secretbox_KEYBYTES as usize;
-pub const SYM_LEN_NONCE: usize = crypto_secretbox_NONCEBYTES as usize;
-pub const SYM_LEN_MAC: usize = crypto_secretbox_MACBYTES as usize;
+pub const SYM_KEY_LEN: usize = crypto_aead_aegis256_KEYBYTES as usize;
+pub const SYM_LEN_NONCE: usize = crypto_aead_aegis256_NPUBBYTES as usize;
+pub const SYM_LEN_MAC: usize = crypto_aead_aegis256_ABYTES as usize;
 
 
 /// Consts for asym encryption
-pub const ENC_KEY_LEN_PUB: usize = crypto_box_PUBLICKEYBYTES as usize;
-pub const ENC_KEY_LEN_PRIV: usize = crypto_box_SECRETKEYBYTES as usize;
-pub const ENC_LEN_NONCE: usize = crypto_box_NONCEBYTES as usize;
-pub const ENC_LEN_MAC: usize = crypto_box_MACBYTES as usize;
+pub const ENC_KEY_LEN_PUB: usize = crypto_kem_PUBLICKEYBYTES as usize;
+pub const ENC_KEY_LEN_PRIV: usize = crypto_kem_SECRETKEYBYTES as usize;
+pub const ENC_LEN_NONCE: usize = crypto_aead_aegis256_NPUBBYTES as usize;
+pub const ENC_LEN_MAC: usize = crypto_aead_aegis256_ABYTES as usize;
 
 
 /// Consts for asym signing
 pub const SIGN_KEY_LEN_PUB: usize = crypto_sign_PUBLICKEYBYTES as usize;
 pub const SIGN_KEY_LEN_PRIV: usize = crypto_sign_SECRETKEYBYTES as usize;
-pub const SIGN_LEN_NONCE: usize = crypto_secretbox_NONCEBYTES as usize;
-pub const SIGN_LEN_SIGNATURE: usize = crypto_sign_BYTES  as usize;
+pub const SIGN_LEN_NONCE: usize = crypto_aead_aegis256_NPUBBYTES as usize;
+pub const SIGN_LEN_SIGNATURE: usize = crypto_aead_aegis256_ABYTES  as usize;
 
 
 /// Environment variable list with their corresponding OnceCell keys
