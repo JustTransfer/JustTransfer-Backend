@@ -171,6 +171,7 @@ pub async fn anonymous_get_message_metadata(
 
     let messages_get = anonymousmessages::table
         .filter(anonymousmessages::id.eq(id_param))
+        .filter(anonymousmessages::mac.is_not_null())
         .select((
             anonymousmessages::id,
             anonymousmessages::cfilename,
@@ -179,6 +180,7 @@ pub async fn anonymous_get_message_metadata(
             anonymousmessages::max_downloads,
             anonymousmessages::lifetime,
             anonymousmessages::creation_time,
+            anonymousmessages::mac,
             anonymousmessages::number_downloads,
             anonymousmessages::file_size,
             anonymousmessages::chunk_size,
@@ -427,6 +429,23 @@ pub async fn anonymous_send_message_end(
 
     // Check if the file size match the one store in DB
     delete_invalid_file_size_anonymous(pool, s3, &file_id_param).await?;
+
+    Ok(())
+}
+
+pub fn update_message_mac(
+    file_id_param: Uuid,
+    mac: Vec<u8>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+
+    use crate::schema::anonymousmessages;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+    diesel::update(anonymousmessages.filter(anonymousmessages::file_id.eq(file_id_param)))
+        .set(anonymousmessages::mac.eq(Some(mac)))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }

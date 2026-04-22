@@ -12,6 +12,7 @@ diesel::table! {
         max_downloads -> Int8,
         lifetime -> Int8,
         creation_time -> Timestamptz,
+        mac -> Nullable<Bytea>,
         number_downloads -> Int8,
         file_size -> Int8,
         chunk_size -> Int8,

@@ -90,6 +90,7 @@ CREATE TABLE anonymousMessages
     max_downloads           BIGINT      NOT NULL,
     lifetime                BIGINT      NOT NULL,
     creation_time           TIMESTAMPTZ NOT NULL,
+    mac                     BYTEA,
     number_downloads        BIGINT DEFAULT 0 NOT NULL,
     file_size               BIGINT        NOT NULL,
     chunk_size              BIGINT        NOT NULL

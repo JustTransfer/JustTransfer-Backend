@@ -162,6 +162,7 @@ pub async fn anonymous_message_get_one_metadata(
             max_downloads: message.max_downloads,
             lifetime: message.lifetime,
             creation_time: message.creation_time,
+            mac: URL_SAFE_NO_PAD.encode(message.mac.unwrap()),
             number_downloads: message.number_downloads,
             file_size: message.file_size,
             chunk_size: message.chunk_size,
@@ -332,6 +333,8 @@ pub struct UploadAnonymousMessageFinishMultipart {
     upload_id: String,
     #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     etags: Vec<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    mac: String,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -354,6 +357,13 @@ pub async fn upload_anonymous_message_finish_multipart(
         &state.s3,
     )
         .await?;
+
+    server::anonymous::update_message_mac(
+        file_id,
+        URL_SAFE_NO_PAD.decode(&payload.mac)
+            .map_err(|_| ApiError::Base64)?,
+        &state.db,
+    )?;
 
     Ok((StatusCode::OK, Json(())))
 }
