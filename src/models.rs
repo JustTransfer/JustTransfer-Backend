@@ -2,6 +2,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid};
+use crate::schema::messages::signature_metadata;
 
 ///
 /// Opaque settings
@@ -209,10 +210,11 @@ pub struct Message {
     pub max_downloads: i64,
     pub lifetime: i64,
     pub creation_time: chrono::DateTime<Utc>,
-    pub signature: Option<Vec<u8>>,
+    pub signature_metadata: Option<Vec<u8>>,
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
+    pub signature: Option<Vec<u8>>,
 }
 
 #[derive(Insertable)]
@@ -233,7 +235,6 @@ pub struct NewMessage<'a> {
     pub max_downloads: &'a i64,
     pub lifetime: &'a i64,
     pub creation_time: &'a chrono::DateTime<Utc>,
-    //pub signature: &'a Vec<u8>,
     pub number_downloads: &'a i64,
     pub file_size: &'a i64,
     pub chunk_size: &'a i64,
@@ -268,10 +269,11 @@ pub struct MessageWithUsernames {
     pub max_downloads: i64,
     pub lifetime: i64,
     pub creation_time: chrono::DateTime<Utc>,
-    pub signature: Option<Vec<u8>>,
+    pub signature_metadata: Option<Vec<u8>>,
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
+    pub signature: Option<Vec<u8>>,
 }
 
 #[derive(Queryable, Serialize)]
@@ -292,10 +294,11 @@ pub struct MessageWithUsernamesEncoded {
     pub max_downloads: i64,
     pub lifetime: i64,
     pub creation_time: chrono::DateTime<Utc>,
-    pub signature: String,
+    pub signature_metadata: String,
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
+    pub signature: String,
 }
 
 ///

@@ -16,6 +16,7 @@ use crate::api_handlers::auth::{Claims};
 use crate::consts::*;
 use crate::models::*;
 use crate::error::*;
+use crate::schema::messages::signature_metadata;
 
 ///
 /// Registration
@@ -671,10 +672,11 @@ pub async fn get_messages(
             max_downloads: m.max_downloads,
             lifetime: m.lifetime,
             creation_time: m.creation_time,
-            signature: URL_SAFE_NO_PAD.encode(m.signature.unwrap()), // Sever returns only messages with signature, so unwrap is safe
+            signature_metadata: URL_SAFE_NO_PAD.encode(m.signature_metadata.unwrap()), // Sever returns only messages with signature metadata, so unwrap is safe
             number_downloads: m.number_downloads,
             file_size: m.file_size,
             chunk_size: m.chunk_size,
+            signature: URL_SAFE_NO_PAD.encode(m.signature.unwrap()), // Sever returns only messages with signature, so unwrap is safe
         }
     }).collect();
 
@@ -780,8 +782,6 @@ pub async fn upload_message(
         payload.max_downloads,
         payload.lifetime,
         payload.creation_time,
-        //URL_SAFE_NO_PAD.decode(&payload.signature)
-        //    .map_err(|_| ApiError::Base64)?,
         payload.file_size,
         &state.db,
         &state.s3,
@@ -802,6 +802,8 @@ pub struct UploadMessageFinishMultipart {
     upload_id: String,
     #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     etags: Vec<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    signature_metadata: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     signature: String,
 }
@@ -829,6 +831,8 @@ pub async fn upload_message_finish_multipart(
 
     server::connected::update_message_signature(
         file_id,
+        URL_SAFE_NO_PAD.decode(&payload.signature_metadata)
+            .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.signature)
             .map_err(|_| ApiError::ServerError)?,
         &state.db,
