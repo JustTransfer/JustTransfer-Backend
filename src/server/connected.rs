@@ -1146,14 +1146,12 @@ pub fn update_message_signature(
     use crate::schema::messages;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-    
+
     diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
-        .set(messages::signature_metadata.eq(Some(signature_metadata_param)))
-        .execute(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
-    
-    diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
-        .set(messages::signature.eq(Some(signature_param)))
+        .set((
+            messages::signature_metadata.eq(signature_metadata_param),
+            messages::signature.eq(signature_param),
+        ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
