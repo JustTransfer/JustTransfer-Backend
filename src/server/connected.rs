@@ -780,6 +780,7 @@ pub async fn get_messages(
         .inner_join(sender_user.on(sender_key.field(key_pairs::owner_id).eq(sender_user.field(users::id))))
         .inner_join(receiver_user.on(receiver_key.field(key_pairs::owner_id).eq(receiver_user.field(users::id))))
         .filter(receiver_user.field(users::id).eq(user_id_param))
+        .filter(messages::signature_metadata.is_not_null())
         .filter(messages::signature.is_not_null())
         .select((
             messages::id,
@@ -795,10 +796,11 @@ pub async fn get_messages(
             messages::max_downloads,
             messages::lifetime,
             messages::creation_time,
-            messages::signature,
+            messages::signature_metadata,
             messages::number_downloads,
             messages::file_size,
             messages::chunk_size,
+            messages::signature,
         ))
         .order(messages::creation_time.desc())
         .load::<MessageWithUsernames>(&mut conn)?;
@@ -1136,6 +1138,7 @@ pub async fn send_message_finish_multipart(
 
 pub fn update_message_signature(
     file_id_param: Uuid,
+    signature_metadata_param: Vec<u8>,
     signature_param: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
@@ -1143,6 +1146,12 @@ pub fn update_message_signature(
     use crate::schema::messages;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+    
+    diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
+        .set(messages::signature_metadata.eq(Some(signature_metadata_param)))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+    
     diesel::update(messages.filter(messages::file_id.eq(file_id_param)))
         .set(messages::signature.eq(Some(signature_param)))
         .execute(&mut conn)
