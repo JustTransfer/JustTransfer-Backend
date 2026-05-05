@@ -34,7 +34,7 @@ pub struct RegisterUserStart {
 pub struct RegisterUserStartResult {
     result: String,
 }
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn register_user_start(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserStart>,
@@ -90,7 +90,7 @@ pub struct RegisterEndResult {
     keys: Vec<KeyPairsEncoded>,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn register_user_end(
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEnd>,
@@ -157,7 +157,7 @@ pub struct RegisterUserEndUpdate {
     keys: Vec<KeyPairsEncodedUpdate>
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn register_user_end_update(
     Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
@@ -221,7 +221,7 @@ pub async fn register_user_end_update(
 /// Verify Email
 ///
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn verify_email(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
@@ -245,7 +245,7 @@ pub struct ResetPasswordRequest {
     email: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn request_password_reset(
     State(state): State<AppState>,
     Json(payload): Json<ResetPasswordRequest>,
@@ -281,7 +281,7 @@ pub struct ResetPasswordEnd {
     pub_sign: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn finish_password_reset(
     Path(token): Path<Uuid>,
     State(state): State<AppState>,
@@ -357,7 +357,7 @@ pub struct LoginStartResult {
     result: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn login_user_start(
     State(state): State<AppState>,
     Json(payload): Json<LoginStart>,
@@ -399,7 +399,7 @@ pub struct LoginEndResult {
     keys: Vec<KeyPairsEncoded>,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn login_user_end(
     State(state): State<AppState>,
     session: Session,
@@ -468,7 +468,7 @@ pub async fn login_user_end(
     ))
 }
 
-#[instrument(err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn logout(
     session: Session,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -489,7 +489,7 @@ pub struct UserInfoResult {
     role: String,
     number_transfers: i64,
 }
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
 pub async fn get_user_info(
     Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
@@ -505,7 +505,7 @@ pub async fn get_user_info(
     })))
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
 pub async fn delete_user(
     Extension(claims_session): Extension<Claims>,
     Path(username): Path<String>,
@@ -551,7 +551,7 @@ pub struct AddKeyResult {
     keys: Vec<KeyPairsEncoded>,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn add_key(
     Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
@@ -653,7 +653,7 @@ pub struct GetMessageResult {
     messages: Vec<MessageWithUsernamesEncoded>,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn get_messages(
     Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
@@ -694,7 +694,7 @@ pub struct GetMessageSentResult {
     messages: Vec<MessageSentWithUsernames>,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn get_messages_sent(
     Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
@@ -711,7 +711,7 @@ pub struct GetOneMessageResult {
     download_url: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn get_one_message(
     Extension(claims_session): Extension<Claims>,
     Path(id): Path<Uuid>,
@@ -760,7 +760,7 @@ pub struct UploadMessageResult {
     chunk_size: i64,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
 pub async fn upload_message(
     Extension(claims_session): Extension<Claims>,
     State(state): State<AppState>,
@@ -814,7 +814,7 @@ pub struct UploadMessageFinishMultipart {
     signature: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, fields(user_id = %claims_session.id, file_id = %file_id), err(Debug))]
 pub async fn upload_message_finish_multipart(
     Path(file_id): Path<Uuid>,
     Extension(claims_session): Extension<Claims>,
@@ -851,7 +851,7 @@ pub async fn upload_message_finish_multipart(
 /// Delete Messages
 ///
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, fields(user_id = %claims_session.id, file_id = %id), err(Debug))]
 pub async fn delete_message(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
