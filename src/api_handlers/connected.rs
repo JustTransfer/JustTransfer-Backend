@@ -239,17 +239,23 @@ pub async fn verify_email(
 /// Password Reset
 ///
 
+#[derive(Deserialize, Validate, Debug)]
+pub struct ResetPasswordRequest {
+    #[validate(email)]
+    email: String,
+}
+
 #[instrument(skip(state), err(Debug))]
 pub async fn request_password_reset(
-    Path(email): Path<String>,
     State(state): State<AppState>,
+    Json(payload): Json<ResetPasswordRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    // Validate the email
-    validate_email(&email).map_err(|_| ApiError::InputValidation)?;
-
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+    
     server::connected::request_password_reset(
-        &*email,
+        &payload.email,
         &state.db,
         &state.mailer,
     )?;
