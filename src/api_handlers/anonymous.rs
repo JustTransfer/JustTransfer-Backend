@@ -75,7 +75,7 @@ pub struct AnonymousLoginStartResult {
     result: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn anonymous_message_login_start(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
@@ -112,7 +112,7 @@ pub struct AnonymousLoginEnd {
     client_login_finish_result: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn anonymous_message_login_end(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
@@ -144,7 +144,7 @@ pub struct AnonymousGetMessageResult {
     message: AnonymousMessageMetadataEncoded,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn anonymous_message_get_one_metadata(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
@@ -177,7 +177,7 @@ pub struct AnonymousGetMessageResultDownloadUrl {
     download_url: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn anonymous_message_get_download_url(
     Path(id): Path<Uuid>,
     State(state): State<AppState>,
@@ -208,7 +208,7 @@ pub struct AnonymousSendMessageResultStart {
     chunk_size: i64,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn anonymous_message_send_start(
     State(state): State<AppState>,
     Json(payload): Json<AnonymousSendMessageStart>,
@@ -266,7 +266,7 @@ pub struct UploadAnonymousMessageFinishResult {
     message_file_id: Uuid,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, err(Debug))]
 pub async fn upload_anonymous_message(
     State(state): State<AppState>,
     session: Session,
@@ -337,7 +337,7 @@ pub struct UploadAnonymousMessageFinishMultipart {
     mac: String,
 }
 
-#[instrument(skip(state), err(Debug))]
+#[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
 pub async fn upload_anonymous_message_finish_multipart(
     Path(file_id): Path<Uuid>,
     Extension(claims_session): Extension<Claims>,

@@ -2,7 +2,6 @@ use chrono::Utc;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid};
-use crate::schema::messages::signature_metadata;
 
 ///
 /// Opaque settings
