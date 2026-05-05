@@ -16,7 +16,6 @@ use crate::api_handlers::auth::{Claims};
 use crate::consts::*;
 use crate::models::*;
 use crate::error::*;
-use crate::schema::messages::signature_metadata;
 
 ///
 /// Registration

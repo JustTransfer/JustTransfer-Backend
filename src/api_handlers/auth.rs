@@ -6,7 +6,6 @@ use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::
 use uuid::Uuid;
 use chrono::Utc;
 use std::fmt;
-use tower::ServiceExt;
 use tracing::{info, instrument, warn};
 
 use crate::consts::*;

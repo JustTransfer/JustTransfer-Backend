@@ -1,4 +1,3 @@
-use aws_sdk_s3::types::ObjectLockLegalHoldStatus::On;
 use libsodium_sys::*;
 use once_cell::sync::OnceCell;
 use uuid::Uuid;

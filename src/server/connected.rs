@@ -21,7 +21,6 @@ use crate::schema::users::dsl::users;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
 use crate::schema::key_pairs::dsl::key_pairs;
-use crate::schema::messages::{kem_ciphertext_file, kem_ciphertext_filename};
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_connected};
 
 ///
@@ -655,7 +654,6 @@ pub fn add_key (
     key: NewKeyPairsDecoded,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<Vec<KeyPairs>, ServerError> {
-    use crate::schema::users;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -1082,7 +1080,6 @@ pub async fn send_message_finish_multipart(
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
     use crate::schema::messages;
-    use crate::schema::users;
     use crate::schema::key_pairs;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -1168,7 +1165,6 @@ async fn delete_invalid_messages_for_user(
     s3: &aws_sdk_s3::Client,
     user_id_param: Uuid,
 ) -> Result<(), ServerError> {
-    use crate::schema::users;
     use crate::schema::messages;
     use crate::schema::key_pairs;
 
