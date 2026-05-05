@@ -306,7 +306,8 @@ pub fn request_password_reset(
         let user = user_opt.unwrap();
 
         // Send password reset email
-        let url = format!( // add the username as fragment
+        let url = format!(
+            // Token in url and username in fragment
             "{}/reset-password/{}#{}",
             FRONTEND_URL.get().unwrap(),
             new_registration_token,
