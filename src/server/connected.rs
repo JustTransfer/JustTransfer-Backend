@@ -307,10 +307,11 @@ pub fn request_password_reset(
 
         // Send password reset email
         let url = format!(
-            "{}/reset-password/{}/{}",
+            // Token in url and username in fragment
+            "{}/reset-password/{}#{}",
             FRONTEND_URL.get().unwrap(),
             new_registration_token,
-            urlencoding::encode(user.username.as_str())
+            urlencoding::encode(&user.username)
         );
         server::mail::send_password_reset_email(
             user.email.as_str(),
