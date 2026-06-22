@@ -16,7 +16,7 @@ This project is under active development. API contracts and behavior may change.
 - Account registration and login flow (OPAQUE-based auth flow in server logic)
 - Session-based authentication and fresh-login checks for sensitive operations
 - Encrypted file metadata/message handling for connected and anonymous transfers
-- S3-compatible object storage support (tested with MinIO-style endpoints)
+- S3-compatible object storage support
 - PostgreSQL persistence with Diesel migrations
 - Email flows for verification and password reset
 - Background monthly quota reset task (`master` / `development` modes)
@@ -34,7 +34,7 @@ This project is under active development. API contracts and behavior may change.
 
 - Rust toolchain (stable)
 - PostgreSQL (or a running container)
-- S3-compatible object storage (for local dev: MinIO)
+- S3-compatible object storage (for local dev: RustFS)
 - `libsodium` development libraries
 
 Linux packages (Debian/Ubuntu):
@@ -57,13 +57,13 @@ Windows:
 cp .env.sample .env
 ```
 
-2) Start local PostgreSQL + MinIO
+2) Start local PostgreSQL + RustFS containers
 
 3) Update `.env` for host-run backend (typical local values):
 
 ```dotenv
 DATABASE_URL=postgres://postgres:postgres@localhost/just_transfer
-MINIO_URL=http://localhost:9000
+RUSTFS_URL=http://localhost:9000
 FRONTEND_URL=https://localhost
 ```
 
@@ -82,9 +82,9 @@ Required variables are loaded at startup from the process environment:
 - `FRONTEND_URL`
 - `POSTGRESQL_USERNAME`
 - `DATABASE_URL`
-- `MINIO_ROOT_USER`
-- `MINIO_ROOT_PASSWORD`
-- `MINIO_URL`
+- `RUSTFS_USER`
+- `RUSTFS_PASSWORD`
+- `RUSTFS_URL`
 - `S3_BUCKET_NAME`
 - `S3_BUCKET_NAME_ANONYMOUS`
 - `SERVER_MODE` (`master`, `slave`, or `development`)

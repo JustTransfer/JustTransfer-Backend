@@ -155,8 +155,8 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, ServerError> {
     // Init S3
     let client_config = Builder::new()
         .region(Region::new("eu-central-1"))
-        .credentials_provider(Credentials::new(MINIO_ROOT_USER.get().unwrap(), MINIO_ROOT_PASSWORD.get().unwrap(), None, None, "example"))
-        .endpoint_url(MINIO_URL.get().unwrap())
+        .credentials_provider(Credentials::new(RUSTFS_USER.get().unwrap(), RUSTFS_PASSWORD.get().unwrap(), None, None, "example"))
+        .endpoint_url(RUSTFS_URL.get().unwrap())
         .force_path_style(true)
         .behavior_version_latest()
         .build();

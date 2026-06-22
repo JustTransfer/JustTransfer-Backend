@@ -65,9 +65,9 @@ pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 13] = [
     ("FRONTEND_URL", &FRONTEND_URL),
     ("POSTGRESQL_USERNAME", &POSTGRESQL_USERNAME),
     ("DATABASE_URL", &DATABASE_URL),
-    ("MINIO_ROOT_USER", &MINIO_ROOT_USER),
-    ("MINIO_ROOT_PASSWORD", &MINIO_ROOT_PASSWORD),
-    ("MINIO_URL", &MINIO_URL),
+    ("RUSTFS_USER", &RUSTFS_USER),
+    ("RUSTFS_PASSWORD", &RUSTFS_PASSWORD),
+    ("RUSTFS_URL", &RUSTFS_URL),
     ("S3_BUCKET_NAME", &S3_BUCKET_NAME_CONNECTED),
     ("S3_BUCKET_NAME_ANONYMOUS", &S3_BUCKET_NAME_ANONYMOUS),
     ("SERVER_MODE", &SERVER_MODE),
@@ -108,9 +108,9 @@ pub static BACKEND_URL: OnceCell<String> = OnceCell::new();
 pub static FRONTEND_URL: OnceCell<String> = OnceCell::new();
 pub static POSTGRESQL_USERNAME: OnceCell<String> = OnceCell::new();
 pub static DATABASE_URL: OnceCell<String> = OnceCell::new();
-pub static MINIO_ROOT_USER: OnceCell<String> = OnceCell::new();
-pub static MINIO_ROOT_PASSWORD: OnceCell<String> = OnceCell::new();
-pub static MINIO_URL: OnceCell<String> = OnceCell::new();
+pub static RUSTFS_USER: OnceCell<String> = OnceCell::new();
+pub static RUSTFS_PASSWORD: OnceCell<String> = OnceCell::new();
+pub static RUSTFS_URL: OnceCell<String> = OnceCell::new();
 pub static S3_BUCKET_NAME_CONNECTED: OnceCell<String> = OnceCell::new();
 pub static S3_BUCKET_NAME_ANONYMOUS: OnceCell<String> = OnceCell::new();
 pub static SERVER_MODE: OnceCell<String> = OnceCell::new();
