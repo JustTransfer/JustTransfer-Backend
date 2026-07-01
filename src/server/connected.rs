@@ -7,7 +7,7 @@ use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use diesel::dsl::{sql, now as sql_now};
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
-use rand::rngs::OsRng;
+use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::*;
 use tracing::log::info;
 use uuid::Uuid;
