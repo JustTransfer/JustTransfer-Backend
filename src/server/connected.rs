@@ -7,7 +7,7 @@ use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use diesel::dsl::{sql, now as sql_now};
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
-use rand::rngs::OsRng;
+use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::*;
 use tracing::log::info;
 use uuid::Uuid;
@@ -101,7 +101,7 @@ pub fn registration_finish(
 
 
     // Create user and insert keys in one transaction
-    let transaction_result = conn.transaction::<_, ServerError, _>(|conn| {
+    let _transaction_result = conn.transaction::<_, ServerError, _>(|conn| {
         diesel::insert_into(users::table)
             .values(&new_user)
             .execute(conn)
@@ -580,7 +580,7 @@ pub fn delete_user(
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    let transaction_result = conn.transaction::<(), ServerError, _>(|conn| {
+    let _transaction_result = conn.transaction::<(), ServerError, _>(|conn| {
 
         // Delete all sent messages of the user
         diesel::delete(messages.filter(messages::sender_key_id.eq_any(

@@ -6,7 +6,7 @@ use diesel::{r2d2, OptionalExtension, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use rand::rngs::OsRng;
+use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::argon2::Argon2;
 use opaque_ke::{CipherSuite, ServerSetup};
 use tracing::{info, warn, error};

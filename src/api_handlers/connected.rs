@@ -7,7 +7,7 @@ use chrono::{ Utc };
 use opaque_ke::*;
 use uuid::Uuid;
 use validator::{Validate};
-use tracing::{info, instrument};
+use tracing::{instrument};
 
 use crate::{api_handlers, server};
 use crate::server::init::DefaultCipherSuite;
@@ -127,7 +127,7 @@ pub async fn register_user_end(
         .map_err(|_| ApiError::Base64)?;
 
     
-    let server_registration_finish = server::connected::registration_finish(
+    let _server_registration_finish = server::connected::registration_finish(
         req,
         &*payload.username,
         &*payload.email,

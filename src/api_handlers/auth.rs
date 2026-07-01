@@ -6,7 +6,7 @@ use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::
 use uuid::Uuid;
 use chrono::Utc;
 use std::fmt;
-use tracing::{info, instrument, warn};
+use tracing::{warn};
 
 use crate::consts::*;
 use crate::error::*;
@@ -204,7 +204,7 @@ pub async  fn require_fresh_login(
 ) -> Result<Response, StatusCode> {
 
     // Check if the user is connected
-    let user_id = session
+    let _user_id = session
         .get::<Uuid>(AUTH_KEY_USER_ID)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?

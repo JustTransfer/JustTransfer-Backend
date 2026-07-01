@@ -6,7 +6,7 @@ use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
 use diesel::sql_types::Timestamptz;
 use diesel::dsl::{sql, now as sql_now};
-use rand::rngs::OsRng;
+use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::*;
 use tracing::info;
 use uuid::Uuid;
