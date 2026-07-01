@@ -2,7 +2,7 @@ use aws_sdk_s3::Client;
 use diesel::{r2d2, PgConnection};
 use diesel::r2d2::ConnectionManager;
 use validator::{ValidationError, Validate};
-use crate::consts::{MAX_FILE_SIZE_ANONYMOUS, MAX_FILE_SIZE_CONNECTED, MAX_LENGTH_USERNAME, MAX_VALUE_INT, MAX_VALUE_INT_FILE_SIZE, MIN_LENGTH_USERNAME};
+use crate::consts::{MAX_FILE_SIZE_ANONYMOUS, MAX_LENGTH_USERNAME, MAX_VALUE_INT, MAX_VALUE_INT_FILE_SIZE, MIN_LENGTH_USERNAME};
 
 pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
