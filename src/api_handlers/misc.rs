@@ -64,8 +64,8 @@ pub fn validate_username(username: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::new("invalid_length"));
     }
 
-    // Allow only alphanumeric characters and underscores
-    if !username.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    // Allow only ASCII lowercase letters, digits, and underscores
+    if !username.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
         return Err(ValidationError::new("invalid_characters"));
     }
 
