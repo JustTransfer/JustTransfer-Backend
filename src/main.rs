@@ -44,8 +44,8 @@ async fn main() {
         .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::PUT])
         .allow_headers(Any);
 
-    let session_layer = api_handlers::auth::get_session_layer();
-    let anonymous_session_layer = api_handlers::auth::get_session_layer();
+    let session_layer = api_handlers::auth::get_session_layer("user_session");
+    let anonymous_session_layer = api_handlers::auth::get_session_layer("anonymous_session");
 
     // Public routes (no authentication required)
     let public_app = Router::new()

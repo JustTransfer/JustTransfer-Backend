@@ -120,10 +120,11 @@ impl Claims {
     }
 }
 
-pub fn get_session_layer() -> SessionManagerLayer<MemoryStore> {
+pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<MemoryStore> {
     // In-memory session store
     let session_store = MemoryStore::default();
     let session_layer = SessionManagerLayer::new(session_store)
+        .with_name(cookie_name)
         .with_secure(true)
         .with_expiry(Expiry::OnInactivity(Duration::minutes(*SESSION_DURATION_MINUTES.get().unwrap())));
 
