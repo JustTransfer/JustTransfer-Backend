@@ -151,8 +151,14 @@ pub struct AnonymousGetMessageResult {
 #[instrument(skip_all, err(Debug))]
 pub async fn anonymous_message_get_one_metadata(
     Path(id): Path<Uuid>,
+    Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
+
+    // Check that the path correspond to the id in session
+    if id != claims.id {
+        return Err(ApiError::Forbidden);
+    }
 
     let message = server::anonymous::anonymous_get_message_metadata(id, &state.db)
         .await?;
@@ -184,8 +190,14 @@ pub struct AnonymousGetMessageResultDownloadUrl {
 #[instrument(skip_all, err(Debug))]
 pub async fn anonymous_message_get_download_url(
     Path(id): Path<Uuid>,
+    Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
+
+    // Check that the path correspond to the id in session
+    if id != claims.id {
+        return Err(ApiError::Forbidden);
+    }
 
     let presigned_url = server::anonymous::anonymous_get_message(id, &state.db, &state.s3)
         .await?;
@@ -344,7 +356,7 @@ pub struct UploadAnonymousMessageFinishMultipart {
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
 pub async fn upload_anonymous_message_finish_multipart(
     Path(file_id): Path<Uuid>,
-    Extension(claims_session): Extension<Claims>,
+    Extension(claims): Extension<Claims>,
     State(state): State<AppState>,
     Json(payload): Json<UploadAnonymousMessageFinishMultipart>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -353,7 +365,7 @@ pub async fn upload_anonymous_message_finish_multipart(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     server::anonymous::anonymous_send_message_end(
-        claims_session.id,
+        claims.id,
         file_id,
         payload.upload_id,
         payload.etags,
