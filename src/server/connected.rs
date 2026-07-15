@@ -300,26 +300,34 @@ pub fn request_password_reset(
         .map_err(|_| ServerError::Internal)?;
 
 
-    // TODO timing attack possible here
-    if user_opt.is_some() {
-        let user = user_opt.unwrap();
+    let user_email = if let Some(user) = &user_opt {
+        user.email.as_str()
+    } else {
+        // Get the dummy email id to prevent user enumeration
+        &*DUMMY_EMAIL.get().unwrap().to_owned()
+    };
 
-        // Send password reset email
-        let url = format!(
-            // Token in url and username in fragment
-            "{}/reset-password/{}#{}",
-            FRONTEND_URL.get().unwrap(),
-            new_registration_token,
-            urlencoding::encode(&user.username)
-        );
-        server::mail::send_password_reset_email(
-            user.email.as_str(),
-            user.username.as_str(),
-            url.as_str(),
-            mailer,
-        )
-            .map_err(|_| ServerError::Internal)?;
-    }
+    let user_username = if let Some(user) = &user_opt {
+        user.username.as_str()
+    } else {
+        DUMMY_USERNAME
+    };
+
+    // Send password reset email
+    let url = format!(
+        // Token in url and username in fragment
+        "{}/reset-password/{}#{}",
+        FRONTEND_URL.get().unwrap(),
+        new_registration_token,
+        urlencoding::encode(&user_username)
+    );
+    server::mail::send_password_reset_email(
+        user_email,
+        user_username,
+        url.as_str(),
+        mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
