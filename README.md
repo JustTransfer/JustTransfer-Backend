@@ -91,6 +91,7 @@ Required variables are loaded at startup from the process environment:
 - `SMTP_HOST`
 - `SMTP_MAIL`
 - `SMTP_PASSWORD`
+- `DUMMY_EMAIL` (to avoid timing attacks)
 
 Use `.env.sample` as the baseline configuration.
 

@@ -252,7 +252,7 @@ async fn generate_dummy_user(
         let new_user = NewUser {
             id: &Uuid::new_v4(),
             username: &DUMMY_USERNAME.to_string(),
-            email: &DUMMY_EMAIL.to_string(),
+            email: &DUMMY_EMAIL.get().unwrap().to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
             role: &DUMMY_ROLE.to_string(),
             created_at: Utc::now(),
