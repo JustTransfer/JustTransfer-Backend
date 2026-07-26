@@ -9,7 +9,6 @@ CREATE TABLE opaque_settings
 CREATE TABLE users
 (
     id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    username                TEXT        NOT NULL UNIQUE,
     email                   TEXT        NOT NULL UNIQUE,
     password_file           BYTEA       NOT NULL,
     server_login            BYTEA,
@@ -41,6 +40,15 @@ CREATE TABLE key_pairs
     revoked_at              TIMESTAMPTZ
 );
 
+-- Table
+CREATE TABLE saved_transfers
+(
+    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id                UUID        NOT NULL REFERENCES users(id),
+    enc_transfer_id         BYTEA       NOT NULL,
+    enc_password            BYTEA       NOT NULL
+);
+
 -- Table reset_tokens
 CREATE TABLE reset_tokens
 (
@@ -50,33 +58,8 @@ CREATE TABLE reset_tokens
     expires_at              TIMESTAMPTZ NOT NULL
 );
 
--- Table messages
-CREATE TABLE messages
-(
-    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-
-    upload_id               TEXT        NOT NULL,
-
-    sender_key_id           UUID        NOT NULL REFERENCES key_pairs (id),
-    receiver_key_id         UUID        NOT NULL REFERENCES key_pairs (id),
-
-    kem_ciphertext_filename BYTEA       NOT NULL,
-    cfilename               BYTEA       NOT NULL,
-    nonce_filename          BYTEA       NOT NULL,
-    file_id                 UUID        NOT NULL UNIQUE,
-    kem_ciphertext_file     BYTEA       NOT NULL,
-    max_downloads           BIGINT      NOT NULL,
-    lifetime                BIGINT      NOT NULL,
-    creation_time           TIMESTAMPTZ NOT NULL,
-    signature_metadata      BYTEA,
-    number_downloads        BIGINT      DEFAULT 0 NOT NULL,
-    file_size               BIGINT      NOT NULL,
-    chunk_size              BIGINT      NOT NULL,
-    signature               BYTEA
-);
-
--- Table Anonymous messages
-CREATE TABLE anonymousMessages
+-- Table link_transfers
+CREATE TABLE link_transfers
 (
     id                      UUID        PRIMARY KEY,
 
@@ -84,6 +67,7 @@ CREATE TABLE anonymousMessages
 
     password_file           BYTEA       NOT NULL,
     server_login            BYTEA,
+    auth_key                BYTEA       NOT NULL,
 
     cfilename               BYTEA       NOT NULL,
     nonce_filename          BYTEA       NOT NULL,
@@ -94,5 +78,6 @@ CREATE TABLE anonymousMessages
     mac                     BYTEA,
     number_downloads        BIGINT DEFAULT 0 NOT NULL,
     file_size               BIGINT        NOT NULL,
-    chunk_size              BIGINT        NOT NULL
+    chunk_size              BIGINT        NOT NULL,
+    signature               BYTEA
 );

@@ -16,8 +16,7 @@ use crate::{api_handlers, server};
 use crate::consts::*;
 use crate::error::ServerError;
 use crate::models::*;
-use crate::schema::messages::dsl::messages;
-use crate::schema::anonymousmessages::dsl::anonymousmessages;
+use crate::schema::link_transfers::dsl::link_transfers;
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -73,8 +72,7 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
     let state = api_handlers::misc::AppState {
         db: db_pool.clone(),
         s3: s3_client.clone(),
-        bucket_name: S3_BUCKET_NAME_CONNECTED.get().unwrap().clone(),
-        bucket_name_anonymous: S3_BUCKET_NAME_ANONYMOUS.get().unwrap().clone(),
+        bucket_name: S3_BUCKET_NAME.get().unwrap().clone(),
         mailer,
     };
 
@@ -193,8 +191,7 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, ServerError> {
 
     // Define the required buckets
     let required_buckets = [
-        S3_BUCKET_NAME_CONNECTED.get().unwrap(),
-        S3_BUCKET_NAME_ANONYMOUS.get().unwrap(),
+        S3_BUCKET_NAME.get().unwrap(),
     ];
 
     // Create any missing buckets
@@ -244,14 +241,13 @@ async fn generate_dummy_user(
 
     // Check if the dummy user already exists
     let existing_user = users::table
-        .filter(users::username.eq(DUMMY_USERNAME))
+        .filter(users::email.eq(DUMMY_EMAIL.get().unwrap().to_string()))
         .first::<User>(&mut conn)
         .optional()?;
 
     if existing_user.is_none() {
         let new_user = NewUser {
             id: &Uuid::new_v4(),
-            username: &DUMMY_USERNAME.to_string(),
             email: &DUMMY_EMAIL.get().unwrap().to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
             role: &DUMMY_ROLE.to_string(),
@@ -269,7 +265,7 @@ async fn generate_dummy_user(
 
 
     let dummy_user_id = users::table
-        .filter(users::username.eq(DUMMY_USERNAME))
+        .filter(users::email.eq(DUMMY_EMAIL.get().unwrap().to_string()))
         .select(users::id)
         .first::<Uuid>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
@@ -284,17 +280,17 @@ async fn generate_dummy_anonymous_transfer(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>
 ) -> Result<(), ServerError> {
 
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the dummy anonymous transfer already exists
-    let existing_message = anonymousmessages::table
-        .filter(anonymousmessages::id.eq(DUMMY_ANONYMOUS_MESSAGE_ID))
-        .first::<AnonymousMessage>(&mut conn)
+    let existing_message = link_transfers::table
+        .filter(link_transfers::id.eq(DUMMY_ANONYMOUS_MESSAGE_ID))
+        .first::<LinkTransfer>(&mut conn)
         .optional()?;
 
     if existing_message.is_none() {
-        let new_message = NewAnonymousMessage {
+        let new_message = NewLinkTransfer {
             id: &DUMMY_ANONYMOUS_MESSAGE_ID,
             upload_id: &"".to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
@@ -309,9 +305,9 @@ async fn generate_dummy_anonymous_transfer(
             chunk_size: &CHUNK_SIZE_ANONYMOUS.get().unwrap(),
         };
 
-        diesel::insert_into(anonymousmessages::table)
+        diesel::insert_into(link_transfers::table)
             .values(&new_message)
-            .returning(AnonymousMessage::as_returning())
+            .returning(LinkTransfer::as_returning())
             .get_result(&mut conn)
             .map_err(|_| ServerError::Internal)?;
     }
@@ -319,8 +315,7 @@ async fn generate_dummy_anonymous_transfer(
     Ok(())
 }
 
-
-pub async fn delete_invalid_file_size_connected (
+pub async fn delete_invalid_file_size (
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
     file_id_param: &Uuid,
@@ -329,7 +324,7 @@ pub async fn delete_invalid_file_size_connected (
     // Get the file size from S3
     let head_object_output = s3
         .head_object()
-        .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
+        .bucket(S3_BUCKET_NAME.get().unwrap())
         .key(file_id_param.to_string())
         .send()
         .await
@@ -339,64 +334,12 @@ pub async fn delete_invalid_file_size_connected (
         .ok_or(ServerError::Internal)?;
 
     // Get the file size from DB
-    use crate::schema::messages;
+    use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    let message = messages
-        .filter(messages::file_id.eq(file_id_param))
-        .first::<Message>(&mut conn)
-        .optional()?
-        .ok_or(ServerError::Internal)?;
-
-    let diff = (uploaded_file_size - message.file_size).abs();
-    let tolerance = message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT;
-
-    // Check if the uploaded file size matches the expected file size with tolerance 1%
-    if diff as f64 > tolerance {
-        // Delete the uploaded file from S3
-        s3.delete_object()
-            .bucket(S3_BUCKET_NAME_CONNECTED.get().unwrap())
-            .key(file_id_param.to_string())
-            .send()
-            .await
-            .map_err(|_| ServerError::Internal)?;
-
-        // Delete the message from DB
-        diesel::delete(messages.filter(messages::id.eq(message.id)))
-            .execute(&mut conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        return Err(ServerError::Internal);
-    }
-
-    Ok(())
-}
-
-pub async fn delete_invalid_file_size_anonymous (
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
-    file_id_param: &Uuid,
-) -> Result<(), ServerError> {
-
-    // Get the file size from S3
-    let head_object_output = s3
-        .head_object()
-        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
-        .key(file_id_param.to_string())
-        .send()
-        .await
-        .map_err(|_| ServerError::Internal)?;
-
-    let uploaded_file_size = head_object_output.content_length()
-        .ok_or(ServerError::Internal)?;
-
-    // Get the file size from DB
-    use crate::schema::anonymousmessages;
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    let anonymous_message = anonymousmessages
-        .filter(anonymousmessages::file_id.eq(file_id_param))
-        .first::<AnonymousMessage>(&mut conn)
+    let anonymous_message = link_transfers
+        .filter(link_transfers::file_id.eq(file_id_param))
+        .first::<LinkTransfer>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
 
@@ -407,14 +350,14 @@ pub async fn delete_invalid_file_size_anonymous (
     if diff as f64 > tolerance {
         // Delete the uploaded file from S3
         s3.delete_object()
-            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+            .bucket(S3_BUCKET_NAME.get().unwrap())
             .key(file_id_param.to_string())
             .send()
             .await
             .map_err(|_| ServerError::Internal)?;
 
         // Delete the message from DB
-        diesel::delete(anonymousmessages.filter(anonymousmessages::id.eq(anonymous_message.id)))
+        diesel::delete(link_transfers.filter(link_transfers::id.eq(anonymous_message.id)))
             .execute(&mut conn)
             .map_err(|_| ServerError::Internal)?;
 

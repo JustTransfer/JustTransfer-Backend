@@ -12,11 +12,11 @@ use tracing::info;
 use uuid::Uuid;
 use crate::api_handlers::auth::Role;
 use crate::consts::*;
-use crate::models::{AnonymousMessage, AnonymousMessageMetadata, NewAnonymousMessage};
-use crate::schema::anonymousmessages::dsl::anonymousmessages;
+use crate::models::{LinkTransfer, LinkTransferMetadata, NewLinkTransfer};
+use crate::schema::link_transfers::dsl::link_transfers;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
-use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size_anonymous};
+use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size};
 
 ///
 /// Anonymous Messages
@@ -26,28 +26,28 @@ async fn delete_invalid_anonymous_message(
     s3: &aws_sdk_s3::Client,
     id_param: Uuid,
 ) -> Result<(), ServerError> {
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the message is expired or has reached max downloads
-    let message_opt = anonymousmessages
-        .filter(anonymousmessages::id.eq(id_param))
-        .filter(anonymousmessages::number_downloads.ge(anonymousmessages::max_downloads).or(
+    let message_opt = link_transfers
+        .filter(link_transfers::id.eq(id_param))
+        .filter(link_transfers::number_downloads.ge(link_transfers::max_downloads).or(
             sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
         ))
-        .first::<AnonymousMessage>(&mut conn)
+        .first::<LinkTransfer>(&mut conn)
         .optional()?;
 
     if let Some(message) = message_opt {
 
         // Delete from DB
-        diesel::delete(anonymousmessages.filter(anonymousmessages::id.eq(id_param)))
+        diesel::delete(link_transfers.filter(link_transfers::id.eq(id_param)))
             .execute(&mut conn)?;
 
         // Delete file from S3
         s3.delete_object()
-            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+            .bucket(S3_BUCKET_NAME.get().unwrap())
             .key(message.file_id.to_string())
             .send()
             .await
@@ -69,15 +69,15 @@ pub async fn login_start_anonymous(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<CredentialResponse<DefaultCipherSuite>, ServerError> {
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
     delete_invalid_anonymous_message(pool, s3, id_param).await?;
 
-    let annonymous_message_opt = anonymousmessages::table
-        .filter(anonymousmessages::id.eq(id_param))
-        .first::<AnonymousMessage>(&mut conn)
+    let annonymous_message_opt = link_transfers::table
+        .filter(link_transfers::id.eq(id_param))
+        .first::<LinkTransfer>(&mut conn)
         .optional()?;
 
     let password_file_param = if let Some(annonymous_message) = &annonymous_message_opt {
@@ -114,8 +114,8 @@ pub async fn login_start_anonymous(
         DUMMY_ANONYMOUS_MESSAGE_ID
     };
 
-    diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(anonymous_message_id)))
-        .set(anonymousmessages::server_login.eq(Some(
+    diesel::update(link_transfers::table.filter(link_transfers::id.eq(anonymous_message_id)))
+        .set(link_transfers::server_login.eq(Some(
             server_login_start_result.state.serialize().to_vec(),
         )))
         .execute(&mut conn)
@@ -129,23 +129,23 @@ pub async fn login_end_anonymous(
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Load the ServerLogin state from the DB
     // Transaction to get the server login state and delete it from the DB
     let transaction_result = conn.transaction::<ServerLogin<DefaultCipherSuite>, ServerError, _>(|conn| {
-        let server_login_state_bytes = anonymousmessages::table
-            .filter(anonymousmessages::id.eq(id_param))
-            .select(anonymousmessages::server_login)
+        let server_login_state_bytes = link_transfers::table
+            .filter(link_transfers::id.eq(id_param))
+            .select(link_transfers::server_login)
             .first::<Option<Vec<u8>>>(conn)
             .optional()?
             .ok_or(ServerError::Internal)?
             .ok_or(ServerError::Internal)?;
 
-        diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_param)))
-            .set(anonymousmessages::server_login.eq::<Option<Vec<u8>>>(None))
+        diesel::update(link_transfers::table.filter(link_transfers::id.eq(id_param)))
+            .set(link_transfers::server_login.eq::<Option<Vec<u8>>>(None))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
@@ -164,28 +164,28 @@ pub async fn login_end_anonymous(
 pub async fn anonymous_get_message_metadata(
     id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<AnonymousMessageMetadata, ServerError> {
-    use crate::schema::anonymousmessages;
+) -> Result<LinkTransferMetadata, ServerError> {
+    use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    let messages_get = anonymousmessages::table
-        .filter(anonymousmessages::id.eq(id_param))
-        .filter(anonymousmessages::mac.is_not_null())
+    let messages_get = link_transfers::table
+        .filter(link_transfers::id.eq(id_param))
+        .filter(link_transfers::mac.is_not_null())
         .select((
-            anonymousmessages::id,
-            anonymousmessages::cfilename,
-            anonymousmessages::nonce_filename,
-            anonymousmessages::file_id,
-            anonymousmessages::max_downloads,
-            anonymousmessages::lifetime,
-            anonymousmessages::creation_time,
-            anonymousmessages::mac,
-            anonymousmessages::number_downloads,
-            anonymousmessages::file_size,
-            anonymousmessages::chunk_size,
+            link_transfers::id,
+            link_transfers::cfilename,
+            link_transfers::nonce_filename,
+            link_transfers::file_id,
+            link_transfers::max_downloads,
+            link_transfers::lifetime,
+            link_transfers::creation_time,
+            link_transfers::mac,
+            link_transfers::number_downloads,
+            link_transfers::file_size,
+            link_transfers::chunk_size,
         ))
-        .first::<AnonymousMessageMetadata>(&mut conn)
+        .first::<LinkTransferMetadata>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
 
@@ -197,7 +197,7 @@ pub async fn anonymous_get_message(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<String, ServerError> {
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -205,18 +205,18 @@ pub async fn anonymous_get_message(
     delete_invalid_anonymous_message(pool, s3, id_param).await?;
 
 
-    let transaction_result = conn.transaction::<AnonymousMessage, ServerError, _>(|conn| {
+    let transaction_result = conn.transaction::<LinkTransfer, ServerError, _>(|conn| {
 
         // Get the message
-        let anonymousmessage = anonymousmessages
-            .filter(anonymousmessages::id.eq(id_param))
-            .first::<AnonymousMessage>(conn)
+        let anonymousmessage = link_transfers
+            .filter(link_transfers::id.eq(id_param))
+            .first::<LinkTransfer>(conn)
             .optional()?
             .ok_or(ServerError::Internal)?;
 
         // Increment the message download count
-        diesel::update(anonymousmessages.filter(anonymousmessages::id.eq(anonymousmessage.id)))
-            .set(anonymousmessages::number_downloads.eq(anonymousmessages::number_downloads + 1))
+        diesel::update(link_transfers.filter(link_transfers::id.eq(anonymousmessage.id)))
+            .set(link_transfers::number_downloads.eq(link_transfers::number_downloads + 1))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
@@ -227,7 +227,7 @@ pub async fn anonymous_get_message(
     // Generate pre-signed S3 download URL
     let presigned_url = s3
         .get_object()
-        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .bucket(S3_BUCKET_NAME.get().unwrap())
         .key(transaction_result.file_id.to_string())
         .presigned(
             PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
@@ -277,14 +277,14 @@ pub async fn anonymous_send_message(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(Vec<String>, String), ServerError> {
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
-    let new_message = NewAnonymousMessage {
+    let new_message = NewLinkTransfer {
         id: &id_transfer,
         upload_id: &"".to_string(), // Empty string to be updated after
         password_file: &password_file_param.serialize().to_vec(),
@@ -302,7 +302,7 @@ pub async fn anonymous_send_message(
     conn.transaction::<_, ServerError, _>(|conn| {
 
         // Count the number of anonymous messages
-        let sent_messages_count: i64 = anonymousmessages::table
+        let sent_messages_count: i64 = link_transfers::table
             .count()
             .get_result(conn)
             .map_err(|_| ServerError::Internal)?;
@@ -317,7 +317,7 @@ pub async fn anonymous_send_message(
         }
 
         // Insert the new message into the database
-        diesel::insert_into(anonymousmessages::table)
+        diesel::insert_into(link_transfers::table)
             .values(&new_message)
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
@@ -331,7 +331,7 @@ pub async fn anonymous_send_message(
 
     // Create multipart upload
     let create_multipart_upload_output = s3.create_multipart_upload()
-        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .bucket(S3_BUCKET_NAME.get().unwrap())
         .key(file_id_param.to_string())
         .send()
         .await
@@ -342,8 +342,8 @@ pub async fn anonymous_send_message(
         .ok_or(ServerError::Internal)?;
     
     // Put the upload_id in the DB
-    diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(id_transfer)))
-        .set(anonymousmessages::upload_id.eq(upload_id))
+    diesel::update(link_transfers::table.filter(link_transfers::id.eq(id_transfer)))
+        .set(link_transfers::upload_id.eq(upload_id))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -352,7 +352,7 @@ pub async fn anonymous_send_message(
 
     for part_number in 1..=num_chunks {
         let upload_url = s3.upload_part()
-            .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+            .bucket(S3_BUCKET_NAME.get().unwrap())
             .key(file_id_param.to_string())
             .part_number(part_number)
             .upload_id(upload_id)
@@ -379,14 +379,14 @@ pub async fn anonymous_send_message_end(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if upload_id and file_id correspond for the message id in session
-    let message = anonymousmessages::table
-        .filter(anonymousmessages::id.eq(message_id))
-        .first::<AnonymousMessage>(&mut conn)
+    let message = link_transfers::table
+        .filter(link_transfers::id.eq(message_id))
+        .first::<LinkTransfer>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
 
@@ -399,8 +399,8 @@ pub async fn anonymous_send_message_end(
     }
 
     // Set the upload_id to empty string
-    diesel::update(anonymousmessages::table.filter(anonymousmessages::id.eq(message_id)))
-        .set(anonymousmessages::upload_id.eq("")) // Set to empty string to prevent reuse
+    diesel::update(link_transfers::table.filter(link_transfers::id.eq(message_id)))
+        .set(link_transfers::upload_id.eq("")) // Set to empty string to prevent reuse
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -419,7 +419,7 @@ pub async fn anonymous_send_message_end(
 
     let _complete_multipart_upload_res = s3
         .complete_multipart_upload()
-        .bucket(S3_BUCKET_NAME_ANONYMOUS.get().unwrap())
+        .bucket(S3_BUCKET_NAME.get().unwrap())
         .key(file_id_param.to_string())
         .multipart_upload(completed_multipart_upload)
         .upload_id(upload_id_param)
@@ -428,7 +428,7 @@ pub async fn anonymous_send_message_end(
         .map_err(|_| ServerError::Internal)?;
 
     // Check if the file size match the one store in DB
-    delete_invalid_file_size_anonymous(pool, s3, &file_id_param).await?;
+    delete_invalid_file_size(pool, s3, &file_id_param).await?;
 
     Ok(())
 }
@@ -439,11 +439,11 @@ pub fn update_message_mac(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
 
-    use crate::schema::anonymousmessages;
+    use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-    diesel::update(anonymousmessages.filter(anonymousmessages::file_id.eq(file_id_param)))
-        .set(anonymousmessages::mac.eq(Some(mac)))
+    diesel::update(link_transfers.filter(link_transfers::file_id.eq(file_id_param)))
+        .set(link_transfers::mac.eq(Some(mac)))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 

@@ -136,7 +136,6 @@ pub struct NewKeyPairsDecoded {
 #[diesel(belongs_to(User, foreign_key = role))]
 pub struct User {
     pub id: Uuid,
-    pub username: String,
     pub email: String,
     pub password_file: Vec<u8>,
     pub server_login: Option<Vec<u8>>,
@@ -150,7 +149,6 @@ pub struct User {
 
 pub struct InfoUser {
     pub id: Uuid,
-    pub username: String,
     pub email: String,
     pub role: String,
     pub number_transfers: i64,
@@ -160,7 +158,6 @@ pub struct InfoUser {
 #[diesel(table_name = crate::schema::users)]
 pub struct NewUser<'a> {
     pub id: &'a Uuid,
-    pub username: &'a String,
     pub email: &'a String,
     pub password_file: &'a Vec<u8>,
     pub role: &'a String,
@@ -186,131 +183,17 @@ pub struct ResetToken {
 }
 
 ///
-/// Messages
-///
-#[derive(Queryable, Selectable, Identifiable, Insertable)]
-#[diesel(table_name = crate::schema::messages)]
-#[diesel(check_for_backend(diesel::pg::Pg))]
-#[diesel(belongs_to(KeyPairs, foreign_key = sender_key_id))]
-#[diesel(belongs_to(KeyPairs, foreign_key = receiver_key_id))]
-pub struct Message {
-    pub id: Uuid,
-
-    pub upload_id: String,
-
-    pub sender_key_id: Uuid,
-    pub receiver_key_id: Uuid,
-
-    pub kem_ciphertext_filename: Vec<u8>,
-    pub cfilename: Vec<u8>,
-    pub nonce_filename: Vec<u8>,
-    pub file_id: Uuid,
-    pub kem_ciphertext_file: Vec<u8>,
-    pub max_downloads: i64,
-    pub lifetime: i64,
-    pub creation_time: chrono::DateTime<Utc>,
-    pub signature_metadata: Option<Vec<u8>>,
-    pub number_downloads: i64,
-    pub file_size: i64,
-    pub chunk_size: i64,
-    pub signature: Option<Vec<u8>>,
-}
-
-#[derive(Insertable)]
-#[diesel(table_name = crate::schema::messages)]
-pub struct NewMessage<'a> {
-    pub id: &'a Uuid,
-
-    pub upload_id: &'a String,
-
-    pub sender_key_id: &'a Uuid,
-    pub receiver_key_id: &'a Uuid,
-
-    pub kem_ciphertext_filename: &'a Vec<u8>,
-    pub cfilename: &'a Vec<u8>,
-    pub nonce_filename: &'a Vec<u8>,
-    pub file_id: &'a Uuid,
-    pub kem_ciphertext_file: &'a Vec<u8>,
-    pub max_downloads: &'a i64,
-    pub lifetime: &'a i64,
-    pub creation_time: &'a chrono::DateTime<Utc>,
-    pub number_downloads: &'a i64,
-    pub file_size: &'a i64,
-    pub chunk_size: &'a i64,
-}
-
-#[derive(Queryable, Serialize)]
-pub struct MessageSentWithUsernames {
-    pub id: Uuid,
-    pub sender: String,
-    pub receiver: String,
-    pub max_downloads: i64,
-    pub lifetime: i64,
-    pub creation_time: chrono::DateTime<Utc>,
-    pub file_size: i64,
-}
-
-#[derive(Queryable, Serialize)]
-pub struct MessageWithUsernames {
-    pub id: Uuid,
-
-    pub sender: String,
-    pub receiver: String,
-
-    pub sender_key_id: Uuid,
-    pub receiver_key_id: Uuid,
-
-    pub kem_ciphertext_filename: Vec<u8>,
-    pub cfilename: Vec<u8>,
-    pub nonce_filename: Vec<u8>,
-    pub file_id: Uuid,
-    pub kem_ciphertext_file: Vec<u8>,
-    pub max_downloads: i64,
-    pub lifetime: i64,
-    pub creation_time: chrono::DateTime<Utc>,
-    pub signature_metadata: Option<Vec<u8>>,
-    pub number_downloads: i64,
-    pub file_size: i64,
-    pub chunk_size: i64,
-    pub signature: Option<Vec<u8>>,
-}
-
-#[derive(Queryable, Serialize)]
-pub struct MessageWithUsernamesEncoded {
-    pub id: Uuid,
-
-    pub sender: String,
-    pub receiver: String,
-
-    pub sender_key_id: Uuid,
-    pub receiver_key_id: Uuid,
-
-    pub kem_ciphertext_filename: String,
-    pub cfilename: String,
-    pub nonce_filename: String,
-    pub file_id: Uuid,
-    pub kem_ciphertext_file: String,
-    pub max_downloads: i64,
-    pub lifetime: i64,
-    pub creation_time: chrono::DateTime<Utc>,
-    pub signature_metadata: String,
-    pub number_downloads: i64,
-    pub file_size: i64,
-    pub chunk_size: i64,
-    pub signature: String,
-}
-
-///
-/// Anonymous messages
+/// Link transfer
 ///
 #[derive(Queryable, Selectable, Identifiable)]
-#[diesel(table_name = crate::schema::anonymousmessages)]
+#[diesel(table_name = crate::schema::link_transfers)]
 #[diesel(check_for_backend(diesel::pg::Pg))]
-pub struct AnonymousMessage {
+pub struct LinkTransfer {
     pub id: Uuid,
     pub upload_id: String,
     pub password_file: Vec<u8>,
     pub server_login: Option<Vec<u8>>,
+    pub auth_key: Vec<u8>,
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
@@ -321,11 +204,12 @@ pub struct AnonymousMessage {
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
+    pub signature: Option<Vec<u8>>,
 }
 
 #[derive(Insertable)]
-#[diesel(table_name = crate::schema::anonymousmessages)]
-pub struct NewAnonymousMessage<'a> {
+#[diesel(table_name = crate::schema::link_transfers)]
+pub struct NewLinkTransfer<'a> {
     pub id: &'a Uuid,
     pub upload_id: &'a String,
     pub password_file: &'a Vec<u8>,
@@ -341,7 +225,7 @@ pub struct NewAnonymousMessage<'a> {
 }
 
 #[derive(Queryable, Serialize, Clone)]
-pub struct AnonymousMessageMetadata {
+pub struct LinkTransferMetadata {
     pub id: Uuid,
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
@@ -356,7 +240,7 @@ pub struct AnonymousMessageMetadata {
 }
 
 #[derive(Queryable, Serialize, Clone)]
-pub struct AnonymousMessageMetadataEncoded {
+pub struct LinkTransferMetadataEncoded {
     pub id: Uuid,
     pub cfilename: String,
     pub nonce_filename: String,

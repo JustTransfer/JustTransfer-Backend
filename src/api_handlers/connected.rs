@@ -23,8 +23,8 @@ use crate::error::*;
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserStart {
-    #[validate(custom(function = "validate_username"))]
-    username: String,
+    #[validate(email)]
+    email: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_start: String,
 }
@@ -50,7 +50,7 @@ pub async fn register_user_start(
         .map_err(|_| ApiError::Opaque)?;
 
     let server_registration_start_result =
-        server::connected::registration_start(&*payload.username, req, &state.db)?;
+        server::connected::registration_start(&*payload.email, req, &state.db)?;
 
     Ok((
         StatusCode::OK,
@@ -63,8 +63,6 @@ pub async fn register_user_start(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct RegisterUserEnd {
-    #[validate(custom(function = "validate_username"))]
-    username: String,
     #[validate(email)]
     email: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
@@ -129,7 +127,6 @@ pub async fn register_user_end(
     
     let _server_registration_finish = server::connected::registration_finish(
         req,
-        &*payload.username,
         &*payload.email,
         cpriv_enc,
         nonce_priv_enc,
@@ -188,7 +185,7 @@ pub async fn register_user_end_update(
     
     let keys = server::connected::registration_finish_update(
         client_registration_finish,
-        &*claims_session.username,
+        &*claims_session.email,
         decoded_keys.map_err(|_| ApiError::ServerError)?,
         &state.db,
         &state.mailer,
@@ -345,8 +342,8 @@ pub async fn finish_password_reset(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct LoginStart {
-    #[validate(custom(function = "validate_username"))]
-    username: String,
+    #[validate(email)]
+    email: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_start: String,
 }
@@ -371,7 +368,7 @@ pub async fn login_user_start(
         .map_err(|_| ApiError::Opaque)?;
     
     let server_login_start = server::connected::login_start(
-        &*payload.username,
+        &*payload.email,
         req,
         &state.db,
     )?;
@@ -386,8 +383,8 @@ pub async fn login_user_start(
 
 #[derive(Deserialize, Validate, Debug)]
 pub struct LoginEnd {
-    #[validate(custom(function = "validate_username"))]
-    username: String,
+    #[validate(email)]
+    email: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_login_finish_result: String,
 }
@@ -415,13 +412,13 @@ pub async fn login_user_end(
         .map_err(|_| ApiError::Opaque)?;
     
     let server_login_finish = server::connected::login_finish(
-        &*payload.username,
+        &*payload.email,
         req,
         &state.db,
     )?;
 
     // Get the user role from the database
-    let user = server::connected::get_user(&*payload.username, &state.db)?;
+    let user = server::connected::get_user(&*payload.email, &state.db)?;
 
     // Get the role enum from the string
     let role = api_handlers::auth::Role::try_from(user.role.as_str())
@@ -431,7 +428,7 @@ pub async fn login_user_end(
     session.insert(AUTH_KEY_USER_ID, user.id)
         .await
         .map_err(|_| ApiError::ServerError)?;
-    session.insert(AUTH_KEY_USERNAME, &user.username)
+    session.insert(AUTH_KEY_EMAIL, &user.email)
         .await
         .map_err(|_| ApiError::ServerError)?;
     session.insert(AUTH_KEY_ROLE, role.to_string())
@@ -483,7 +480,6 @@ pub async fn logout(
 
 #[derive(Serialize)]
 pub struct UserInfoResult {
-    username: String,
     email: String,
     role: String,
     number_transfers: i64,
@@ -494,10 +490,9 @@ pub async fn get_user_info(
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    let user_info = server::connected::get_user(&*claims_session.username, &state.db)?;
+    let user_info = server::connected::get_user(&*claims_session.email, &state.db)?;
 
     Ok((StatusCode::OK, Json(UserInfoResult {
-        username: user_info.username,
         email: user_info.email,
         role: user_info.role,
         number_transfers: user_info.number_transfers,
@@ -507,15 +502,15 @@ pub async fn get_user_info(
 #[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
 pub async fn delete_user(
     Extension(claims_session): Extension<Claims>,
-    Path(username): Path<String>,
+    Path(email): Path<String>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    // Validate the username
-    validate_username(&username).map_err(|_| ApiError::InputValidation)?;
+    // Validate the email
+    validate_email(&email).map_err(|_| ApiError::InputValidation)?;
 
-    // Check if the username is the same as the one in the session
-    if *claims_session.username != username {
+    // Check if the email is the same as the one in the session
+    if *claims_session.email != email {
         return Err(ApiError::Forbidden);
     }
 
@@ -625,14 +620,14 @@ pub async fn get_pub_key(
 
 #[instrument(skip(state), err(Debug))]
 pub async fn get_pub_key_user(
-    Path(username): Path<String>,
+    Path(email): Path<String>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
-    // Validate the username
-    validate_username(&username).map_err(|_| ApiError::InputValidation)?;
+    // Validate the email
+    validate_email(&email).map_err(|_| ApiError::InputValidation)?;
 
-    let pub_keys = server::connected::get_pub_key_user(&*username, &state.db)?;
+    let pub_keys = server::connected::get_pub_key_user(&*email, &state.db)?;
 
     Ok((StatusCode::OK, Json(
         GetPubKeyResult {
@@ -641,229 +636,4 @@ pub async fn get_pub_key_user(
             pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.2),
         }
     )))
-}
-
-///
-/// Download Messages
-///
-
-#[derive(Serialize)]
-pub struct GetMessageResult {
-    messages: Vec<MessageWithUsernamesEncoded>,
-}
-
-#[instrument(skip_all, err(Debug))]
-pub async fn get_messages(
-    Extension(claims_session): Extension<Claims>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ApiError> {
-    
-    let messages: Vec<MessageWithUsernames> = server::connected::get_messages(claims_session.id, &state.db, &state.s3)
-        .await?;
-
-    // Convert the fields of each messages to base64
-    let messages_encoded: Vec<MessageWithUsernamesEncoded> = messages.into_iter().map(|m| {
-        MessageWithUsernamesEncoded {
-            id: m.id,
-            sender: m.sender,
-            receiver: m.receiver,
-            sender_key_id: m.sender_key_id,
-            receiver_key_id: m.receiver_key_id,
-            kem_ciphertext_filename: URL_SAFE_NO_PAD.encode(m.kem_ciphertext_filename),
-            cfilename: URL_SAFE_NO_PAD.encode(m.cfilename),
-            nonce_filename: URL_SAFE_NO_PAD.encode(m.nonce_filename),
-            file_id: m.file_id,
-            kem_ciphertext_file: URL_SAFE_NO_PAD.encode(m.kem_ciphertext_file),
-            max_downloads: m.max_downloads,
-            lifetime: m.lifetime,
-            creation_time: m.creation_time,
-            signature_metadata: URL_SAFE_NO_PAD.encode(m.signature_metadata.unwrap()), // Sever returns only messages with signature metadata, so unwrap is safe
-            number_downloads: m.number_downloads,
-            file_size: m.file_size,
-            chunk_size: m.chunk_size,
-            signature: URL_SAFE_NO_PAD.encode(m.signature.unwrap()), // Sever returns only messages with signature, so unwrap is safe
-        }
-    }).collect();
-
-    Ok((StatusCode::OK, Json(GetMessageResult { messages: messages_encoded })))
-}
-
-#[derive(Serialize)]
-pub struct GetMessageSentResult {
-    messages: Vec<MessageSentWithUsernames>,
-}
-
-#[instrument(skip_all, err(Debug))]
-pub async fn get_messages_sent(
-    Extension(claims_session): Extension<Claims>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    let messages: Vec<MessageSentWithUsernames> = server::connected::get_messages_sent(claims_session.id, &state.db, &state.s3)
-        .await?;
-
-    Ok((StatusCode::OK, Json(GetMessageSentResult { messages: messages })))
-}
-
-#[derive(Serialize)]
-pub struct GetOneMessageResult {
-    download_url: String,
-}
-
-#[instrument(skip_all, err(Debug))]
-pub async fn get_one_message(
-    Extension(claims_session): Extension<Claims>,
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    let presigned_url = server::connected::get_message(claims_session.id, id, &state.db, &state.s3)
-        .await?;
-
-    Ok((StatusCode::OK, Json(GetOneMessageResult { download_url: presigned_url })))
-}
-
-///
-/// Upload Messages
-///
-
-#[derive(Deserialize, Validate, Debug)]
-pub struct UploadMessage {
-    // The type already validates that the provided input is valid
-    sender_key_id: Uuid,
-    // The type already validates that the provided input is valid
-    receiver_key_id: Uuid,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    kem_ciphertext_filename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    cfilename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    nonce_filename: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    kem_ciphertext_file: String,
-    #[validate(custom(function = "validate_int_param_64"))]
-    max_downloads: i64,
-    #[validate(custom(function = "validate_int_param_64"))]
-    lifetime: i64,
-    // The type already validates that the provided input is valid
-    creation_time: chrono::DateTime<chrono::Utc>,
-    #[validate(custom(function = "validate_int_param_64"))]
-    file_size: i64,
-}
-
-#[derive(Serialize)]
-pub struct UploadMessageResult {
-    upload_urls: Vec<String>,
-    upload_id: String,
-    message_file_id: Uuid,
-    chunk_size: i64,
-}
-
-#[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
-pub async fn upload_message(
-    Extension(claims_session): Extension<Claims>,
-    State(state): State<AppState>,
-    Json(payload): Json<UploadMessage>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
-
-    // Authorize the upload based on the user role and the provided parameters
-    claims_session.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
-
-    let (upload_urls, upload_id, file_id) = server::connected::send_message(
-        &claims_session.username,
-        payload.sender_key_id,
-        payload.receiver_key_id,
-        URL_SAFE_NO_PAD.decode(&payload.kem_ciphertext_filename)
-            .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.cfilename)
-            .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
-            .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.kem_ciphertext_file)
-            .map_err(|_| ApiError::Base64)?,
-        payload.max_downloads,
-        payload.lifetime,
-        payload.creation_time,
-        payload.file_size,
-        &state.db,
-        &state.s3,
-    )
-        .await?;
-    
-    Ok((StatusCode::CREATED, Json(UploadMessageResult {
-        upload_urls: upload_urls,
-        upload_id: upload_id,
-        message_file_id: file_id,
-        chunk_size: *CHUNK_SIZE_CONNECTED.get().unwrap(),
-    })))
-}
-
-#[derive(Deserialize, Validate, Debug)]
-pub struct UploadMessageFinishMultipart {
-    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
-    upload_id: String,
-    #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
-    etags: Vec<String>,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    signature_metadata: String,
-    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
-    signature: String,
-}
-
-#[instrument(skip_all, fields(user_id = %claims_session.id, file_id = %file_id), err(Debug))]
-pub async fn upload_message_finish_multipart(
-    Path(file_id): Path<Uuid>,
-    Extension(claims_session): Extension<Claims>,
-    State(state): State<AppState>,
-    Json(payload): Json<UploadMessageFinishMultipart>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    // Validate payload
-    payload.validate().map_err(|_| ApiError::InputValidation)?;
-
-    server::connected::send_message_finish_multipart(
-        claims_session.id,
-        file_id,
-        payload.upload_id,
-        payload.etags,
-        &state.db,
-        &state.s3,
-    )
-        .await?;
-
-    server::connected::update_message_signature(
-        file_id,
-        URL_SAFE_NO_PAD.decode(&payload.signature_metadata)
-            .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.signature)
-            .map_err(|_| ApiError::ServerError)?,
-        &state.db,
-    )?;
-
-    Ok(StatusCode::OK)
-}
-
-///
-/// Delete Messages
-///
-
-#[instrument(skip_all, fields(user_id = %claims_session.id, file_id = %id), err(Debug))]
-pub async fn delete_message(
-    Path(id): Path<Uuid>,
-    State(state): State<AppState>,
-    Extension(claims_session): Extension<Claims>,
-) -> Result<impl IntoResponse, ApiError> {
-
-    server::connected::delete_message(
-        claims_session.id,
-        id,
-        &state.db,
-        &state.s3,
-    )
-        .await?;
-
-    Ok(StatusCode::OK)
 }

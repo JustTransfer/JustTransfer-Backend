@@ -1,25 +1,6 @@
 // @generated automatically by Diesel CLI.
 
 diesel::table! {
-    anonymousmessages (id) {
-        id -> Uuid,
-        upload_id -> Text,
-        password_file -> Bytea,
-        server_login -> Nullable<Bytea>,
-        cfilename -> Bytea,
-        nonce_filename -> Bytea,
-        file_id -> Uuid,
-        max_downloads -> Int8,
-        lifetime -> Int8,
-        creation_time -> Timestamptz,
-        mac -> Nullable<Bytea>,
-        number_downloads -> Int8,
-        file_size -> Int8,
-        chunk_size -> Int8,
-    }
-}
-
-diesel::table! {
     key_pairs (id) {
         id -> Uuid,
         owner_id -> Uuid,
@@ -36,20 +17,19 @@ diesel::table! {
 }
 
 diesel::table! {
-    messages (id) {
+    link_transfers (id) {
         id -> Uuid,
         upload_id -> Text,
-        sender_key_id -> Uuid,
-        receiver_key_id -> Uuid,
-        kem_ciphertext_filename -> Bytea,
+        password_file -> Bytea,
+        server_login -> Nullable<Bytea>,
+        auth_key -> Bytea,
         cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,
-        kem_ciphertext_file -> Bytea,
         max_downloads -> Int8,
         lifetime -> Int8,
         creation_time -> Timestamptz,
-        signature_metadata -> Nullable<Bytea>,
+        mac -> Nullable<Bytea>,
         number_downloads -> Int8,
         file_size -> Int8,
         chunk_size -> Int8,
@@ -74,9 +54,17 @@ diesel::table! {
 }
 
 diesel::table! {
+    saved_transfers (id) {
+        id -> Uuid,
+        owner_id -> Uuid,
+        enc_transfer_id -> Bytea,
+        enc_password -> Bytea,
+    }
+}
+
+diesel::table! {
     users (id) {
         id -> Uuid,
-        username -> Text,
         email -> Text,
         password_file -> Bytea,
         server_login -> Nullable<Bytea>,
@@ -90,12 +78,13 @@ diesel::table! {
 
 diesel::joinable!(key_pairs -> users (owner_id));
 diesel::joinable!(reset_tokens -> users (account_id));
+diesel::joinable!(saved_transfers -> users (owner_id));
 
 diesel::allow_tables_to_appear_in_same_query!(
-    anonymousmessages,
     key_pairs,
-    messages,
+    link_transfers,
     opaque_settings,
     reset_tokens,
+    saved_transfers,
     users,
 );

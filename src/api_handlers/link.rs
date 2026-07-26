@@ -94,7 +94,7 @@ pub async fn anonymous_message_login_start(
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let server_login_start = server::anonymous::login_start_anonymous(
+    let server_login_start = server::link::login_start_anonymous(
         id,
         req,
         &state.db,
@@ -132,7 +132,7 @@ pub async fn anonymous_message_login_end(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    server::anonymous::login_end_anonymous(id, req, &state.db)
+    server::link::login_end_anonymous(id, req, &state.db)
         .await?;
 
     // Create session
@@ -145,7 +145,7 @@ pub async fn anonymous_message_login_end(
 
 #[derive(Serialize)]
 pub struct AnonymousGetMessageResult {
-    message: AnonymousMessageMetadataEncoded,
+    message: LinkTransferMetadataEncoded,
 }
 
 #[instrument(skip_all, err(Debug))]
@@ -160,11 +160,11 @@ pub async fn anonymous_message_get_one_metadata(
         return Err(ApiError::Forbidden);
     }
 
-    let message = server::anonymous::anonymous_get_message_metadata(id, &state.db)
+    let message = server::link::anonymous_get_message_metadata(id, &state.db)
         .await?;
 
     let resp = Json(AnonymousGetMessageResult {
-        message: AnonymousMessageMetadataEncoded {
+        message: LinkTransferMetadataEncoded {
             id: message.id,
             cfilename: URL_SAFE_NO_PAD.encode(message.cfilename),
             nonce_filename: URL_SAFE_NO_PAD.encode(message.nonce_filename),
@@ -199,7 +199,7 @@ pub async fn anonymous_message_get_download_url(
         return Err(ApiError::Forbidden);
     }
 
-    let presigned_url = server::anonymous::anonymous_get_message(id, &state.db, &state.s3)
+    let presigned_url = server::link::anonymous_get_message(id, &state.db, &state.s3)
         .await?;
 
     Ok((StatusCode::OK, Json(AnonymousGetMessageResultDownloadUrl {
@@ -242,7 +242,7 @@ pub async fn anonymous_message_send_start(
     let id = Uuid::new_v4();
 
     let server_registration_start_result =
-        server::anonymous::anonymous_send_message_start(id, req, &state.db)?;
+        server::link::anonymous_send_message_start(id, req, &state.db)?;
 
     Ok((
         StatusCode::OK,
@@ -295,7 +295,7 @@ pub async fn upload_anonymous_message(
     // Create claims with provided parameters
     let claims = Claims {
         id: payload.id,
-        username: "".to_string(),
+        email: "".to_string(),
         role: auth::Role::Anonymous,
         iat: 0, // Not used in this case to validate the following
     };
@@ -311,7 +311,7 @@ pub async fn upload_anonymous_message(
 
     let file_id = Uuid::new_v4(); // Generate a new UUID for the message file
 
-    let (upload_urls, upload_id) = server::anonymous::anonymous_send_message(
+    let (upload_urls, upload_id) = server::link::anonymous_send_message(
         req,
         payload.id,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
@@ -364,7 +364,7 @@ pub async fn upload_anonymous_message_finish_multipart(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    server::anonymous::anonymous_send_message_end(
+    server::link::anonymous_send_message_end(
         claims.id,
         file_id,
         payload.upload_id,
@@ -374,7 +374,7 @@ pub async fn upload_anonymous_message_finish_multipart(
     )
         .await?;
 
-    server::anonymous::update_message_mac(
+    server::link::update_message_mac(
         file_id,
         URL_SAFE_NO_PAD.decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,

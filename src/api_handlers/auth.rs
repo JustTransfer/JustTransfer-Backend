@@ -87,7 +87,7 @@ impl Role {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub id: Uuid,
-    pub username: String,
+    pub email: String,
     pub role: Role,
     pub iat: i64, // Issued at timestamp
 }
@@ -137,9 +137,9 @@ pub async fn require_auth(
     next: Next,
 ) -> Result<Response, StatusCode> {
 
-    // Extend the request with the user's role and username for later use in handlers
-    let username = session
-        .get::<String>(AUTH_KEY_USERNAME)
+    // Extend the request with the user's role and email for later use in handlers
+    let email = session
+        .get::<String>(AUTH_KEY_EMAIL)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
@@ -165,7 +165,7 @@ pub async fn require_auth(
     req.extensions_mut().insert(
         Claims {
             id: user_id,
-            username: username,
+            email: email,
             role: Role::try_from(role.as_str()).unwrap_or(Role::User),
             iat: created_at,
         }
@@ -189,7 +189,7 @@ pub async  fn require_auth_anonymous(
     // Extend the request with the anonymous message ID for later use in handlers
     req.extensions_mut().insert(Claims {
         id: message_id,
-        username: "".to_string(),
+        email: "".to_string(),
         role: Role::Anonymous,
         iat: 0,
     });

@@ -20,16 +20,16 @@ pub fn init_mailer(smtp_server: &str, smtp_username: &str, smtp_password: &str) 
         .build()
 }
 
-fn send_mail(receiver: &str, username: &str, subject: &str, body: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+fn send_mail(receiver: &str, subject: &str, body: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     if SERVER_MODE.get().unwrap() == "development" {
-        tracing::info!("--- Email to {} ({}) ---\nSubject: {}\n\n{}\n--- End of email ---", username, receiver, subject, body);
+        tracing::info!("--- Email to {} ---\nSubject: {}\n\n{}\n--- End of email ---", receiver, subject, body);
         return Ok(());
     }
 
     let email = Message::builder()
         .from(Mailbox::new(Some("JustTransfer".to_owned()), crate::consts::SMTP_MAIL.get().unwrap().to_owned().parse().unwrap()))
-        .to(Mailbox::new(Some(username.to_owned()), receiver.parse().unwrap()))
+        .to(Mailbox::new(Some(receiver.to_owned()), receiver.parse().unwrap()))
         .subject(subject.to_owned())
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_owned())
@@ -38,52 +38,52 @@ fn send_mail(receiver: &str, username: &str, subject: &str, body: &str, mailer: 
     // Send the email
     match mailer.send(&email) {
         Ok(_) => {
-            tracing::info!("Email sent to {} ({})", username, receiver);
+            tracing::info!("Email sent to {}", receiver);
             Ok(())
         }
         Err(e) => {
-            tracing::error!("Could not send email to {} ({}): {:?}", username, receiver, e);
+            tracing::error!("Could not send email to {}: {:?}", receiver, e);
             Err(ServerError::EmailSendError)
         }
     }
 }
 
-pub fn send_verification_email(receiver: &str, username: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+pub fn send_verification_email(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "Welcome to JustTransfer! Please verify your email address";
-    let body = format!("Hello {},\n\nThank you for registering with JustTransfer! To complete your registration, please click the following link to verify your email address:\n\n{}\n\nIf you did not create an account with JustTransfer, please ignore this email.\n\nBest regards,\nJustTransfer Team", username, link);
+    let body = format!("Hello {},\n\nThank you for registering with JustTransfer! To complete your registration, please click the following link to verify your email address:\n\n{}\n\nIf you did not create an account with JustTransfer, please ignore this email.\n\nBest regards,\nJustTransfer Team", receiver, link);
 
-    send_mail(receiver, username, subject, &body, mailer)
+    send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_password_reset_email(receiver: &str, username: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+pub fn send_password_reset_email(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "JustTransfer password reset request";
-    let body = format!("Hello {},\n\nWe received a request to reset your JustTransfer password. If you initiated this request, please click the following link to reset your password:\n\n{}\n\nIf you did not request a password reset, please ignore this email. Your password will remain unchanged.\n\nBest regards,\nJustTransfer Team", username, link);
+    let body = format!("Hello {},\n\nWe received a request to reset your JustTransfer password. If you initiated this request, please click the following link to reset your password:\n\n{}\n\nIf you did not request a password reset, please ignore this email. Your password will remain unchanged.\n\nBest regards,\nJustTransfer Team", receiver, link);
 
-    send_mail(receiver, username, subject, &body, mailer)
+    send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_password_reset_confirmation_email(receiver: &str, username: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+pub fn send_password_reset_confirmation_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "Your JustTransfer password has been reset";
-    let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer password has been reset. If you did not initiate this request, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", username);
+    let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer password has been reset. If you did not initiate this request, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", receiver);
 
-    send_mail(receiver, username, subject, &body, mailer)
+    send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_password_changed_notification_email(receiver: &str, username: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+pub fn send_password_changed_notification_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "Your JustTransfer password has been changed";
-    let body = format!("Hello {},\n\nThis is a notification that your JustTransfer password has been changed. If you did not initiate this change, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", username);
+    let body = format!("Hello {},\n\nThis is a notification that your JustTransfer password has been changed. If you did not initiate this change, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", receiver);
 
-    send_mail(receiver, username, subject, &body, mailer)
+    send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_transfer_notification_email(receiver: &str, username: &str, transfer_from: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+pub fn send_transfer_notification_email(receiver: &str, transfer_from: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "You have received a new file transfer on JustTransfer";
-    let body = format!("Hello {},\n\nYou have received a new file transfer from {} on JustTransfer. Please log in to your account to access the file.\n\nBest regards,\nJustTransfer Team", username, transfer_from);
+    let body = format!("Hello {},\n\nYou have received a new file transfer from {} on JustTransfer. Please log in to your account to access the file.\n\nBest regards,\nJustTransfer Team", receiver, transfer_from);
 
-    send_mail(receiver, username, subject, &body, mailer)
+    send_mail(receiver, subject, &body, mailer)
 }
