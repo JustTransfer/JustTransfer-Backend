@@ -45,7 +45,7 @@ async fn main() {
         .allow_headers(Any);
 
     let session_layer = api_handlers::auth::get_session_layer("user_session");
-    let anonymous_session_layer = api_handlers::auth::get_session_layer("anonymous_session");
+    let link_session_layer = api_handlers::auth::get_session_layer("link_session");
 
     // Public routes (no authentication required)
     let public_app = Router::new()
@@ -78,27 +78,27 @@ async fn main() {
         .layer(middleware::from_fn(api_handlers::auth::require_auth))
         .layer(session_layer);
 
-    // Routes for anonymous transfers
-    let anonymous_app = Router::new()
-        .route("/api/anonymous/message/{id}/metadata", get(api_handlers::link::anonymous_message_get_one_metadata))
-        .route("/api/anonymous/message/{id}", get(api_handlers::link::anonymous_message_get_download_url))
-        .route("/api/anonymous/message/uploadfinish/{file_id}", post(api_handlers::link::upload_anonymous_message_finish_multipart))
-        .layer(middleware::from_fn(api_handlers::auth::require_auth_anonymous))
+    // Routes for link transfers
+    let link_app = Router::new()
+        .route("/api/link/message/{id}/metadata", get(api_handlers::link::link_message_get_one_metadata))
+        .route("/api/link/message/{id}", get(api_handlers::link::link_message_get_download_url))
+        .route("/api/link/message/uploadfinish/{file_id}", post(api_handlers::link::upload_link_message_finish_multipart))
+        .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
 
-        // Routes for creating an anonymous message (no authentication required)
-        .route("/api/anonymous/message/start", post(api_handlers::link::anonymous_message_send_start))
-        .route("/api/anonymous/message", post(api_handlers::link::upload_anonymous_message))
-        .route("/api/anonymous/message/{id}/login/start", post(api_handlers::link::anonymous_message_login_start))
-        .route("/api/anonymous/message/{id}/login/end", post(api_handlers::link::anonymous_message_login_end))
+        // Routes for creating a link transfer (no authentication required)
+        .route("/api/link/message/start", post(api_handlers::link::link_message_send_start))
+        .route("/api/link/message", post(api_handlers::link::upload_link_message))
+        .route("/api/link/message/{id}/login/start", post(api_handlers::link::link_message_login_start))
+        .route("/api/link/message/{id}/login/end", post(api_handlers::link::link_message_login_end))
 
-        .layer(anonymous_session_layer);
+        .layer(link_session_layer);
 
 
     let app = Router::new()
         .merge(public_app)
         .merge(account_app)
         .merge(account_app_fresh_login)
-        .merge(anonymous_app)
+        .merge(link_app)
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)

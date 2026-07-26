@@ -213,6 +213,7 @@ pub struct NewLinkTransfer<'a> {
     pub id: &'a Uuid,
     pub upload_id: &'a String,
     pub password_file: &'a Vec<u8>,
+    pub auth_key: &'a Vec<u8>,
     pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
     pub file_id: &'a Uuid,

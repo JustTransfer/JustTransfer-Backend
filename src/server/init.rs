@@ -294,6 +294,7 @@ async fn generate_dummy_anonymous_transfer(
             id: &DUMMY_ANONYMOUS_MESSAGE_ID,
             upload_id: &"".to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
+            auth_key: &vec![0; 16],
             cfilename: &vec![0; 16],
             nonce_filename: &vec![0; SYM_LEN_NONCE],
             file_id: &Uuid::new_v4(),

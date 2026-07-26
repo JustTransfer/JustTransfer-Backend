@@ -174,7 +174,7 @@ pub async fn require_auth(
     Ok(next.run(req).await)
 }
 
-pub async  fn require_auth_anonymous(
+pub async  fn require_auth_link(
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,

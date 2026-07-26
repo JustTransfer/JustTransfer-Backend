@@ -78,6 +78,6 @@ CREATE TABLE link_transfers
     mac                     BYTEA,
     number_downloads        BIGINT DEFAULT 0 NOT NULL,
     file_size               BIGINT        NOT NULL,
-    chunk_size              BIGINT        NOT NULL,
-    signature               BYTEA
+    chunk_size              BIGINT        NOT NULL
+    -- signature               BYTEA
 );
