@@ -76,7 +76,7 @@ async fn main() {
         .route("/api/register/update", post(api_handlers::connected::register_user_end_update))
         .layer(middleware::from_fn(api_handlers::auth::require_fresh_login))
         .layer(middleware::from_fn(api_handlers::auth::require_auth))
-        .layer(session_layer);
+        .layer(session_layer.clone());
 
     // Routes for link transfers
     let link_app = Router::new()
@@ -88,6 +88,9 @@ async fn main() {
         // Routes for creating a link transfer (no authentication required)
         .route("/api/link/message/start", post(api_handlers::link::link_message_send_start))
         .route("/api/link/message", post(api_handlers::link::upload_link_message))
+        .layer(session_layer) // TODO check if correct
+        .layer(middleware::from_fn(api_handlers::auth::optional_auth))
+
         .route("/api/link/message/{id}/login/start", post(api_handlers::link::link_message_login_start))
         .route("/api/link/message/{id}/login/end", post(api_handlers::link::link_message_login_end))
 

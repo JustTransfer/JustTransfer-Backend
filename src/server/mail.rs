@@ -80,10 +80,10 @@ pub fn send_password_changed_notification_email(receiver: &str, mailer: &SmtpTra
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_transfer_notification_email(receiver: &str, transfer_from: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+pub fn send_transfer_notification_email(receiver: &str, url: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "You have received a new file transfer on JustTransfer";
-    let body = format!("Hello {},\n\nYou have received a new file transfer from {} on JustTransfer. Please log in to your account to access the file.\n\nBest regards,\nJustTransfer Team", receiver, transfer_from);
+    let body = format!("Hello {},\n\nYou have received a new file transfer on JustTransfer. Use the following link to access the transfer:\n\n{}\n\nBest regards,\nJustTransfer Team", receiver, url);
 
     send_mail(receiver, subject, &body, mailer)
 }

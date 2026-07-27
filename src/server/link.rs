@@ -16,6 +16,7 @@ use crate::models::{LinkTransfer, LinkTransferMetadata, NewLinkTransfer};
 use crate::schema::link_transfers::dsl::link_transfers;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
+use crate::server;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size};
 
 ///
@@ -377,8 +378,10 @@ pub async fn link_send_message_end(
     file_id_param: Uuid,
     upload_id_param: String,
     etags_param: Vec<String>,
+    email_receiver: Option<String>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
+    mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
     use crate::schema::link_transfers;
 
@@ -431,6 +434,17 @@ pub async fn link_send_message_end(
     // Check if the file size match the one store in DB
     delete_invalid_file_size(pool, s3, &file_id_param).await?;
 
+    // Send optional notification email
+    if email_receiver.is_some() {
+        server::mail::send_transfer_notification_email(
+            email_receiver.as_ref().unwrap(),
+            &format!("{}/link/message/{}", FRONTEND_URL.get().unwrap(), message_id),
+            mailer,
+        )
+            .map_err(|_| ServerError::Internal)?;
+
+    }
+    
     Ok(())
 }
 

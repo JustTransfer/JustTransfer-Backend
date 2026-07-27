@@ -197,6 +197,34 @@ pub async  fn require_auth_link(
     Ok(next.run(req).await)
 }
 
+pub async fn optional_auth(
+    session: Session,
+    mut req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+
+    if let (
+        Ok(Some(email)),
+        Ok(Some(user_id)),
+        Ok(Some(role)),
+        Ok(Some(created_at)),
+    ) = (
+        session.get::<String>(AUTH_KEY_EMAIL).await,
+        session.get::<Uuid>(AUTH_KEY_USER_ID).await,
+        session.get::<String>(AUTH_KEY_ROLE).await,
+        session.get::<i64>(AUTH_KEY_CREATED_AT).await,
+    ) {
+        req.extensions_mut().insert(Claims {
+            id: user_id,
+            email,
+            role: Role::try_from(role.as_str()).unwrap_or(Role::User),
+            iat: created_at,
+        });
+    }
+
+    next.run(req).await
+}
+
 // Check if the iat of the session is recent
 pub async  fn require_fresh_login(
     session: Session,

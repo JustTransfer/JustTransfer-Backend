@@ -286,6 +286,7 @@ pub struct UploadLinkMessageFinishResult {
 pub async fn upload_link_message(
     State(state): State<AppState>,
     session: Session,
+    claims: Option<Extension<Claims>>,
     Json(payload): Json<UploadLinkMessageFinish>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -293,12 +294,21 @@ pub async fn upload_link_message(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     // Create claims with provided parameters
-    let claims = Claims {
-        id: payload.id,
-        email: "".to_string(),
-        role: auth::Role::Anonymous,
-        iat: 0, // Not used in this case to validate the following
-    };
+    let claims = claims
+        .map(|Extension(c)| c)
+        .unwrap_or(Claims {
+            id: payload.id,
+            email: "".into(),
+            role: auth::Role::Anonymous,
+            iat: 0,
+        });
+
+    claims.authorize_upload(
+        payload.creation_time,
+        payload.lifetime,
+        payload.file_size,
+        payload.max_downloads,
+    )?;
 
     // Authorize the upload based on the user role and the provided parameters
     claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
@@ -351,6 +361,9 @@ pub struct UploadLinkMessageFinishMultipart {
     etags: Vec<String>,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
+    // Optional receiver email address
+    #[validate(email)]
+    receiver_email: Option<String>,
 }
 
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
@@ -364,13 +377,21 @@ pub async fn upload_link_message_finish_multipart(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
+    // Authorize only the other role than Anonymous to send email
+    let receiver_email = match claims.role {
+        auth::Role::Anonymous => None,
+        _ => payload.receiver_email.clone(),
+    };
+
     server::link::link_send_message_end(
         claims.id,
         file_id,
         payload.upload_id,
         payload.etags,
+        receiver_email,
         &state.db,
         &state.s3,
+        &state.mailer,
     )
         .await?;
 
