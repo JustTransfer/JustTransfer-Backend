@@ -67,3 +67,11 @@ pub fn validate_email(email: &str) -> Result<(), ValidationError> {
     let email_validation = EmailValidation { email };
     email_validation.validate().map_err(|_| ValidationError::new("invalid_email"))
 }
+
+pub fn validate_optional_email(email: &str) -> Result<(), ValidationError> {
+    if email.is_empty() {
+        return Ok(());
+    }
+
+    validate_email(email)
+}

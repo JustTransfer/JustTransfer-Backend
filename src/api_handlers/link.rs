@@ -355,15 +355,14 @@ pub struct UploadLinkMessageFinishMultipart {
     etags: Vec<String>,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
-    // Optional receiver email address
-    #[validate(email)]
+    #[validate(custom(function = "validate_optional_email"))]
     receiver_email: Option<String>,
 }
 
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
 pub async fn upload_link_message_finish_multipart(
     Path(file_id): Path<Uuid>,
-    Extension(user_claims): Extension<UserClaims>,
+    user_claims: Option<Extension<UserClaims>>,
     Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
     Json(payload): Json<UploadLinkMessageFinishMultipart>,
@@ -373,9 +372,13 @@ pub async fn upload_link_message_finish_multipart(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     // Authorize only the other role than Anonymous to send email
-    let receiver_email = match user_claims.role {
-        auth::Role::Anonymous => None,
-        _ => payload.receiver_email.clone(),
+    let receiver_email = if let Some(email) = payload.receiver_email.clone() {
+        if user_claims.is_none() && user_claims.unwrap().role != auth::Role::Anonymous {
+            return Err(ApiError::Forbidden);
+        }
+        Some(email)
+    } else {
+        None
     };
 
     server::link::link_send_message_end(
