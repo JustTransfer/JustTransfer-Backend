@@ -88,12 +88,12 @@ async fn main() {
         // Routes for creating a link transfer (no authentication required)
         .route("/api/link/message/start", post(api_handlers::link::link_message_send_start))
         .route("/api/link/message", post(api_handlers::link::upload_link_message))
-        .layer(session_layer) // TODO check if correct
         .layer(middleware::from_fn(api_handlers::auth::optional_auth))
 
         .route("/api/link/message/{id}/login/start", post(api_handlers::link::link_message_login_start))
         .route("/api/link/message/{id}/login/end", post(api_handlers::link::link_message_login_end))
 
+        .layer(session_layer) // TODO check if correct
         .layer(link_session_layer);
 
 

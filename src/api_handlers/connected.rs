@@ -12,7 +12,7 @@ use tracing::{instrument};
 use crate::{api_handlers, server};
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
-use crate::api_handlers::auth::{Claims};
+use crate::api_handlers::auth::{UserClaims};
 use crate::consts::*;
 use crate::models::*;
 use crate::error::*;
@@ -155,7 +155,7 @@ pub struct RegisterUserEndUpdate {
 
 #[instrument(skip_all, err(Debug))]
 pub async fn register_user_end_update(
-    Extension(claims_session): Extension<Claims>,
+    Extension(claims_session): Extension<UserClaims>,
     State(state): State<AppState>,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -486,7 +486,7 @@ pub struct UserInfoResult {
 }
 #[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
 pub async fn get_user_info(
-    Extension(claims_session): Extension<Claims>,
+    Extension(claims_session): Extension<UserClaims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
@@ -501,7 +501,7 @@ pub async fn get_user_info(
 
 #[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
 pub async fn delete_user(
-    Extension(claims_session): Extension<Claims>,
+    Extension(claims_session): Extension<UserClaims>,
     Path(email): Path<String>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -547,7 +547,7 @@ pub struct AddKeyResult {
 
 #[instrument(skip_all, err(Debug))]
 pub async fn add_key(
-    Extension(claims_session): Extension<Claims>,
+    Extension(claims_session): Extension<UserClaims>,
     State(state): State<AppState>,
     Json(payload): Json<AddKeyParam>,
 ) -> Result<impl IntoResponse, ApiError> {

@@ -387,7 +387,7 @@ pub async fn link_send_message_end(
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    // Check if upload_id and file_id correspond for the message id in session
+    // Check if upload_id and file_id correspond for the message_id in session
     let message = link_transfers::table
         .filter(link_transfers::id.eq(message_id))
         .first::<LinkTransfer>(&mut conn)
@@ -442,7 +442,6 @@ pub async fn link_send_message_end(
             mailer,
         )
             .map_err(|_| ServerError::Internal)?;
-
     }
     
     Ok(())

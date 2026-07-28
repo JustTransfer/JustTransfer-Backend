@@ -85,14 +85,14 @@ impl Role {
 
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
+pub struct UserClaims {
     pub id: Uuid,
     pub email: String,
     pub role: Role,
     pub iat: i64, // Issued at timestamp
 }
 
-impl Claims {
+impl UserClaims {
     pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i64, file_size: i64, max_downloads: i64) -> Result<(), ApiError> {
         
         // Creation time
@@ -118,6 +118,11 @@ impl Claims {
 
         Ok(())
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LinkClaims {
+    pub id: Uuid,
 }
 
 pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<MemoryStore> {
@@ -163,7 +168,7 @@ pub async fn require_auth(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     req.extensions_mut().insert(
-        Claims {
+        UserClaims {
             id: user_id,
             email: email,
             role: Role::try_from(role.as_str()).unwrap_or(Role::User),
@@ -187,11 +192,8 @@ pub async  fn require_auth_link(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Extend the request with the anonymous message ID for later use in handlers
-    req.extensions_mut().insert(Claims {
+    req.extensions_mut().insert(LinkClaims {
         id: message_id,
-        email: "".to_string(),
-        role: Role::Anonymous,
-        iat: 0,
     });
 
     Ok(next.run(req).await)
@@ -214,7 +216,7 @@ pub async fn optional_auth(
         session.get::<String>(AUTH_KEY_ROLE).await,
         session.get::<i64>(AUTH_KEY_CREATED_AT).await,
     ) {
-        req.extensions_mut().insert(Claims {
+        req.extensions_mut().insert(UserClaims {
             id: user_id,
             email,
             role: Role::try_from(role.as_str()).unwrap_or(Role::User),

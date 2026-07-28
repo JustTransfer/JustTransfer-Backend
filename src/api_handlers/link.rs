@@ -14,7 +14,7 @@ use crate::api_handlers::*;
 use crate::server;
 use crate::server::init::DefaultCipherSuite;
 use crate::api_handlers::misc::*;
-use crate::api_handlers::auth::{Claims};
+use crate::api_handlers::auth::{UserClaims, LinkClaims};
 use crate::consts::*;
 use crate::error::ApiError;
 use crate::models::*;
@@ -151,12 +151,12 @@ pub struct LinkGetMessageResult {
 #[instrument(skip_all, err(Debug))]
 pub async fn link_message_get_one_metadata(
     Path(id): Path<Uuid>,
-    Extension(claims): Extension<Claims>,
+    Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     // Check that the path correspond to the id in session
-    if id != claims.id {
+    if id != link_claims.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -190,12 +190,12 @@ pub struct LinkGetMessageResultDownloadUrl {
 #[instrument(skip_all, err(Debug))]
 pub async fn link_message_get_download_url(
     Path(id): Path<Uuid>,
-    Extension(claims): Extension<Claims>,
+    Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     // Check that the path correspond to the id in session
-    if id != claims.id {
+    if id != link_claims.id {
         return Err(ApiError::Forbidden);
     }
 
@@ -270,7 +270,7 @@ pub struct UploadLinkMessageFinish {
     lifetime: i64,
     // The type already validates that the provided input is valid
     creation_time: chrono::DateTime<chrono::Utc>,
-    #[validate(custom(function = "validate_file_size_anonymous"))]
+    #[validate(custom(function = "validate_file_size"))]
     file_size: i64,
 }
 
@@ -286,32 +286,26 @@ pub struct UploadLinkMessageFinishResult {
 pub async fn upload_link_message(
     State(state): State<AppState>,
     session: Session,
-    claims: Option<Extension<Claims>>,
+    user_claims: Option<Extension<UserClaims>>,
     Json(payload): Json<UploadLinkMessageFinish>,
 ) -> Result<impl IntoResponse, ApiError> {
 
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    // Create claims with provided parameters
-    let claims = claims
-        .map(|Extension(c)| c)
-        .unwrap_or(Claims {
+    // Authorize the upload based on the user role and the provided parameters
+    if user_claims.is_some() {
+        let claims = user_claims.unwrap().0;
+        claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+    } else {
+        let claims = UserClaims {
             id: payload.id,
             email: "".into(),
             role: auth::Role::Anonymous,
             iat: 0,
-        });
-
-    claims.authorize_upload(
-        payload.creation_time,
-        payload.lifetime,
-        payload.file_size,
-        payload.max_downloads,
-    )?;
-
-    // Authorize the upload based on the user role and the provided parameters
-    claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+        };
+        claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+    }
 
     // Decode the base64 encoded fields
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
@@ -369,7 +363,8 @@ pub struct UploadLinkMessageFinishMultipart {
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
 pub async fn upload_link_message_finish_multipart(
     Path(file_id): Path<Uuid>,
-    Extension(claims): Extension<Claims>,
+    Extension(user_claims): Extension<UserClaims>,
+    Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
     Json(payload): Json<UploadLinkMessageFinishMultipart>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -378,13 +373,13 @@ pub async fn upload_link_message_finish_multipart(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     // Authorize only the other role than Anonymous to send email
-    let receiver_email = match claims.role {
+    let receiver_email = match user_claims.role {
         auth::Role::Anonymous => None,
         _ => payload.receiver_email.clone(),
     };
 
     server::link::link_send_message_end(
-        claims.id,
+        link_claims.id,
         file_id,
         payload.upload_id,
         payload.etags,
