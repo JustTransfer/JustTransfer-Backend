@@ -33,7 +33,6 @@ diesel::table! {
         number_downloads -> Int8,
         file_size -> Int8,
         chunk_size -> Int8,
-        signature -> Nullable<Bytea>,
     }
 }
 
@@ -57,7 +56,9 @@ diesel::table! {
     saved_transfers (id) {
         id -> Uuid,
         owner_id -> Uuid,
+        nonce_transfer_id -> Bytea,
         enc_transfer_id -> Bytea,
+        nonce_password -> Bytea,
         enc_password -> Bytea,
     }
 }

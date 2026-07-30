@@ -1,7 +1,9 @@
+use aws_sdk_s3::types::builders::OwnerBuilder;
 use chrono::Utc;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid};
+use crate::schema::link_transfers::nonce_filename;
 
 ///
 /// Opaque settings
@@ -204,7 +206,7 @@ pub struct LinkTransfer {
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
-    pub signature: Option<Vec<u8>>,
+    // pub signature: Option<Vec<u8>>, todo
 }
 
 #[derive(Insertable)]
@@ -253,4 +255,40 @@ pub struct LinkTransferMetadataEncoded {
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
+}
+
+///
+/// Saved Transfer
+///
+#[derive(Queryable, Selectable, Identifiable)]
+#[diesel(table_name = crate::schema::saved_transfers)]
+#[diesel(check_for_backend(diesel::pg::Pg))]
+pub struct SavedTransfer {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+    pub nonce_transfer_id: Vec<u8>,
+    pub enc_transfer_id: Vec<u8>,
+    pub nonce_password: Vec<u8>,
+    pub enc_password: Vec<u8>,
+}
+
+#[derive(Insertable)]
+#[diesel(table_name = crate::schema::saved_transfers)]
+pub struct NewSavedTransfer<'a> {
+    pub id: &'a Uuid,
+    pub owner_id: &'a Uuid,
+    pub nonce_transfer_id: &'a Vec<u8>,
+    pub enc_transfer_id: &'a Vec<u8>,
+    pub nonce_password: &'a Vec<u8>,
+    pub enc_password: &'a Vec<u8>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct EncodedSavedTransfer {
+    pub id: Uuid,
+    pub owner_id: Uuid,
+    pub nonce_transfer_id: String,
+    pub enc_transfer_id: String,
+    pub nonce_password: String,
+    pub enc_password: String,
 }

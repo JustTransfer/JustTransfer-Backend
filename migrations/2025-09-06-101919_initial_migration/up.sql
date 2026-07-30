@@ -45,7 +45,9 @@ CREATE TABLE saved_transfers
 (
     id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id                UUID        NOT NULL REFERENCES users(id),
+    nonce_transfer_id       BYTEA       NOT NULL,
     enc_transfer_id         BYTEA       NOT NULL,
+    nonce_password          BYTEA       NOT NULL,
     enc_password            BYTEA       NOT NULL
 );
 
@@ -79,5 +81,5 @@ CREATE TABLE link_transfers
     number_downloads        BIGINT DEFAULT 0 NOT NULL,
     file_size               BIGINT        NOT NULL,
     chunk_size              BIGINT        NOT NULL
-    -- signature               BYTEA
+    -- signature               BYTEA todo
 );

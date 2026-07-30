@@ -746,6 +746,51 @@ pub fn get_pub_key_user(
 }
 
 ///
+/// Saved transfer
+///
+
+pub fn get_saved_transfers(
+    user_id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<Vec<SavedTransfer>, ServerError> {
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+    
+    let saved_transfers = crate::schema::saved_transfers::table
+        .filter(crate::schema::saved_transfers::owner_id.eq(user_id_param))
+        .load::<SavedTransfer>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+    
+    Ok(saved_transfers)
+}
+
+pub fn add_saved_transfer (
+    user_id_param: Uuid,
+    nonce_transfer_id_param: Vec<u8>,
+    enc_transfer_id_param: Vec<u8>,
+    nonce_password_param: Vec<u8>,
+    enc_password_param: Vec<u8>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let new_saved_transfer = NewSavedTransfer {
+        id: &Uuid::new_v4(),
+        owner_id: &user_id_param,
+        nonce_transfer_id: &nonce_transfer_id_param,
+        enc_transfer_id: &enc_transfer_id_param,
+        nonce_password: &nonce_password_param,
+        enc_password: &enc_password_param,
+    };
+
+    diesel::insert_into(crate::schema::saved_transfers::table)
+        .values(&new_saved_transfer)
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
+///
 /// Admin
 ///
 
