@@ -382,7 +382,7 @@ pub async fn link_send_message_end(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
     mailer: &lettre::SmtpTransport,
-) -> Result<(), ServerError> {
+) -> Result<Uuid, ServerError> {
     use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -443,8 +443,15 @@ pub async fn link_send_message_end(
         )
             .map_err(|_| ServerError::Internal)?;
     }
+
+    // Get the auth_key from the db
+    let auth_key = link_transfers::table
+        .filter(link_transfers::id.eq(message_id))
+        .select(link_transfers::auth_key)
+        .first::<Vec<u8>>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
     
-    Ok(())
+    Ok(Uuid::from_slice(&auth_key).map_err(|_| ServerError::Internal)?)
 }
 
 pub fn update_message_mac(
@@ -460,6 +467,21 @@ pub fn update_message_mac(
         .set(link_transfers::mac.eq(Some(mac)))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
+pub fn delete_link_tranfser(
+    id: Uuid,
+    auth_key: String,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+
+    use crate::schema::link_transfers;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Check if the auth_key is valid
+    // TODO
 
     Ok(())
 }

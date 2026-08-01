@@ -60,6 +60,8 @@ diesel::table! {
         enc_transfer_id -> Bytea,
         nonce_password -> Bytea,
         enc_password -> Bytea,
+        nonce_auth_key -> Nullable<Bytea>,
+        enc_auth_key -> Nullable<Bytea>,
     }
 }
 

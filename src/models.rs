@@ -270,6 +270,8 @@ pub struct SavedTransfer {
     pub enc_transfer_id: Vec<u8>,
     pub nonce_password: Vec<u8>,
     pub enc_password: Vec<u8>,
+    pub nonce_auth_key: Option<Vec<u8>>,
+    pub enc_auth_key: Option<Vec<u8>>,
 }
 
 #[derive(Insertable)]
@@ -281,6 +283,8 @@ pub struct NewSavedTransfer<'a> {
     pub enc_transfer_id: &'a Vec<u8>,
     pub nonce_password: &'a Vec<u8>,
     pub enc_password: &'a Vec<u8>,
+    pub nonce_auth_key: Option<&'a Vec<u8>>,
+    pub enc_auth_key: Option<&'a Vec<u8>>,
 }
 
 #[derive(Serialize, Clone)]
@@ -291,4 +295,6 @@ pub struct EncodedSavedTransfer {
     pub enc_transfer_id: String,
     pub nonce_password: String,
     pub enc_password: String,
+    pub nonce_auth_key: String,
+    pub enc_auth_key: String,
 }

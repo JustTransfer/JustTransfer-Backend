@@ -15,6 +15,7 @@ use http::{Method, Response};
 use std::any::Any;
 use tower::ServiceBuilder;
 use tower_http::catch_panic::CatchPanicLayer;
+use tracing_subscriber::fmt::layer;
 use crate::consts::{BACKEND_URL, FRONTEND_URL};
 
 pub mod api_handlers;
@@ -87,7 +88,7 @@ async fn main() {
         .route("/api/link/message/uploadfinish/{file_id}", post(api_handlers::link::upload_link_message_finish_multipart))
         .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
 
-        // Routes for creating a link transfer (no authentication required)
+        // Routes for creating a link transfer (authentication optional)
         .route("/api/link/message/start", post(api_handlers::link::link_message_send_start))
         .route("/api/link/message", post(api_handlers::link::upload_link_message))
         .layer(middleware::from_fn(api_handlers::auth::optional_auth))
@@ -95,8 +96,16 @@ async fn main() {
         .route("/api/link/message/{id}/login/start", post(api_handlers::link::link_message_login_start))
         .route("/api/link/message/{id}/login/end", post(api_handlers::link::link_message_login_end))
 
-        .layer(session_layer) // TODO check if correct
-        .layer(link_session_layer);
+        .layer(session_layer.clone()) // TODO check if correct
+        .layer(link_session_layer.clone());
+
+    let auth_link_app = Router::new()
+        .route("/api/link/message/{id}", delete(api_handlers::link::link_message_delete))
+
+        .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
+        .layer(middleware::from_fn(api_handlers::auth::require_auth))
+        .layer(session_layer.clone())
+        .layer(link_session_layer.clone());
 
 
     let app = Router::new()
@@ -104,6 +113,7 @@ async fn main() {
         .merge(account_app)
         .merge(account_app_fresh_login)
         .merge(link_app)
+        .merge(auth_link_app)
         .with_state(state)
         .layer(DefaultBodyLimit::max(consts::MAX_BODY_SIZE))
         .layer(cors)

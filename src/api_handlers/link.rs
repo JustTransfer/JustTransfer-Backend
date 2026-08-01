@@ -359,6 +359,11 @@ pub struct UploadLinkMessageFinishMultipart {
     receiver_email: Option<String>,
 }
 
+#[derive(Serialize)]
+pub struct UploadLinkMessageFinishMultipartResult {
+    auth_key: Uuid,
+}
+
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
 pub async fn upload_link_message_finish_multipart(
     Path(file_id): Path<Uuid>,
@@ -371,17 +376,24 @@ pub async fn upload_link_message_finish_multipart(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
+    let is_connected = user_claims.is_some() && (
+        user_claims.clone().unwrap().role == auth::Role::User ||
+        user_claims.clone().unwrap().role == auth::Role::Premium ||
+        user_claims.clone().unwrap().role == auth::Role::Admin
+    );
+
     // Authorize only the other role than Anonymous to send email
     let receiver_email = if let Some(email) = payload.receiver_email.clone() {
-        if user_claims.is_none() && user_claims.unwrap().role != auth::Role::Anonymous {
+        if is_connected {
+            Some(email)
+        } else {
             return Err(ApiError::Forbidden);
         }
-        Some(email)
     } else {
         None
     };
 
-    server::link::link_send_message_end(
+    let auth_key = server::link::link_send_message_end(
         link_claims.id,
         file_id,
         payload.upload_id,
@@ -399,6 +411,44 @@ pub async fn upload_link_message_finish_multipart(
             .map_err(|_| ApiError::Base64)?,
         &state.db,
     )?;
+
+    // Only return the auth_key if the user is logged in
+    let auth_key = if is_connected {
+        auth_key
+    } else {
+        Uuid::nil()
+    };
+    let response = UploadLinkMessageFinishMultipartResult { auth_key };
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+///
+/// Delete link transfer
+///
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct DeleteLinkMessage {
+    // The type already validates that the provided input is valid
+    auth_key: Uuid,
+}
+
+#[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
+pub async fn link_message_delete(
+    Path(id): Path<Uuid>,
+    user_claims: Extension<UserClaims>,
+    Extension(link_claims): Extension<LinkClaims>,
+    State(state): State<AppState>,
+    Json(payload): Json<DeleteLinkMessage>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Check that the path correspond to the id in session
+    if id != link_claims.id {
+        return Err(ApiError::Forbidden);
+    }
+    
+    server::link::link_delete
+
 
     Ok((StatusCode::OK, Json(())))
 }

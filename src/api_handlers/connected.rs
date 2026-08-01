@@ -661,6 +661,8 @@ pub async fn get_saved_transfers(
             enc_transfer_id: URL_SAFE_NO_PAD.encode(t.enc_transfer_id),
             nonce_password: URL_SAFE_NO_PAD.encode(t.nonce_password),
             enc_password: URL_SAFE_NO_PAD.encode(t.enc_password),
+            nonce_auth_key: t.nonce_auth_key.map(|v| URL_SAFE_NO_PAD.encode(v)).unwrap_or_default(),
+            enc_auth_key: t.enc_auth_key.map(|v| URL_SAFE_NO_PAD.encode(v)).unwrap_or_default(),
         }
     }).collect();
 
@@ -679,6 +681,10 @@ pub struct AddTransfer {
     nonce_password: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     enc_password: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_auth_key: Option<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    enc_auth_key: Option<String>,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -697,6 +703,17 @@ pub async fn add_saved_transfer(
     let nonce_password = URL_SAFE_NO_PAD.decode(&payload.nonce_password).map_err(|_| ApiError::Base64)?;
     let enc_password = URL_SAFE_NO_PAD.decode(&payload.enc_password).map_err(|_| ApiError::Base64)?;
 
+    let nonce_auth_key = payload
+        .nonce_auth_key
+        .map(|s| URL_SAFE_NO_PAD.decode(s))
+        .transpose()
+        .map_err(|_| ApiError::Base64)?;
+
+    let enc_auth_key = payload
+        .enc_auth_key
+        .map(|s| URL_SAFE_NO_PAD.decode(s))
+        .transpose()
+        .map_err(|_| ApiError::Base64)?;
 
     server::connected::add_saved_transfer(
         claims_session.id,
@@ -704,6 +721,8 @@ pub async fn add_saved_transfer(
         enc_transfer_id,
         nonce_password,
         enc_password,
+        nonce_auth_key,
+        enc_auth_key,
         &state.db,
     )?;
 

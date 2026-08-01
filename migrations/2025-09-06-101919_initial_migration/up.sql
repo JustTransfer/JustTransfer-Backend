@@ -40,17 +40,6 @@ CREATE TABLE key_pairs
     revoked_at              TIMESTAMPTZ
 );
 
--- Table
-CREATE TABLE saved_transfers
-(
-    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    owner_id                UUID        NOT NULL REFERENCES users(id),
-    nonce_transfer_id       BYTEA       NOT NULL,
-    enc_transfer_id         BYTEA       NOT NULL,
-    nonce_password          BYTEA       NOT NULL,
-    enc_password            BYTEA       NOT NULL
-);
-
 -- Table reset_tokens
 CREATE TABLE reset_tokens
 (
@@ -82,4 +71,17 @@ CREATE TABLE link_transfers
     file_size               BIGINT        NOT NULL,
     chunk_size              BIGINT        NOT NULL
     -- signature               BYTEA todo
+);
+
+-- Table saved_transfers
+CREATE TABLE saved_transfers
+(
+    id                      UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    owner_id                UUID        NOT NULL REFERENCES users(id),
+    nonce_transfer_id       BYTEA       NOT NULL,
+    enc_transfer_id         BYTEA       NOT NULL,
+    nonce_password          BYTEA       NOT NULL,
+    enc_password            BYTEA       NOT NULL,
+    nonce_auth_key          BYTEA,
+    enc_auth_key            BYTEA
 );

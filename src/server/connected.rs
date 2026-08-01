@@ -18,6 +18,7 @@ use crate::schema::users::dsl::users;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
 use crate::schema::key_pairs::dsl::key_pairs;
+use crate::schema::saved_transfers::nonce_auth_key;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
 
 ///
@@ -769,6 +770,8 @@ pub fn add_saved_transfer (
     enc_transfer_id_param: Vec<u8>,
     nonce_password_param: Vec<u8>,
     enc_password_param: Vec<u8>,
+    nonce_auth_key_param: Option<Vec<u8>>,
+    enc_auth_key_param: Option<Vec<u8>>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -780,6 +783,8 @@ pub fn add_saved_transfer (
         enc_transfer_id: &enc_transfer_id_param,
         nonce_password: &nonce_password_param,
         enc_password: &enc_password_param,
+        nonce_auth_key: nonce_auth_key_param.as_ref(),
+        enc_auth_key: enc_auth_key_param.as_ref(),
     };
 
     diesel::insert_into(crate::schema::saved_transfers::table)
