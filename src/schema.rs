@@ -22,7 +22,7 @@ diesel::table! {
         upload_id -> Text,
         password_file -> Bytea,
         server_login -> Nullable<Bytea>,
-        auth_key -> Bytea,
+        auth_key -> Uuid,
         cfilename -> Bytea,
         nonce_filename -> Bytea,
         file_id -> Uuid,

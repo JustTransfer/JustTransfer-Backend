@@ -58,7 +58,7 @@ CREATE TABLE link_transfers
 
     password_file           BYTEA       NOT NULL,
     server_login            BYTEA,
-    auth_key                BYTEA       NOT NULL,
+    auth_key                UUID        NOT NULL,
 
     cfilename               BYTEA       NOT NULL,
     nonce_filename          BYTEA       NOT NULL,

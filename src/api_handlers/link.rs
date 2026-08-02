@@ -446,9 +446,14 @@ pub async fn link_message_delete(
     if id != link_claims.id {
         return Err(ApiError::Forbidden);
     }
-    
-    server::link::link_delete
 
+    server::link::delete_link_transfer(
+        id,
+        payload.auth_key,
+        &state.db,
+        &state.s3,
+    )
+        .await?;
 
     Ok((StatusCode::OK, Json(())))
 }

@@ -99,6 +99,7 @@ async fn main() {
         .layer(session_layer.clone()) // TODO check if correct
         .layer(link_session_layer.clone());
 
+    // Routes for connected link transfer
     let auth_link_app = Router::new()
         .route("/api/link/message/{id}", delete(api_handlers::link::link_message_delete))
 

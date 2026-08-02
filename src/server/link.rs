@@ -1,3 +1,4 @@
+use libsodium_sys::*;
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use chrono::Utc;
@@ -22,7 +23,33 @@ use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invali
 ///
 /// Link Transfer
 ///
-async fn delete_invalid_link_message(
+
+async fn delete_link_transfer_db(
+    pool: &DbPool,
+    s3: &aws_sdk_s3::Client,
+    link_transfer_param: LinkTransfer,
+) -> Result<(), ServerError> {
+    use crate::schema::link_transfers;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Delete from DB
+    diesel::delete(link_transfers.filter(link_transfers::id.eq(link_transfer_param.id)))
+        .execute(&mut conn)?;
+
+    // Delete file from S3
+    s3.delete_object()
+        .bucket(S3_BUCKET_NAME.get().unwrap())
+        .key(link_transfer_param.file_id.to_string())
+        .send()
+        .await
+        .map_err(|_| ServerError::Internal)?;
+
+    info!("Deleted link transfer with id: {}", link_transfer_param.id);
+
+    Ok(())
+}
+
+async fn delete_invalid_link_transfer_db(
     pool: &DbPool,
     s3: &aws_sdk_s3::Client,
     id_param: Uuid,
@@ -41,20 +68,7 @@ async fn delete_invalid_link_message(
         .optional()?;
 
     if let Some(message) = message_opt {
-
-        // Delete from DB
-        diesel::delete(link_transfers.filter(link_transfers::id.eq(id_param)))
-            .execute(&mut conn)?;
-
-        // Delete file from S3
-        s3.delete_object()
-            .bucket(S3_BUCKET_NAME.get().unwrap())
-            .key(message.file_id.to_string())
-            .send()
-            .await
-            .map_err(|_| ServerError::Internal)?;
-
-        info!("Deleted expired/max downloaded link transfer with id: {}", message.id);
+        delete_link_transfer_db(pool, s3, message).await?;
     }
 
     Ok(())
@@ -74,7 +88,7 @@ pub async fn login_start_link(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
-    delete_invalid_link_message(pool, s3, id_param).await?;
+    delete_invalid_link_transfer_db(pool, s3, id_param).await?;
 
     let annonymous_message_opt = link_transfers::table
         .filter(link_transfers::id.eq(id_param))
@@ -203,7 +217,7 @@ pub async fn link_get_message(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
-    delete_invalid_link_message(pool, s3, id_param).await?;
+    delete_invalid_link_transfer_db(pool, s3, id_param).await?;
 
 
     let transaction_result = conn.transaction::<LinkTransfer, ServerError, _>(|conn| {
@@ -289,7 +303,7 @@ pub async fn link_send_message(
         id: &id_transfer,
         upload_id: &"".to_string(), // Empty string to be updated after
         password_file: &password_file_param.serialize().to_vec(),
-        auth_key: &Uuid::new_v4().as_bytes().to_vec(), // TODO check if correct
+        auth_key: &Uuid::new_v4(),
         cfilename: &filename_param,
         nonce_filename: &nonce_filename_param,
         file_id: &file_id_param,
@@ -448,10 +462,10 @@ pub async fn link_send_message_end(
     let auth_key = link_transfers::table
         .filter(link_transfers::id.eq(message_id))
         .select(link_transfers::auth_key)
-        .first::<Vec<u8>>(&mut conn)
+        .first::<Uuid>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
     
-    Ok(Uuid::from_slice(&auth_key).map_err(|_| ServerError::Internal)?)
+    Ok(auth_key)
 }
 
 pub fn update_message_mac(
@@ -471,17 +485,41 @@ pub fn update_message_mac(
     Ok(())
 }
 
-pub fn delete_link_tranfser(
+pub async fn delete_link_transfer(
     id: Uuid,
-    auth_key: String,
+    auth_key: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
 
     use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the auth_key is valid
-    // TODO
+    let message = link_transfers::table
+        .filter(link_transfers::id.eq(id))
+        .first::<LinkTransfer>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let equal = unsafe {
+        sodium_memcmp(
+            auth_key.as_bytes().as_ptr().cast(),
+            message.auth_key.as_bytes().as_ptr().cast(),
+            16,
+        ) == 0
+    };
+
+    if !equal {
+        return Err(ServerError::Unauthorized);
+    }
+
+    // Delete the file
+    delete_link_transfer_db(
+        pool,
+        s3,
+        message,
+    ).await?;
 
     Ok(())
 }
