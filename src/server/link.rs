@@ -423,9 +423,9 @@ pub async fn link_send_message_end(
         .map_err(|_| ServerError::Internal)?;
 
     // Prepare the parts for completing the multipart upload
-    let parts = etags_param.iter().map(|p| {
+    let parts = etags_param.iter().enumerate().map(|(i, p)| {
         CompletedPart::builder()
-            .part_number(etags_param.iter().position(|x| x == p).unwrap() as i32 + 1)
+            .part_number(i as i32 + 1)
             .e_tag(p.clone())
             .build()
     }).collect::<Vec<_>>();

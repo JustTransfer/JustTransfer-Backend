@@ -345,10 +345,13 @@ pub async fn delete_invalid_file_size (
         .ok_or(ServerError::Internal)?;
 
     let diff = (uploaded_file_size - anonymous_message.file_size).abs();
-    let tolerance = anonymous_message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT;
 
-    // Check if the uploaded file size matches the expected file size with tolerance 1%
+    let percent_tolerance = anonymous_message.file_size as f64 * MAX_ENC_SIZE_DIFF_PERCENT;
+    let tolerance = percent_tolerance.max(MIN_ENC_SIZE_DIFF_BYTES as f64);
+
     if diff as f64 > tolerance {
+        error!("Uploaded file size {} does not match expected file size {} for file_id {}. Difference: {}, Tolerance: {}",
+            uploaded_file_size, anonymous_message.file_size, file_id_param, diff, tolerance);
         // Delete the uploaded file from S3
         s3.delete_object()
             .bucket(S3_BUCKET_NAME.get().unwrap())

@@ -6,7 +6,8 @@ use uuid::Uuid;
 /// Const for Server
 pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10 MiB
 pub const MAX_TIME_MARGIN: i64 = 1; // minute
-pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.01; // 1%
+pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.05; // 5%
+pub const MIN_ENC_SIZE_DIFF_BYTES: usize = 1024; // 1 KiB
 
 
 /// Const for Dummy User
