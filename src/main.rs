@@ -46,7 +46,6 @@ async fn main() {
         .allow_headers(Any);
 
     let session_layer = api_handlers::auth::get_session_layer("user_session");
-    let link_session_layer = api_handlers::auth::get_session_layer("link_session");
 
     // Public routes (no authentication required)
     let public_app = Router::new()
@@ -85,7 +84,7 @@ async fn main() {
     let link_app = Router::new()
         .route("/api/link/message/{id}/metadata", get(api_handlers::link::link_message_get_one_metadata))
         .route("/api/link/message/{id}", get(api_handlers::link::link_message_get_download_url))
-        .route("/api/link/message/uploadfinish/{file_id}", post(api_handlers::link::upload_link_message_finish_multipart))
+        .route("/api/link/message/{id}/uploadfinish/{file_id}", post(api_handlers::link::upload_link_message_finish_multipart))
         .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
 
         // Routes for creating a link transfer (authentication optional)
@@ -96,8 +95,7 @@ async fn main() {
         .route("/api/link/message/{id}/login/start", post(api_handlers::link::link_message_login_start))
         .route("/api/link/message/{id}/login/end", post(api_handlers::link::link_message_login_end))
 
-        .layer(session_layer.clone()) // TODO check if correct
-        .layer(link_session_layer.clone());
+        .layer(session_layer.clone());
 
     // Routes for connected link transfer
     let auth_link_app = Router::new()
@@ -105,8 +103,7 @@ async fn main() {
 
         .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
         .layer(middleware::from_fn(api_handlers::auth::require_auth))
-        .layer(session_layer.clone())
-        .layer(link_session_layer.clone());
+        .layer(session_layer.clone());
 
 
     let app = Router::new()

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Extension, Json};
 use tower_sessions::{Session};
 
@@ -136,7 +138,15 @@ pub async fn link_message_login_end(
         .await?;
 
     // Create session
-    session.insert(AUTH_KEY_ANONYMOUS, id)
+    let mut authorized_ids = session
+        .get::<HashSet<Uuid>>(AUTH_KEY_ANONYMOUS)
+        .await
+        .map_err(|_| ApiError::ServerError)?
+        .unwrap_or_default();
+
+    authorized_ids.insert(id);
+
+    session.insert(AUTH_KEY_ANONYMOUS, authorized_ids)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -333,7 +343,15 @@ pub async fn upload_link_message(
         .await?;
 
     // Create session
-    session.insert(AUTH_KEY_ANONYMOUS, payload.id)
+    let mut authorized_ids = session
+        .get::<HashSet<Uuid>>(AUTH_KEY_ANONYMOUS)
+        .await
+        .map_err(|_| ApiError::ServerError)?
+        .unwrap_or_default();
+
+    authorized_ids.insert(payload.id);
+
+    session.insert(AUTH_KEY_ANONYMOUS, authorized_ids)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -345,6 +363,12 @@ pub async fn upload_link_message(
         message_file_id: file_id,
     }))
     )
+}
+
+#[derive(Deserialize)]
+pub struct FinishMultipartParams {
+    id: Uuid,
+    file_id: Uuid,
 }
 
 #[derive(Deserialize, Validate, Debug)]
@@ -366,7 +390,7 @@ pub struct UploadLinkMessageFinishMultipartResult {
 
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
 pub async fn upload_link_message_finish_multipart(
-    Path(file_id): Path<Uuid>,
+    Path(params): Path<FinishMultipartParams>,
     user_claims: Option<Extension<UserClaims>>,
     Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
@@ -375,6 +399,11 @@ pub async fn upload_link_message_finish_multipart(
 
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    // Check that the path id matches the id authorized in session
+    if params.id != link_claims.id {
+        return Err(ApiError::Forbidden);
+    }
 
     let is_connected = user_claims.is_some() && (
         user_claims.clone().unwrap().role == auth::Role::User ||
@@ -395,7 +424,7 @@ pub async fn upload_link_message_finish_multipart(
 
     let auth_key = server::link::link_send_message_end(
         link_claims.id,
-        file_id,
+        params.file_id,
         payload.upload_id,
         payload.etags,
         receiver_email,
@@ -406,7 +435,7 @@ pub async fn upload_link_message_finish_multipart(
         .await?;
 
     server::link::update_message_mac(
-        file_id,
+        params.file_id,
         URL_SAFE_NO_PAD.decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
         &state.db,

@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use axum::{http::StatusCode, response::Response};
 use serde::{Deserialize, Serialize};
 use axum::middleware::Next;
+use axum::extract::Path;
 use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
 
 use uuid::Uuid;
@@ -179,22 +182,29 @@ pub async fn require_auth(
     Ok(next.run(req).await)
 }
 
-pub async  fn require_auth_link(
+#[derive(Deserialize)]
+pub struct LinkAuthParam {
+    id: Uuid,
+}
+pub async fn require_auth_link(
+    Path(params): Path<LinkAuthParam>,
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
 
-    let message_id = session
-        .get::<Uuid>(AUTH_KEY_ANONYMOUS)
+    let authorized_ids = session
+        .get::<HashSet<Uuid>>(AUTH_KEY_ANONYMOUS)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+        .unwrap_or_default();
+
+    if !authorized_ids.contains(&params.id) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
 
     // Extend the request with the anonymous message ID for later use in handlers
-    req.extensions_mut().insert(LinkClaims {
-        id: message_id,
-    });
+    req.extensions_mut().insert(LinkClaims { id: params.id });
 
     Ok(next.run(req).await)
 }
