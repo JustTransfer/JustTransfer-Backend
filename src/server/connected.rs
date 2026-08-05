@@ -795,6 +795,22 @@ pub fn add_saved_transfer (
     Ok(())
 }
 
+pub fn delete_saved_transfer (
+    user_id_param: Uuid,
+    saved_transfer_id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+    
+    diesel::delete(crate::schema::saved_transfers::table)
+        .filter(crate::schema::saved_transfers::owner_id.eq(user_id_param))
+        .filter(crate::schema::saved_transfers::id.eq(saved_transfer_id_param))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
 ///
 /// Admin
 ///

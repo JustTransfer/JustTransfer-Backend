@@ -728,3 +728,19 @@ pub async fn add_saved_transfer(
 
     Ok(StatusCode::OK)
 }
+
+#[instrument(skip(state), err(Debug))]
+pub async fn delete_saved_transfer(
+    Extension(claims_session): Extension<UserClaims>,
+    Path(saved_transfer_id): Path<Uuid>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    server::connected::delete_saved_transfer(
+        claims_session.id,
+        saved_transfer_id,
+        &state.db,
+    )?;
+
+    Ok(StatusCode::OK)
+}
