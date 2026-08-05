@@ -365,7 +365,7 @@ pub async fn delete_invalid_file_size (
             .execute(&mut conn)
             .map_err(|_| ServerError::Internal)?;
 
-        return Err(ServerError::Internal);
+        return Err(ServerError::Forbidden);
     }
 
     Ok(())
