@@ -100,6 +100,7 @@ async fn main() {
 
     // Routes for connected link transfer
     let auth_link_app = Router::new()
+        .route("/api/link/message/{id}", put(api_handlers::link::link_message_update))
         .route("/api/link/message/{id}", delete(api_handlers::link::link_message_delete))
 
         .layer(middleware::from_fn(api_handlers::auth::require_auth_link))

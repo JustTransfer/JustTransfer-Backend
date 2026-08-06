@@ -97,7 +97,6 @@ pub struct UserClaims {
 
 impl UserClaims {
     pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i64, file_size: i64, max_downloads: i64) -> Result<(), ApiError> {
-        
         // Creation time
         let now = Utc::now();
         if creation_time > now + chrono::Duration::minutes(MAX_TIME_MARGIN) || creation_time < now - chrono::Duration::minutes(MAX_TIME_MARGIN) {
@@ -111,6 +110,20 @@ impl UserClaims {
 
         // File size
         if file_size > self.role.max_file_size() {
+            return Err(ApiError::Forbidden);
+        }
+
+        // Max downloads
+        if max_downloads < 1 || max_downloads > self.role.max_downloads() {
+            return Err(ApiError::Forbidden);
+        }
+
+        Ok(())
+    }
+    
+    pub fn authorize_update(&self, lifetime: i64, max_downloads: i64) -> Result<(), ApiError> {
+        // Lifetime
+        if lifetime < 1 || lifetime > self.role.max_lifetime() {
             return Err(ApiError::Forbidden);
         }
 

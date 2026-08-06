@@ -453,6 +453,53 @@ pub async fn upload_link_message_finish_multipart(
 }
 
 ///
+/// Update link transfer
+///
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct UpdateLinkMessage {
+    // The type already validates that the provided input is valid
+    auth_key: Uuid,
+    #[validate(custom(function = "validate_int_param_64"))]
+    max_downloads: i64,
+    #[validate(custom(function = "validate_int_param_64"))]
+    lifetime: i64,
+}
+
+#[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
+pub async fn link_message_update(
+    Path(id): Path<Uuid>,
+    user_claims: Extension<UserClaims>,
+    Extension(link_claims): Extension<LinkClaims>,
+    State(state): State<AppState>,
+    Json(payload): Json<UpdateLinkMessage>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    // Check that the path correspond to the id in session
+    if id != link_claims.id {
+        return Err(ApiError::Forbidden);
+    }
+
+    // Authorize the upload based on the user role and the provided parameters
+    user_claims.authorize_update(payload.lifetime, payload.max_downloads)?;
+
+    server::link::update_link_transfer(
+        id,
+        payload.auth_key,
+        payload.max_downloads,
+        payload.lifetime,
+        &state.db,
+        &state.s3,
+    )
+        .await?;
+
+    Ok((StatusCode::ACCEPTED, Json(())))
+}
+
+///
 /// Delete link transfer
 ///
 

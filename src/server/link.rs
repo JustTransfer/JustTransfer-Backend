@@ -485,6 +485,49 @@ pub fn update_message_mac(
     Ok(())
 }
 
+pub async fn update_link_transfer(
+    id: Uuid,
+    auth_key: Uuid,
+    max_downloads_param: i64,
+    lifetime_param: i64,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
+) -> Result<(), ServerError> {
+
+    use crate::schema::link_transfers;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Check if the auth_key is valid
+    let message = link_transfers::table
+        .filter(link_transfers::id.eq(id))
+        .first::<LinkTransfer>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let equal = unsafe {
+        sodium_memcmp(
+            auth_key.as_bytes().as_ptr().cast(),
+            message.auth_key.as_bytes().as_ptr().cast(),
+            16,
+        ) == 0
+    };
+
+    if !equal {
+        return Err(ServerError::Unauthorized);
+    }
+
+    // Update the transfer
+    diesel::update(link_transfers.filter(link_transfers::id.eq(id)))
+        .set((
+            link_transfers::max_downloads.eq(max_downloads_param),
+            link_transfers::lifetime.eq(lifetime_param),
+        ))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
 pub async fn delete_link_transfer(
     id: Uuid,
     auth_key: Uuid,
