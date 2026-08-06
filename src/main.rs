@@ -64,7 +64,7 @@ async fn main() {
         .route("/api/pubkey/{id}", get(api_handlers::connected::get_pub_key))
         .route("/api/user/{email}/pubkey", get(api_handlers::connected::get_pub_key_user))
         .route("/api/user/saved-transfer", get(api_handlers::connected::get_saved_transfers))
-        .route("/api/user/saved-transfer", post(api_handlers::connected::add_saved_transfer)) // todo check email sended on new transfer
+        .route("/api/user/saved-transfer", post(api_handlers::connected::add_saved_transfer))
         .route("/api/user/saved-transfer/{id}", delete(api_handlers::connected::delete_saved_transfer))
         .layer(middleware::from_fn(api_handlers::auth::require_auth))
 

@@ -69,8 +69,8 @@ pub fn validate_email(email: &str) -> Result<(), ValidationError> {
 }
 
 pub fn validate_optional_email(email: &str) -> Result<(), ValidationError> {
-    if email.is_empty() {
-        return Ok(());
+    if email.trim().is_empty() {
+        return Err(ValidationError::new("invalid_email"));
     }
 
     validate_email(email)
