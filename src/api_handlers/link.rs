@@ -485,10 +485,16 @@ pub async fn upload_link_message_finish_multipart(
 pub struct UpdateLinkMessage {
     // The type already validates that the provided input is valid
     auth_key: Uuid,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    cfilename: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_filename: String,
     #[validate(custom(function = "validate_int_param_64"))]
     max_downloads: i64,
     #[validate(custom(function = "validate_int_param_64"))]
     lifetime: i64,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    mac: String,
 }
 
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
@@ -514,8 +520,14 @@ pub async fn link_message_update(
     server::link::update_link_transfer(
         id,
         payload.auth_key,
+        URL_SAFE_NO_PAD.decode(&payload.cfilename)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
+            .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
         payload.lifetime,
+        URL_SAFE_NO_PAD.decode(&payload.mac)
+            .map_err(|_| ApiError::Base64)?,
         &state.db,
         &state.s3,
     )

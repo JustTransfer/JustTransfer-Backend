@@ -505,8 +505,11 @@ pub fn update_message_mac(
 pub async fn update_link_transfer(
     id: Uuid,
     auth_key: Uuid,
+    cfilename: Vec<u8>,
+    nonce_filename: Vec<u8>,
     max_downloads_param: i64,
     lifetime_param: i64,
+    mac: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
@@ -536,8 +539,11 @@ pub async fn update_link_transfer(
     // Update the transfer
     diesel::update(link_transfers.filter(link_transfers::id.eq(id)))
         .set((
+            link_transfers::cfilename.eq(cfilename),
+            link_transfers::nonce_filename.eq(nonce_filename),
             link_transfers::max_downloads.eq(max_downloads_param),
             link_transfers::lifetime.eq(lifetime_param),
+            link_transfers::mac.eq(mac),
         ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
