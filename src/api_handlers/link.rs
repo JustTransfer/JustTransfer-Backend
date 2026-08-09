@@ -176,12 +176,17 @@ pub async fn link_message_get_one_metadata(
     let resp = Json(LinkGetMessageResult {
         message: LinkTransferMetadataEncoded {
             id: message.id,
+            c_enc_key: URL_SAFE_NO_PAD.encode(message.c_enc_key),
+            nonce_enc_key: URL_SAFE_NO_PAD.encode(message.nonce_enc_key),
+            c_mac_key: URL_SAFE_NO_PAD.encode(message.c_mac_key),
+            nonce_mac_key: URL_SAFE_NO_PAD.encode(message.nonce_mac_key),
             cfilename: URL_SAFE_NO_PAD.encode(message.cfilename),
             nonce_filename: URL_SAFE_NO_PAD.encode(message.nonce_filename),
             file_id: message.file_id,
             max_downloads: message.max_downloads,
             lifetime: message.lifetime,
             creation_time: message.creation_time,
+            hash_file: URL_SAFE_NO_PAD.encode(message.hash_file.unwrap()),
             mac: URL_SAFE_NO_PAD.encode(message.mac.unwrap()),
             number_downloads: message.number_downloads,
             file_size: message.file_size,
@@ -271,6 +276,14 @@ pub struct UploadLinkMessageFinish {
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     client_registration_finish: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    c_enc_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_enc_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    c_mac_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_mac_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     cfilename: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     nonce_filename: String,
@@ -328,6 +341,14 @@ pub async fn upload_link_message(
     let (upload_urls, upload_id) = server::link::link_send_message(
         req,
         payload.id,
+        URL_SAFE_NO_PAD.decode(&payload.c_enc_key)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.nonce_enc_key)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.c_mac_key)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.nonce_mac_key)
+            .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
@@ -377,6 +398,8 @@ pub struct UploadLinkMessageFinishMultipart {
     upload_id: String,
     #[validate(length(min = 1, max = MAX_LENGTH_BASE64))]
     etags: Vec<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    hash_file: String,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
     #[validate(custom(function = "validate_optional_email"))]
@@ -436,6 +459,8 @@ pub async fn upload_link_message_finish_multipart(
 
     server::link::update_message_mac(
         params.file_id,
+        URL_SAFE_NO_PAD.decode(&payload.hash_file)
+            .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
         &state.db,

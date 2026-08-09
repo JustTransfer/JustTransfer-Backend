@@ -60,12 +60,18 @@ CREATE TABLE link_transfers
     server_login            BYTEA,
     auth_key                UUID        NOT NULL,
 
+    c_enc_key                 BYTEA       NOT NULL,
+    nonce_enc_key           BYTEA       NOT NULL,
+    c_mac_key                 BYTEA       NOT NULL,
+    nonce_mac_key           BYTEA       NOT NULL,
+
     cfilename               BYTEA       NOT NULL,
     nonce_filename          BYTEA       NOT NULL,
     file_id                 UUID        NOT NULL UNIQUE,
     max_downloads           BIGINT      NOT NULL,
     lifetime                BIGINT      NOT NULL,
     creation_time           TIMESTAMPTZ NOT NULL,
+    hash_file               BYTEA,
     mac                     BYTEA,
     number_downloads        BIGINT DEFAULT 0 NOT NULL,
     file_size               BIGINT        NOT NULL,

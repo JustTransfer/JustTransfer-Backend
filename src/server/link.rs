@@ -189,12 +189,17 @@ pub async fn link_get_message_metadata(
         .filter(link_transfers::mac.is_not_null())
         .select((
             link_transfers::id,
+            link_transfers::c_enc_key,
+            link_transfers::nonce_enc_key,
+            link_transfers::c_mac_key,
+            link_transfers::nonce_mac_key,
             link_transfers::cfilename,
             link_transfers::nonce_filename,
             link_transfers::file_id,
             link_transfers::max_downloads,
             link_transfers::lifetime,
             link_transfers::creation_time,
+            link_transfers::hash_file,
             link_transfers::mac,
             link_transfers::number_downloads,
             link_transfers::file_size,
@@ -282,7 +287,11 @@ pub fn link_send_message_start(
 pub async fn link_send_message(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     id_transfer: Uuid,
-    filename_param: Vec<u8>,
+    c_enc_key_param: Vec<u8>,
+    nonce_enc_key_param: Vec<u8>,
+    c_mac_key_param: Vec<u8>,
+    nonce_mac_key_param: Vec<u8>,
+    cfilename_param: Vec<u8>,
     nonce_filename_param: Vec<u8>,
     file_id_param: Uuid,
     max_downloads_param: i64,
@@ -304,7 +313,11 @@ pub async fn link_send_message(
         upload_id: &"".to_string(), // Empty string to be updated after
         password_file: &password_file_param.serialize().to_vec(),
         auth_key: &Uuid::new_v4(),
-        cfilename: &filename_param,
+        c_enc_key: &c_enc_key_param,
+        nonce_enc_key: &nonce_enc_key_param,
+        c_mac_key: &c_mac_key_param,
+        nonce_mac_key: &nonce_mac_key_param,
+        cfilename: &cfilename_param,
         nonce_filename: &nonce_filename_param,
         file_id: &file_id_param,
         max_downloads: &max_downloads_param,
@@ -470,6 +483,7 @@ pub async fn link_send_message_end(
 
 pub fn update_message_mac(
     file_id_param: Uuid,
+    hash_file: Vec<u8>,
     mac: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
@@ -478,7 +492,10 @@ pub fn update_message_mac(
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
     diesel::update(link_transfers.filter(link_transfers::file_id.eq(file_id_param)))
-        .set(link_transfers::mac.eq(Some(mac)))
+        .set((
+            link_transfers::hash_file.eq(hash_file),
+            link_transfers::mac.eq(mac),
+        ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 

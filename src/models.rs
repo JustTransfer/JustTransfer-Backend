@@ -1,9 +1,7 @@
-use aws_sdk_s3::types::builders::OwnerBuilder;
 use chrono::Utc;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
 use uuid::{Uuid};
-use crate::schema::link_transfers::nonce_filename;
 
 ///
 /// Opaque settings
@@ -196,12 +194,17 @@ pub struct LinkTransfer {
     pub password_file: Vec<u8>,
     pub server_login: Option<Vec<u8>>,
     pub auth_key: Uuid,
+    pub c_enc_key: Vec<u8>,
+    pub nonce_enc_key: Vec<u8>,
+    pub c_mac_key: Vec<u8>,
+    pub nonce_mac_key: Vec<u8>,
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
     pub max_downloads: i64,
     pub lifetime: i64,
     pub creation_time: chrono::DateTime<Utc>,
+    pub hash_file: Option<Vec<u8>>,
     pub mac: Option<Vec<u8>>,
     pub number_downloads: i64,
     pub file_size: i64,
@@ -216,6 +219,10 @@ pub struct NewLinkTransfer<'a> {
     pub upload_id: &'a String,
     pub password_file: &'a Vec<u8>,
     pub auth_key: &'a Uuid,
+    pub c_enc_key: &'a Vec<u8>,
+    pub nonce_enc_key: &'a Vec<u8>,
+    pub c_mac_key: &'a Vec<u8>,
+    pub nonce_mac_key: &'a Vec<u8>,
     pub cfilename: &'a Vec<u8>,
     pub nonce_filename: &'a Vec<u8>,
     pub file_id: &'a Uuid,
@@ -230,12 +237,17 @@ pub struct NewLinkTransfer<'a> {
 #[derive(Queryable, Serialize, Clone)]
 pub struct LinkTransferMetadata {
     pub id: Uuid,
+    pub c_enc_key: Vec<u8>,
+    pub nonce_enc_key: Vec<u8>,
+    pub c_mac_key: Vec<u8>,
+    pub nonce_mac_key: Vec<u8>,
     pub cfilename: Vec<u8>,
     pub nonce_filename: Vec<u8>,
     pub file_id: Uuid,
     pub max_downloads: i64,
     pub lifetime: i64,
     pub creation_time: chrono::DateTime<Utc>,
+    pub hash_file: Option<Vec<u8>>,
     pub mac: Option<Vec<u8>>,
     pub number_downloads: i64,
     pub file_size: i64,
@@ -245,12 +257,17 @@ pub struct LinkTransferMetadata {
 #[derive(Queryable, Serialize, Clone)]
 pub struct LinkTransferMetadataEncoded {
     pub id: Uuid,
+    pub c_enc_key: String,
+    pub nonce_enc_key: String,
+    pub c_mac_key: String,
+    pub nonce_mac_key: String,
     pub cfilename: String,
     pub nonce_filename: String,
     pub file_id: Uuid,
     pub max_downloads: i64,
     pub lifetime: i64,
     pub creation_time: chrono::DateTime<Utc>,
+    pub hash_file: String,
     pub mac: String,
     pub number_downloads: i64,
     pub file_size: i64,
