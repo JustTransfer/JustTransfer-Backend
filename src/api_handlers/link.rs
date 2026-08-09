@@ -570,3 +570,106 @@ pub async fn link_message_delete(
 
     Ok((StatusCode::OK, Json(())))
 }
+
+///
+/// Update password
+///
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct LinkMessagePasswordChangeStart {
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_start: String,
+}
+
+#[derive(Serialize)]
+pub struct LinkMessagePasswordChangeStartResult {
+    id: Uuid,
+    result: String,
+}
+
+#[instrument(skip_all, err(Debug))]
+pub async fn link_message_password_change_start(
+    Path(id): Path<Uuid>,
+    Extension(link_claims): Extension<LinkClaims>,
+    State(state): State<AppState>,
+    Json(payload): Json<LinkMessagePasswordChangeStart>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Check that the path correspond to the id in session
+    if id != link_claims.id {
+        return Err(ApiError::Forbidden);
+    }
+
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start)
+        .map_err(|_| ApiError::Base64)?;
+    let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
+
+    let server_registration_start_result =
+        server::link::link_send_message_start(id, req, &state.db)?;
+
+    Ok((
+           StatusCode::OK,
+           Json(LinkMessagePasswordChangeStartResult {
+               id: id,
+               result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
+           })),
+    )
+}
+
+#[derive(Deserialize, Validate, Debug)]
+pub struct LinkMessagePasswordChangeEnd {
+    auth_key: Uuid,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    client_registration_finish: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    c_enc_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_enc_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    c_mac_key: String,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    nonce_mac_key: String,
+}
+
+#[instrument(skip_all, err(Debug))]
+pub async fn link_message_password_change_end(
+    Path(id): Path<Uuid>,
+    Extension(link_claims): Extension<LinkClaims>,
+    State(state): State<AppState>,
+    Json(payload): Json<LinkMessagePasswordChangeEnd>,
+) -> Result<impl IntoResponse, ApiError> {
+
+    // Check that the path correspond to the id in session
+    if id != link_claims.id {
+        return Err(ApiError::Forbidden);
+    }
+
+    // Validate payload
+    payload.validate().map_err(|_| ApiError::InputValidation)?;
+
+    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
+        .map_err(|_| ApiError::Base64)?;
+    let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
+        .map_err(|_| ApiError::Opaque)?;
+
+    let server_registration_end_result = server::link::link_change_password_end(
+        id,
+        payload.auth_key,
+        req,
+        URL_SAFE_NO_PAD.decode(&payload.c_enc_key)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.nonce_enc_key)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.c_mac_key)
+            .map_err(|_| ApiError::Base64)?,
+        URL_SAFE_NO_PAD.decode(&payload.nonce_mac_key)
+            .map_err(|_| ApiError::Base64)?,
+        &state.db
+    )?;
+
+    Ok((StatusCode::OK, Json(())))
+}

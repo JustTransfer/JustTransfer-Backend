@@ -589,3 +589,54 @@ pub async fn delete_link_transfer(
 
     Ok(())
 }
+
+pub fn link_change_password_end(
+    id: Uuid,
+    auth_key: Uuid,
+    client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
+    c_enc_key: Vec<u8>,
+    nonce_enc_key: Vec<u8>,
+    c_mac_key: Vec<u8>,
+    nonce_mac_key: Vec<u8>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+
+    use crate::schema::link_transfers;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    // Check if the auth_key is valid
+    let message = link_transfers::table
+        .filter(link_transfers::id.eq(id))
+        .first::<LinkTransfer>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
+    let equal = unsafe {
+        sodium_memcmp(
+            auth_key.as_bytes().as_ptr().cast(),
+            message.auth_key.as_bytes().as_ptr().cast(),
+            16,
+        ) == 0
+    };
+
+    if !equal {
+        return Err(ServerError::Unauthorized);
+    }
+
+    let password_file_param =
+        ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
+
+    // Update the transfer
+    diesel::update(link_transfers.filter(link_transfers::id.eq(id)))
+        .set((
+            link_transfers::password_file.eq(password_file_param.serialize().to_vec()),
+            link_transfers::c_enc_key.eq(c_enc_key),
+            link_transfers::nonce_enc_key.eq(nonce_enc_key),
+            link_transfers::c_mac_key.eq(c_mac_key),
+            link_transfers::nonce_mac_key.eq(nonce_mac_key),
+        ))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}

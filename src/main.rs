@@ -102,6 +102,8 @@ async fn main() {
     let auth_link_app = Router::new()
         .route("/api/link/message/{id}", put(api_handlers::link::link_message_update))
         .route("/api/link/message/{id}", delete(api_handlers::link::link_message_delete))
+        .route("/api/link/message/{id}/password/start", post(api_handlers::link::link_message_password_change_start))
+        .route("/api/link/message/{id}/password/end", post(api_handlers::link::link_message_password_change_end))
 
         .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
         .layer(middleware::from_fn(api_handlers::auth::require_auth))
