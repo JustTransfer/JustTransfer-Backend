@@ -18,6 +18,7 @@ use crate::schema::users::dsl::users;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
 use crate::schema::key_pairs::dsl::key_pairs;
+use crate::schema::saved_transfers::dsl::saved_transfers;
 use crate::schema::saved_transfers::nonce_auth_key;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
 
@@ -567,27 +568,17 @@ pub fn delete_user(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
+    use crate::schema::saved_transfers;
     use crate::schema::key_pairs;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let _transaction_result = conn.transaction::<(), ServerError, _>(|conn| {
 
-        // Delete all sent messages of the user
-        /*diesel::delete(messages.filter(messages::sender_key_id.eq_any(
-            key_pairs.filter(key_pairs::owner_id.eq(user_id_param)).select(key_pairs::id)
-        )))
+        // Delete all saved transfers of the user
+        diesel::delete(saved_transfers.filter(saved_transfers::owner_id.eq(user_id_param)))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
-
-        // Delete all received messages of the user
-        diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
-            key_pairs.filter(key_pairs::owner_id.eq(user_id_param)).select(key_pairs::id)
-        )))
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;*/
-
-        // TODO delete all data
 
         // Delete all keys of the user
         diesel::delete(key_pairs.filter(key_pairs::owner_id.eq(user_id_param)))
@@ -757,12 +748,12 @@ pub fn get_saved_transfers(
 ) -> Result<Vec<SavedTransfer>, ServerError> {
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
     
-    let saved_transfers = crate::schema::saved_transfers::table
+    let transfers = crate::schema::saved_transfers::table
         .filter(crate::schema::saved_transfers::owner_id.eq(user_id_param))
         .load::<SavedTransfer>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
     
-    Ok(saved_transfers)
+    Ok(transfers)
 }
 
 pub fn add_saved_transfer (
