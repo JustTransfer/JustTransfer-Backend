@@ -43,7 +43,7 @@ pub fn validate_int_param_64(value: i64) -> Result<(), ValidationError> {
 }
 
 ///
-/// Validation functions for messages
+/// Validation functions for messages (already enforced by the API)
 ///
 
 pub fn validate_file_size(size: i64) -> Result<(), ValidationError> {
