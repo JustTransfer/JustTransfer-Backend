@@ -38,6 +38,9 @@ diesel::table! {
         number_downloads -> Int8,
         file_size -> Int8,
         chunk_size -> Int8,
+        sender_key_id -> Nullable<Uuid>,
+        signature_metadata -> Nullable<Bytea>,
+        signature -> Nullable<Bytea>,
     }
 }
 
@@ -85,6 +88,7 @@ diesel::table! {
 }
 
 diesel::joinable!(key_pairs -> users (owner_id));
+diesel::joinable!(link_transfers -> key_pairs (sender_key_id));
 diesel::joinable!(reset_tokens -> users (account_id));
 diesel::joinable!(saved_transfers -> users (owner_id));
 

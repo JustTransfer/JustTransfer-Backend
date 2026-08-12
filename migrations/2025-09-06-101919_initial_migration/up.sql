@@ -74,9 +74,12 @@ CREATE TABLE link_transfers
     hash_file               BYTEA,
     mac                     BYTEA,
     number_downloads        BIGINT DEFAULT 0 NOT NULL,
-    file_size               BIGINT        NOT NULL,
-    chunk_size              BIGINT        NOT NULL
-    -- signature               BYTEA todo
+    file_size               BIGINT      NOT NULL,
+    chunk_size              BIGINT      NOT NULL,
+
+    sender_key_id           UUID        REFERENCES key_pairs (id),
+    signature_metadata      BYTEA,
+    signature               BYTEA
 );
 
 -- Table saved_transfers

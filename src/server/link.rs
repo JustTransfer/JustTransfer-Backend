@@ -204,6 +204,9 @@ pub async fn link_get_message_metadata(
             link_transfers::number_downloads,
             link_transfers::file_size,
             link_transfers::chunk_size,
+            link_transfers::sender_key_id,
+            link_transfers::signature_metadata,
+            link_transfers::signature
         ))
         .first::<LinkTransferMetadata>(&mut conn)
         .optional()?
@@ -485,6 +488,9 @@ pub fn update_message_mac(
     file_id_param: Uuid,
     hash_file: Vec<u8>,
     mac: Vec<u8>,
+    sender_key_id: Option<Uuid>,
+    signature_metadata: Option<Vec<u8>>,
+    signature: Option<Vec<u8>>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
 
@@ -495,6 +501,9 @@ pub fn update_message_mac(
         .set((
             link_transfers::hash_file.eq(hash_file),
             link_transfers::mac.eq(mac),
+            link_transfers::sender_key_id.eq(sender_key_id),
+            link_transfers::signature_metadata.eq(signature_metadata),
+            link_transfers::signature.eq(signature),
         ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;

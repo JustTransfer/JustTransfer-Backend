@@ -191,6 +191,9 @@ pub async fn link_message_get_one_metadata(
             number_downloads: message.number_downloads,
             file_size: message.file_size,
             chunk_size: message.chunk_size,
+            sender_key_id: message.sender_key_id,
+            signature_metadata: message.signature_metadata.map(|s| URL_SAFE_NO_PAD.encode(s)),
+            signature: message.signature.map(|s| URL_SAFE_NO_PAD.encode(s)),
         },
     });
 
@@ -404,6 +407,12 @@ pub struct UploadLinkMessageFinishMultipart {
     mac: String,
     #[validate(custom(function = "validate_optional_email"))]
     receiver_email: Option<String>,
+    // The type already validates that the provided input is valid
+    sender_key_id: Option<Uuid>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    signature_metadata: Option<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    signature: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -444,6 +453,32 @@ pub async fn upload_link_message_finish_multipart(
     } else {
         None
     };
+    
+    // Authorize signing only for connected users
+    let has_signature_fields = payload.sender_key_id.is_some()
+        || payload.signature_metadata.is_some()
+        || payload.signature.is_some();
+
+    if has_signature_fields && !is_connected {
+        return Err(ApiError::Forbidden);
+    }
+
+    // Signing requires all three fields together, or none at all
+    let sender_key_id = if is_connected {
+        match (&payload.sender_key_id, &payload.signature_metadata, &payload.signature) {
+            (Some(_), Some(_), Some(_)) => payload.sender_key_id,
+            (None, None, None) => None,
+            _ => return Err(ApiError::InputValidation),
+        }
+    } else {
+        None
+    };
+
+    let (signature_metadata, signature) = if sender_key_id.is_some() {
+        (payload.signature_metadata.clone(), payload.signature.clone())
+    } else {
+        (None, None)
+    };
 
     let auth_key = server::link::link_send_message_end(
         link_claims.id,
@@ -463,6 +498,9 @@ pub async fn upload_link_message_finish_multipart(
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
+        sender_key_id,
+        signature_metadata.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
+        signature.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
         &state.db,
     )?;
 
