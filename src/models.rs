@@ -238,7 +238,7 @@ pub struct NewLinkTransfer<'a> {
 }
 
 #[derive(Queryable, Serialize, Clone)]
-pub struct LinkTransferMetadata {
+pub struct LinkTransferMetadataNoSender {
     pub id: Uuid,
     pub c_enc_key: Vec<u8>,
     pub nonce_enc_key: Vec<u8>,
@@ -262,6 +262,31 @@ pub struct LinkTransferMetadata {
 }
 
 #[derive(Queryable, Serialize, Clone)]
+pub struct LinkTransferMetadata {
+    pub id: Uuid,
+    pub c_enc_key: Vec<u8>,
+    pub nonce_enc_key: Vec<u8>,
+    pub c_mac_key: Vec<u8>,
+    pub nonce_mac_key: Vec<u8>,
+    pub cfilename: Vec<u8>,
+    pub nonce_filename: Vec<u8>,
+    pub file_id: Uuid,
+    pub max_downloads: i64,
+    pub lifetime: i64,
+    pub creation_time: chrono::DateTime<Utc>,
+    pub hash_file: Option<Vec<u8>>,
+    pub mac: Option<Vec<u8>>,
+    pub number_downloads: i64,
+    pub file_size: i64,
+    pub chunk_size: i64,
+
+    pub sender_pub_key: Option<Vec<u8>>,
+    pub sender_email: Option<String>,
+    pub signature_metadata: Option<Vec<u8>>,
+    pub signature: Option<Vec<u8>>,
+}
+
+#[derive(Queryable, Serialize, Clone)]
 pub struct LinkTransferMetadataEncoded {
     pub id: Uuid,
     pub c_enc_key: String,
@@ -279,8 +304,9 @@ pub struct LinkTransferMetadataEncoded {
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
-
-    pub sender_key_id: Option<Uuid>,
+    
+    pub sender_pub_key: Option<String>,
+    pub sender_email: Option<String>,
     pub signature_metadata: Option<String>,
     pub signature: Option<String>,
 }

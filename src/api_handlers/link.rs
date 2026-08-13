@@ -191,7 +191,9 @@ pub async fn link_message_get_one_metadata(
             number_downloads: message.number_downloads,
             file_size: message.file_size,
             chunk_size: message.chunk_size,
-            sender_key_id: message.sender_key_id,
+            
+            sender_pub_key: message.sender_pub_key.map(|s| URL_SAFE_NO_PAD.encode(s)),
+            sender_email: message.sender_email,
             signature_metadata: message.signature_metadata.map(|s| URL_SAFE_NO_PAD.encode(s)),
             signature: message.signature.map(|s| URL_SAFE_NO_PAD.encode(s)),
         },

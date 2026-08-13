@@ -13,10 +13,11 @@ use tracing::info;
 use uuid::Uuid;
 use crate::api_handlers::auth::Role;
 use crate::consts::*;
-use crate::models::{LinkTransfer, LinkTransferMetadata, NewLinkTransfer};
+use crate::models::{LinkTransfer, LinkTransferMetadataNoSender, LinkTransferMetadata, NewLinkTransfer};
 use crate::schema::link_transfers::dsl::link_transfers;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
+use crate::schema::key_pairs;
 use crate::server;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size};
 
@@ -181,6 +182,8 @@ pub async fn link_get_message_metadata(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<LinkTransferMetadata, ServerError> {
     use crate::schema::link_transfers;
+    use crate::schema::key_pairs;
+    use crate::schema::users;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -208,11 +211,58 @@ pub async fn link_get_message_metadata(
             link_transfers::signature_metadata,
             link_transfers::signature
         ))
-        .first::<LinkTransferMetadata>(&mut conn)
+        .first::<LinkTransferMetadataNoSender>(&mut conn)
         .optional()?
         .ok_or(ServerError::Internal)?;
 
-    Ok(messages_get)
+    // Get the pub_key and email
+    let mut pub_key: Option<Vec<u8>> = None;
+    let mut email: Option<String> = None;
+    if let Some(sender_key_id) = messages_get.sender_key_id {
+        let (sign_public_key, owner_id) = key_pairs::table
+            .filter(key_pairs::id.eq(sender_key_id))
+            .select((key_pairs::sign_public_key, key_pairs::owner_id))
+            .first::<(Vec<u8>, Uuid)>(&mut conn)
+            .optional()?
+            .ok_or(ServerError::Internal)?;
+
+        pub_key = Some(sign_public_key);
+
+        println!("got the pub key");
+
+        email = Some(
+            users::table
+                .filter(users::id.eq(owner_id))
+                .select(users::email)
+                .first::<String>(&mut conn)
+                .optional()?
+                .ok_or(ServerError::Internal)?
+        );
+    }
+
+    Ok(LinkTransferMetadata {
+        id: messages_get.id,
+        c_enc_key: messages_get.c_enc_key,
+        nonce_enc_key: messages_get.nonce_enc_key,
+        c_mac_key: messages_get.c_mac_key,
+        nonce_mac_key: messages_get.nonce_mac_key,
+        cfilename: messages_get.cfilename,
+        nonce_filename: messages_get.nonce_filename,
+        file_id: messages_get.file_id,
+        max_downloads: messages_get.max_downloads,
+        lifetime: messages_get.lifetime,
+        creation_time: messages_get.creation_time,
+        hash_file: messages_get.hash_file,
+        mac: messages_get.mac,
+        number_downloads: messages_get.number_downloads,
+        file_size: messages_get.file_size,
+        chunk_size: messages_get.chunk_size,
+
+        sender_pub_key: pub_key,
+        sender_email: email,
+        signature: messages_get.signature,
+        signature_metadata: messages_get.signature_metadata,
+    })
 }
 
 pub async fn link_get_message(
