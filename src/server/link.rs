@@ -228,8 +228,6 @@ pub async fn link_get_message_metadata(
 
         pub_key = Some(sign_public_key);
 
-        println!("got the pub key");
-
         email = Some(
             users::table
                 .filter(users::id.eq(owner_id))
