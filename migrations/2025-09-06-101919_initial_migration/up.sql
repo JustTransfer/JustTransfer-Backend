@@ -77,6 +77,7 @@ CREATE TABLE link_transfers
     file_size               BIGINT      NOT NULL,
     chunk_size              BIGINT      NOT NULL,
 
+    is_signed               BOOLEAN     NOT NULL DEFAULT false,
     sender_key_id           UUID        REFERENCES key_pairs (id),
     signature_metadata      BYTEA,
     signature               BYTEA

@@ -17,7 +17,6 @@ use crate::models::{LinkTransfer, LinkTransferMetadataNoSender, LinkTransferMeta
 use crate::schema::link_transfers::dsl::link_transfers;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
-use crate::schema::key_pairs;
 use crate::server;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size};
 
@@ -207,6 +206,7 @@ pub async fn link_get_message_metadata(
             link_transfers::number_downloads,
             link_transfers::file_size,
             link_transfers::chunk_size,
+            link_transfers::is_signed,
             link_transfers::sender_key_id,
             link_transfers::signature_metadata,
             link_transfers::signature
@@ -258,6 +258,7 @@ pub async fn link_get_message_metadata(
         file_size: messages_get.file_size,
         chunk_size: messages_get.chunk_size,
 
+        is_signed: messages_get.is_signed,
         sender_pub_key: pub_key,
         sender_email: email,
         signature: messages_get.signature,
@@ -379,6 +380,7 @@ pub async fn link_send_message(
         number_downloads: &0,
         file_size: &file_size_param,
         chunk_size: &CHUNK_SIZE_ANONYMOUS.get().unwrap(),
+        is_signed: &false,
     };
 
     conn.transaction::<_, ServerError, _>(|conn| {
@@ -538,6 +540,7 @@ pub fn update_message_mac(
     file_id_param: Uuid,
     hash_file: Vec<u8>,
     mac: Vec<u8>,
+    is_signed: bool,
     sender_key_id: Option<Uuid>,
     signature_metadata: Option<Vec<u8>>,
     signature: Option<Vec<u8>>,
@@ -551,6 +554,7 @@ pub fn update_message_mac(
         .set((
             link_transfers::hash_file.eq(hash_file),
             link_transfers::mac.eq(mac),
+            link_transfers::is_signed.eq(is_signed),
             link_transfers::sender_key_id.eq(sender_key_id),
             link_transfers::signature_metadata.eq(signature_metadata),
             link_transfers::signature.eq(signature),

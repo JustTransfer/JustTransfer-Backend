@@ -191,7 +191,8 @@ pub async fn link_message_get_one_metadata(
             number_downloads: message.number_downloads,
             file_size: message.file_size,
             chunk_size: message.chunk_size,
-            
+
+            is_signed: message.is_signed,
             sender_pub_key: message.sender_pub_key.map(|s| URL_SAFE_NO_PAD.encode(s)),
             sender_email: message.sender_email,
             signature_metadata: message.signature_metadata.map(|s| URL_SAFE_NO_PAD.encode(s)),
@@ -410,6 +411,8 @@ pub struct UploadLinkMessageFinishMultipart {
     #[validate(custom(function = "validate_optional_email"))]
     receiver_email: Option<String>,
     // The type already validates that the provided input is valid
+    is_signed: bool,
+    // The type already validates that the provided input is valid
     sender_key_id: Option<Uuid>,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     signature_metadata: Option<String>,
@@ -457,23 +460,23 @@ pub async fn upload_link_message_finish_multipart(
     };
     
     // Authorize signing only for connected users
-    let has_signature_fields = payload.sender_key_id.is_some()
-        || payload.signature_metadata.is_some()
-        || payload.signature.is_some();
-
-    if has_signature_fields && !is_connected {
+    if payload.is_signed && !is_connected {
         return Err(ApiError::Forbidden);
     }
 
-    // Signing requires all three fields together, or none at all
-    let sender_key_id = if is_connected {
-        match (&payload.sender_key_id, &payload.signature_metadata, &payload.signature) {
-            (Some(_), Some(_), Some(_)) => payload.sender_key_id,
-            (None, None, None) => None,
-            _ => return Err(ApiError::InputValidation),
+    // Signing requires all three fields together, or none at all — and the
+    // fields are only trusted when the request is both connected and
+    // explicitly marked as signed. Any other combination is invalid input.
+    let sender_key_id = match (&payload.sender_key_id, &payload.signature_metadata, &payload.signature) {
+        (Some(_), Some(_), Some(_)) => {
+            if is_connected && payload.is_signed {
+                payload.sender_key_id
+            } else {
+                return Err(ApiError::InputValidation);
+            }
         }
-    } else {
-        None
+        (None, None, None) => None,
+        _ => return Err(ApiError::InputValidation),
     };
 
     let (signature_metadata, signature) = if sender_key_id.is_some() {
@@ -481,6 +484,8 @@ pub async fn upload_link_message_finish_multipart(
     } else {
         (None, None)
     };
+
+    let is_signed = sender_key_id.is_some();
 
     let auth_key = server::link::link_send_message_end(
         link_claims.id,
@@ -500,6 +505,7 @@ pub async fn upload_link_message_finish_multipart(
             .map_err(|_| ApiError::Base64)?,
         URL_SAFE_NO_PAD.decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
+        is_signed,
         sender_key_id,
         signature_metadata.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
         signature.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,

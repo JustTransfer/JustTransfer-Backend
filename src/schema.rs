@@ -38,6 +38,7 @@ diesel::table! {
         number_downloads -> Int8,
         file_size -> Int8,
         chunk_size -> Int8,
+        is_signed -> Bool,
         sender_key_id -> Nullable<Uuid>,
         signature_metadata -> Nullable<Bytea>,
         signature -> Nullable<Bytea>,

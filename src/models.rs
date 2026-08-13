@@ -210,6 +210,7 @@ pub struct LinkTransfer {
     pub file_size: i64,
     pub chunk_size: i64,
 
+    pub is_signed: bool,
     pub sender_key_id: Option<Uuid>,
     pub signature_metadata: Option<Vec<u8>>,
     pub signature: Option<Vec<u8>>,
@@ -235,6 +236,7 @@ pub struct NewLinkTransfer<'a> {
     pub number_downloads: &'a i64,
     pub file_size: &'a i64,
     pub chunk_size: &'a i64,
+    pub is_signed: &'a bool,
 }
 
 #[derive(Queryable, Serialize, Clone)]
@@ -256,6 +258,7 @@ pub struct LinkTransferMetadataNoSender {
     pub file_size: i64,
     pub chunk_size: i64,
 
+    pub is_signed: bool,
     pub sender_key_id: Option<Uuid>,
     pub signature_metadata: Option<Vec<u8>>,
     pub signature: Option<Vec<u8>>,
@@ -280,6 +283,7 @@ pub struct LinkTransferMetadata {
     pub file_size: i64,
     pub chunk_size: i64,
 
+    pub is_signed: bool,
     pub sender_pub_key: Option<Vec<u8>>,
     pub sender_email: Option<String>,
     pub signature_metadata: Option<Vec<u8>>,
@@ -304,7 +308,8 @@ pub struct LinkTransferMetadataEncoded {
     pub number_downloads: i64,
     pub file_size: i64,
     pub chunk_size: i64,
-    
+
+    pub is_signed: bool,
     pub sender_pub_key: Option<String>,
     pub sender_email: Option<String>,
     pub signature_metadata: Option<String>,

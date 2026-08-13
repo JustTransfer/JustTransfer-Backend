@@ -308,6 +308,7 @@ async fn generate_dummy_anonymous_transfer(
             number_downloads: &0,
             file_size: &0,
             chunk_size: &CHUNK_SIZE_ANONYMOUS.get().unwrap(),
+            is_signed: &false,
         };
 
         diesel::insert_into(link_transfers::table)
