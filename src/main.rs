@@ -62,7 +62,7 @@ async fn main() {
         .route("/api/user", get(api_handlers::connected::get_user_info))
         .route("/api/logout", post(api_handlers::connected::logout))
         .route("/api/pubkey/{id}", get(api_handlers::connected::get_pub_key))
-        .route("/api/user/{email}/pubkey", get(api_handlers::connected::get_pub_key_user))
+        .route("/api/user/{email}/pubkey", get(api_handlers::connected::get_pub_key_user))// todo check if still needed
         .route("/api/user/saved-transfer", get(api_handlers::connected::get_saved_transfers))
         .route("/api/user/saved-transfer", post(api_handlers::connected::add_saved_transfer))
         .route("/api/user/saved-transfer/{id}", delete(api_handlers::connected::delete_saved_transfer))

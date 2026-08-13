@@ -597,6 +597,7 @@ pub async fn add_key(
 #[derive(Serialize)]
 pub struct GetPubKeyResult {
     key_id: Uuid,
+    email: String,
     pub_enc: String,
     pub_sign: String,
 }
@@ -612,10 +613,18 @@ pub async fn get_pub_key(
     Ok((StatusCode::OK, Json(
         GetPubKeyResult {
             key_id: pub_keys.0,
-            pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.1),
-            pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.2),
+            email: pub_keys.1,
+            pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.2),
+            pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.3),
         }
     )))
+}
+
+#[derive(Serialize)]
+pub struct GetPubKeyUserResult {
+    key_id: Uuid,
+    pub_enc: String,
+    pub_sign: String,
 }
 
 #[instrument(skip(state), err(Debug))]
@@ -630,7 +639,7 @@ pub async fn get_pub_key_user(
     let pub_keys = server::connected::get_pub_key_user(&*email, &state.db)?;
 
     Ok((StatusCode::OK, Json(
-        GetPubKeyResult {
+        GetPubKeyUserResult {
             key_id: pub_keys.0,
             pub_enc: URL_SAFE_NO_PAD.encode(pub_keys.1),
             pub_sign: URL_SAFE_NO_PAD.encode(pub_keys.2),

@@ -699,7 +699,7 @@ pub fn add_key (
 pub fn get_pub_key(
     key_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(Uuid, [u8; ENC_KEY_LEN_PUB], [u8; SIGN_KEY_LEN_PUB]), ServerError> {
+) -> Result<(Uuid, String, [u8; ENC_KEY_LEN_PUB], [u8; SIGN_KEY_LEN_PUB]), ServerError> {
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let keys = crate::schema::key_pairs::table
@@ -708,10 +708,17 @@ pub fn get_pub_key(
         .optional()?
         .ok_or(ServerError::NotFound)?;
 
+    let user = crate::schema::users::table
+        .filter(crate::schema::users::id.eq(keys.owner_id))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::NotFound)?;
+
     Ok((
-            keys.id,
-            keys.enc_public_key.try_into().map_err(|_| ServerError::Internal)?,
-            keys.sign_public_key.try_into().map_err(|_| ServerError::Internal)?,
+        keys.id,
+        user.email.clone(),
+        keys.enc_public_key.try_into().map_err(|_| ServerError::Internal)?,
+        keys.sign_public_key.try_into().map_err(|_| ServerError::Internal)?,
     ))
 }
 
