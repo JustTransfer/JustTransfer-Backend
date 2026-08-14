@@ -251,7 +251,7 @@ pub async fn optional_auth(
 }
 
 // Check if the iat of the session is recent
-pub async  fn require_fresh_login(
+pub async fn require_fresh_login(
     session: Session,
     req: axum::http::Request<axum::body::Body>,
     next: Next,
