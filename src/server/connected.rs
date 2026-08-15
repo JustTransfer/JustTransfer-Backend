@@ -1,13 +1,11 @@
 use chrono::{Duration, Utc};
-use diesel::{alias, r2d2, PgConnection, QueryDsl, RunQueryDsl};
+use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
-use diesel::sql_types::Timestamptz;
 use diesel::dsl::{sql, now as sql_now};
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
 use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::*;
-use tracing::log::info;
 use uuid::Uuid;
 
 
@@ -15,11 +13,9 @@ use crate::consts::*;
 use crate::models::*;
 use crate::server;
 use crate::schema::users::dsl::users;
-use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
 use crate::schema::key_pairs::dsl::key_pairs;
 use crate::schema::saved_transfers::dsl::saved_transfers;
-use crate::schema::saved_transfers::nonce_auth_key;
 use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
 
 ///

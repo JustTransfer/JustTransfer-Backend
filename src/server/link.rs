@@ -650,7 +650,6 @@ pub async fn update_link_transfer(
     lifetime_param: i64,
     mac: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-    s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
 
     use crate::schema::link_transfers;

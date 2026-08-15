@@ -575,7 +575,6 @@ pub async fn link_message_update(
         URL_SAFE_NO_PAD.decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
         &state.db,
-        &state.s3,
     )
         .await?;
 
