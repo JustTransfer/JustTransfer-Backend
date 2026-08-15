@@ -88,12 +88,12 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
             ServerError::Internal
         })?;
 
-    // Start monthly task
+    // Start the scheduled tasks
     server::cron::start_monthly_task(state.clone())
-        .map_err(|e| {
-            error!("Failed to start monthly task: {}", e);
-            ServerError::Internal
-        })?;
+        .map_err(|e| { error!("Failed to start monthly task: {}", e); ServerError::Internal })?;
+
+    server::cron::start_daily_cleanup_task(state.clone())
+        .map_err(|e| { error!("Failed to start daily cleanup task: {}", e); ServerError::Internal })?;
 
     Ok(state)
 }

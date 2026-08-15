@@ -23,6 +23,84 @@ use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invali
 ///
 /// Link Transfer
 ///
+use aws_sdk_s3::types::{Delete, ObjectIdentifier};
+
+pub async fn delete_expired_link_transfers(
+    pool: &DbPool,
+    s3: &aws_sdk_s3::Client,
+) -> Result<usize, ServerError> {
+    const BATCH_SIZE: i64 = 200;
+    let mut total_deleted = 0usize;
+
+    loop {
+        let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+        // Grab a page of expired/exhausted transfers, never touching the dummy row
+        let batch = link_transfers
+            .filter(crate::schema::link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
+            .filter(
+                crate::schema::link_transfers::number_downloads.ge(crate::schema::link_transfers::max_downloads).or(
+                    sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
+                ),
+            )
+            .limit(BATCH_SIZE)
+            .load::<LinkTransfer>(&mut conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        if batch.is_empty() {
+            break;
+        }
+
+        let ids: Vec<Uuid> = batch.iter().map(|t| t.id).collect();
+        let file_ids: Vec<Uuid> = batch.iter().map(|t| t.file_id).collect();
+        let batch_len = batch.len();
+
+        diesel::delete(link_transfers.filter(crate::schema::link_transfers::id.eq_any(&ids)))
+            .execute(&mut conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Release the DB connection before doing (slower) network calls to S3
+        drop(conn);
+
+        for chunk in file_ids.chunks(1000) {
+            let objects: Vec<ObjectIdentifier> = chunk
+                .iter()
+                .filter_map(|id| ObjectIdentifier::builder().key(id.to_string()).build().ok())
+                .collect();
+
+            if objects.is_empty() {
+                continue;
+            }
+
+            let delete = Delete::builder()
+                .set_objects(Some(objects))
+                .build()
+                .map_err(|_| ServerError::Internal)?;
+
+            if let Err(e) = s3
+                .delete_objects()
+                .bucket(S3_BUCKET_NAME.get().unwrap())
+                .delete(delete)
+                .send()
+                .await
+            {
+                // Log the error but continue processing other chunks
+                tracing::error!("Failed to delete S3 objects for expired transfers: {}", e);
+            }
+        }
+
+        total_deleted += batch_len;
+
+        // Small pause between pages so we don't hammer S3/DB in a tight loop
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+
+        if (batch_len as i64) < BATCH_SIZE {
+            break;
+        }
+    }
+
+    Ok(total_deleted)
+}
 
 async fn delete_link_transfer_db(
     pool: &DbPool,
