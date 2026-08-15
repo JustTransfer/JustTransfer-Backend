@@ -325,8 +325,7 @@ pub fn registration_finish_password_reset(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
-    use crate::schema::users;
-    use crate::schema::key_pairs;
+
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the token is valid
@@ -344,8 +343,8 @@ pub fn registration_finish_password_reset(
     let transaction_result = conn.transaction::<User, ServerError, _>(|conn| {
 
         // Get the user of the token
-        let user = users::table
-            .filter(users::id.eq(reset_token.account_id))
+        let user = crate::schema::users::table
+            .filter(crate::schema::users::id.eq(reset_token.account_id))
             .first::<User>(conn)
             .optional()?
             .ok_or(ServerError::Internal)?;
@@ -377,7 +376,7 @@ pub fn registration_finish_password_reset(
         let password_file_bytes = ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result).serialize();
         let user = diesel::update(users.find(user.id))
             .set((
-                users::password_file.eq(password_file_bytes.to_vec()),
+                crate::schema::users::password_file.eq(password_file_bytes.to_vec()),
             ))
             .returning(User::as_returning())
             .get_result(conn)
@@ -388,11 +387,18 @@ pub fn registration_finish_password_reset(
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
-        // Delete all keys of the user to prevent access with old keys
-        diesel::delete(crate::schema::key_pairs::table.filter(crate::schema::key_pairs::owner_id.eq(user.id)))
+        // Mark all keys as revoked and set the revoked_at date
+        diesel::update(crate::schema::key_pairs::table)
+            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+            .filter(crate::schema::key_pairs::is_active.eq(true))
+            .set((
+                crate::schema::key_pairs::is_active.eq(false),
+                crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
+            ))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
+        // Insert the new key
         let _ = diesel::insert_into(crate::schema::key_pairs::table)
             .values(&new_key)
             .execute(conn)
@@ -522,6 +528,7 @@ pub fn login_finish(
     // Get all the keys of the user
     let keys = crate::schema::key_pairs::table
         .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+        .filter(crate::schema::key_pairs::is_active.eq(true))
         .load::<KeyPairs>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -553,20 +560,48 @@ pub fn get_user(
     })
 }
 
-pub fn delete_user(
+pub async fn delete_user(
     user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
     use crate::schema::saved_transfers;
     use crate::schema::key_pairs;
+    use crate::schema::link_transfers;
+    use crate::schema::reset_tokens;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    let _transaction_result = conn.transaction::<(), ServerError, _>(|conn| {
+    let orphaned_file_ids = conn.transaction::<Vec<Uuid>, ServerError, _>(|conn| {
 
         // Delete all saved transfers of the user
         diesel::delete(saved_transfers.filter(saved_transfers::owner_id.eq(user_id_param)))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Delete any pending password reset token for the user
+        diesel::delete(reset_tokens::table.filter(reset_tokens::account_id.eq(user_id_param)))
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Find the keys owned by the user
+        let owned_key_ids = key_pairs::table
+            .filter(key_pairs::owner_id.eq(user_id_param))
+            .select(key_pairs::id)
+            .load::<Uuid>(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Find the file_ids of signed transfers about to be deleted
+        let orphaned_file_ids = link_transfers::table
+            .filter(link_transfers::sender_key_id.eq_any(&owned_key_ids))
+            .select(link_transfers::file_id)
+            .load::<Uuid>(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        // Delete all signed transfers of the user
+        diesel::delete(link_transfers::table)
+            .filter(link_transfers::sender_key_id.eq_any(&owned_key_ids))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
@@ -580,8 +615,18 @@ pub fn delete_user(
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
-        Ok(())
+        Ok(orphaned_file_ids)
     })?;
+
+    // Clean up the underlying files for the signed transfers just removed
+    for file_id in orphaned_file_ids {
+        s3.delete_object()
+            .bucket(S3_BUCKET_NAME.get().unwrap())
+            .key(file_id.to_string())
+            .send()
+            .await
+            .map_err(|_| ServerError::Internal)?;
+    }
 
     Ok(())
 }

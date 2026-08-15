@@ -514,7 +514,12 @@ pub async fn delete_user(
         return Err(ApiError::Forbidden);
     }
 
-    server::connected::delete_user(claims_session.id, &state.db)?;
+    server::connected::delete_user(
+        claims_session.id,
+        &state.db,
+        &state.s3
+    )
+        .await?;
 
     Ok(StatusCode::NO_CONTENT)
 }
