@@ -56,6 +56,14 @@ pub fn send_verification_email(receiver: &str, link: &str, mailer: &SmtpTranspor
     send_mail(receiver, subject, &body, mailer)
 }
 
+pub fn send_notification_account_creation_email_taken(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    let subject = "JustTransfer account creation attempt";
+    let body = format!("Hello {},\n\nWe received an attempt to create a JustTransfer account using your email address. You already have an account, so nothing was created or changed. If you initiated this request, you can simply log in instead. If you did not, please ignore this email, or reset your password if you're concerned:\n\n{}/reset-password\n\nBest regards,\nJustTransfer Team", receiver, crate::consts::FRONTEND_URL.get().unwrap());
+
+    send_mail(receiver, subject, &body, mailer)
+}
+
 pub fn send_password_reset_email(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "JustTransfer password reset request";

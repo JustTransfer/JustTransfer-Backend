@@ -41,6 +41,11 @@ pub fn registration_start(
     Ok(server_registration_start_result.message)
 }
 
+enum RegistrationOutcome {
+    Created,
+    EmailTaken,
+}
+
 pub fn registration_finish(
     client_registration_finish_result: RegistrationUpload<DefaultCipherSuite>,
     email_param: &str,
@@ -92,32 +97,48 @@ pub fn registration_finish(
         revoked_at: None,
     };
 
+    // Create dummy keys to prevent user enumeration
+    let dummy_key = NewKeyPairs {
+        id: &Uuid::new_v4(),
+        owner_id: DUMMY_ID.get().unwrap(),
+        enc_public_key: &pub_enc,
+        enc_nonce_private_key: &nonce_priv_enc,
+        enc_cipher_private_key: &cpriv_enc,
+        sign_public_key: &pub_sign,
+        sign_nonce_private_key: &nonce_priv_sign,
+        sign_cipher_private_key: &cpriv_sign,
+        is_active: &true,
+        revoked_at: None,
+    };
 
-    // Create user and insert keys in one transaction
-    let _transaction_result = conn.transaction::<_, ServerError, _>(|conn| {
-        diesel::insert_into(users::table)
-            .values(&new_user)
-            .execute(conn)
-            .map_err(|e| {
-                if let DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info) = &e {
-                    let msg = info.constraint_name().unwrap_or("");
+    // Success the transaction on new account or email taken, otherwise error
+    let outcome = conn.transaction::<_, ServerError, _>(|conn| {
+        // Wrap the insert in its own (nested) transaction => Diesel uses a SAVEPOINT here
+        let user_insert = conn.transaction::<_, DieselError, _>(|conn| {
+            diesel::insert_into(users::table)
+                .values(&new_user)
+                .execute(conn)
+        });
 
-                    if msg.contains("email") {
-                        ServerError::EmailTaken
-                    } else {
-                        ServerError::Internal
-                    }
-                } else {
-                    ServerError::Internal
-                }
-            })?;
-
-        diesel::insert_into(crate::schema::key_pairs::table)
-            .values(&key_enc)
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        Ok(())
+        match user_insert {
+            Ok(_) => {
+                diesel::insert_into(crate::schema::key_pairs::table)
+                    .values(&key_enc)
+                    .execute(conn)
+                    .map_err(|_| ServerError::Internal)?;
+                Ok(RegistrationOutcome::Created)
+            }
+            Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info))
+            if info.constraint_name().unwrap_or("").contains("email") => {
+                // Savepoint was rolled back, outer transaction is still valid here
+                diesel::insert_into(crate::schema::key_pairs::table)
+                    .values(&dummy_key)
+                    .execute(conn)
+                    .map_err(|_| ServerError::Internal)?;
+                Ok(RegistrationOutcome::EmailTaken)
+            }
+            Err(_) => Err(ServerError::Internal),
+        }
     })?;
 
     // Email verification
@@ -127,14 +148,28 @@ pub fn registration_finish(
         new_user.registration_token
     );
 
-    server::mail::send_verification_email(
-        new_user.email.as_str(),
-        url.as_str(),
-        mailer,
-    )
-        .map_err(|_| ServerError::Internal)?;
+    match outcome {
+        RegistrationOutcome::Created => {
+            server::mail::send_verification_email(
+                new_user.email.as_str(),
+                url.as_str(),
+                mailer,
+            )
+                .map_err(|_| ServerError::Internal)?;
 
-    Ok(())
+            Ok(())
+        }
+        RegistrationOutcome::EmailTaken => {
+            // Send dummy email to prevent user enumeration
+            server::mail::send_notification_account_creation_email_taken(
+                new_user.email.as_str(),
+                mailer,
+            )
+                .map_err(|_| ServerError::Internal)?;
+
+            Ok(())
+        }
+    }
 }
 
 ///
