@@ -139,14 +139,14 @@ pub async fn link_message_login_end(
 
     // Create session
     let mut authorized_ids = session
-        .get::<HashSet<Uuid>>(AUTH_KEY_ANONYMOUS)
+        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
         .await
         .map_err(|_| ApiError::ServerError)?
         .unwrap_or_default();
 
     authorized_ids.insert(id);
 
-    session.insert(AUTH_KEY_ANONYMOUS, authorized_ids)
+    session.insert(AUTH_KEY_LINK, authorized_ids)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -371,14 +371,14 @@ pub async fn upload_link_message(
 
     // Create session
     let mut authorized_ids = session
-        .get::<HashSet<Uuid>>(AUTH_KEY_ANONYMOUS)
+        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
         .await
         .map_err(|_| ApiError::ServerError)?
         .unwrap_or_default();
 
     authorized_ids.insert(payload.id);
 
-    session.insert(AUTH_KEY_ANONYMOUS, authorized_ids)
+    session.insert(AUTH_KEY_LINK, authorized_ids)
         .await
         .map_err(|_| ApiError::ServerError)?;
 

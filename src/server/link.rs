@@ -90,12 +90,12 @@ pub async fn login_start_link(
     // Delete invalid messages
     delete_invalid_link_transfer_db(pool, s3, id_param).await?;
 
-    let annonymous_message_opt = link_transfers::table
+    let link_message_opt = link_transfers::table
         .filter(link_transfers::id.eq(id_param))
         .first::<LinkTransfer>(&mut conn)
         .optional()?;
 
-    let password_file_param = if let Some(annonymous_message) = &annonymous_message_opt {
+    let password_file_param = if let Some(annonymous_message) = &link_message_opt {
         let password_file_bytes = annonymous_message.password_file.clone();
 
         Some(
@@ -123,10 +123,10 @@ pub async fn login_start_link(
         .map_err(|_| ServerError::Internal)?;
 
     // Use dummy id if the message does not exist to prevent user enumeration
-    let link_transfer_id = if annonymous_message_opt.is_some() {
+    let link_transfer_id = if link_message_opt.is_some() {
         id_param
     } else {
-        DUMMY_ANONYMOUS_MESSAGE_ID
+        DUMMY_LINK_MESSAGE_ID
     };
 
     diesel::update(link_transfers::table.filter(link_transfers::id.eq(link_transfer_id)))

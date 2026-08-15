@@ -383,20 +383,10 @@ pub fn registration_finish_password_reset(
             .get_result(conn)
             .map_err(|_| ServerError::Internal)?;
 
-        // Delete all sent and received messages of the user to prevent access with old keys
-        /*diesel::delete(messages.filter(messages::sender_key_id.eq_any(
-            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
-        )))
+        // Delete all saved transfers of the user to prevent access with old keys
+        diesel::delete(crate::schema::saved_transfers::table.filter(crate::schema::saved_transfers::owner_id.eq(user.id)))
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
-
-        diesel::delete(messages.filter(messages::receiver_key_id.eq_any(
-            key_pairs.filter(key_pairs::owner_id.eq(user.id)).select(key_pairs::id)
-        )))
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;*/
-
-        // TODO delete all data relative to the user
 
         // Delete all keys of the user to prevent access with old keys
         diesel::delete(crate::schema::key_pairs::table.filter(crate::schema::key_pairs::owner_id.eq(user.id)))
@@ -601,31 +591,28 @@ pub fn delete_user(
 ///
 
 fn delete_old_keys_for_user(
-    pool: &DbPool,
+    conn: &mut PgConnection,
     user_id_param: Uuid,
 ) -> Result<(), ServerError> {
     use crate::schema::key_pairs;
+    use diesel::dsl::sql;
     use diesel::sql_types::Bool;
 
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
-    // Delete all keys that are not active and not used referenced by any message
-    // TODO reimplement this query with the new schema and signature
-    // diesel::delete(
-    //     key_pairs::table
-    //         .filter(key_pairs::owner_id.eq(user_id_param))
-    //         .filter(key_pairs::is_active.eq(false))
-    //         .filter(sql::<Bool>(
-    //             "NOT EXISTS (
-    //                 SELECT 1
-    //                 FROM link_transfers
-    //                 WHERE sender_key_id = key_pairs.id
-    //                    OR receiver_key_id = key_pairs.id
-    //             )"
-    //         ))
-    // )
-    //     .execute(&mut conn)
-    //     .map_err(|_| ServerError::Internal)?;
+    // Delete all keys that are not active and not referenced by any link transfer
+    diesel::delete(
+        key_pairs::table
+            .filter(key_pairs::owner_id.eq(user_id_param))
+            .filter(key_pairs::is_active.eq(false))
+            .filter(sql::<Bool>(
+                "NOT EXISTS (
+                    SELECT 1
+                    FROM link_transfers
+                    WHERE sender_key_id = key_pairs.id
+                )"
+            ))
+    )
+        .execute(conn)
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
@@ -679,7 +666,7 @@ pub fn add_key (
             .map_err(|_| ServerError::Internal)?;
 
         // Delete old keys that are not active and not used by any message
-        delete_old_keys_for_user(pool, user_id_param)?;
+        delete_old_keys_for_user(conn, user_id_param)?;
 
         let keys = crate::schema::key_pairs::table
             .filter(crate::schema::key_pairs::owner_id.eq(user_id_param))

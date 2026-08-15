@@ -207,7 +207,7 @@ pub async fn require_auth_link(
 ) -> Result<Response, StatusCode> {
 
     let authorized_ids = session
-        .get::<HashSet<Uuid>>(AUTH_KEY_ANONYMOUS)
+        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .unwrap_or_default();

@@ -18,11 +18,11 @@ pub static DUMMY_ID: OnceCell<Uuid> = OnceCell::new();
 
 
 /// Const for Dummy Anonymous Transfer
-pub const DUMMY_ANONYMOUS_MESSAGE_ID: Uuid = Uuid::from_u128(0x12345678123456781234567812345678);
+pub const DUMMY_LINK_MESSAGE_ID: Uuid = Uuid::from_u128(0x12345678123456781234567812345678);
 
 
 /// Const for Session
-pub const AUTH_KEY_ANONYMOUS: &str = "anonymous_message_id";
+pub const AUTH_KEY_LINK: &str = "link_message_id";
 pub const AUTH_KEY_USER_ID: &str = "id";
 pub const AUTH_KEY_EMAIL: &str = "email";
 pub const AUTH_KEY_ROLE: &str = "role";

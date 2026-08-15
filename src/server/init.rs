@@ -285,13 +285,13 @@ async fn generate_dummy_anonymous_transfer(
 
     // Check if the dummy anonymous transfer already exists
     let existing_message = link_transfers::table
-        .filter(link_transfers::id.eq(DUMMY_ANONYMOUS_MESSAGE_ID))
+        .filter(link_transfers::id.eq(DUMMY_LINK_MESSAGE_ID))
         .first::<LinkTransfer>(&mut conn)
         .optional()?;
 
     if existing_message.is_none() {
         let new_message = NewLinkTransfer {
-            id: &DUMMY_ANONYMOUS_MESSAGE_ID,
+            id: &DUMMY_LINK_MESSAGE_ID,
             upload_id: &"".to_string(),
             password_file: &DUMMY_PASSWORD_FILE.to_vec(),
             auth_key: &Uuid::nil(),
