@@ -1,157 +1,124 @@
 # JustTransfer Backend
 
-Rust backend for JustTransfer, an encrypted file transfer service with two delivery modes:
+A Rust (Axum) API server for JustTransfer - an encrypted file-transfer service supporting two delivery modes:
+- Account/Connected transfers (account-to-account)
+- Link/Anonymous transfers (link/password-style flow)
 
-- **Account/Connected transfer** (account-to-account)
-- **Link/Anonymous transfer** (link/password-style flow)
+This repository contains the Axum web server, Diesel-based PostgreSQL integration (embedded migrations), S3-compatible storage (AWS SDK), OPAQUE-based auth flows, session handling, and email helpers.
 
-This repository contains the API server, database models/migrations, session/auth logic, and S3-compatible object storage integration.
+Tech stack
+- Rust 2021, Tokio
+- Axum web framework
+- Diesel + PostgreSQL
+- AWS SDK for S3 (S3-compatible endpoints supported)
+- OPAQUE (opaque-ke), libsodium, argon2
+- lettre for SMTP
 
-## Current status
+Quickstart (development)
+1. Install prerequisites:
+   - Rust toolchain (stable), cargo
+   - PostgreSQL accessible from the machine
+   - S3-compatible service (e.g. MinIO) if you want storage locally
+   - System libs: libpq (libpq-dev) and libsodium-dev on Debian/Ubuntu
 
-This project is under active development. API contracts and behavior may change.
+2. Copy and edit the environment file:
+   cp .env.sample .env
+   Edit `.env` and set DATABASE_URL and other values. DATABASE_URL must be a full Postgres connection string.
 
-## Core features
+3. Start dependent services (Postgres, S3) using Docker or your environment.
 
-- Account registration and login flow (OPAQUE-based auth flow in server logic)
-- Session-based authentication and fresh-login checks for sensitive operations
-- Encrypted file metadata/message handling for connected and anonymous transfers
-- S3-compatible object storage support
-- PostgreSQL persistence with Diesel migrations
-- Email flows for verification and password reset
-- Background monthly quota reset task (`master` / `development` modes)
+4. Run the backend:
+   cargo run
 
-## Tech stack
+By default, the server listens on BACKEND_URL (see `.env.sample`, default: 0.0.0.0:80).
 
-- **Language/runtime:** Rust 2021, Tokio
-- **Web:** Axum, Tower, tower-http
-- **Database:** PostgreSQL + Diesel
-- **Storage:** AWS SDK S3 client (S3-compatible endpoint)
-- **Crypto/auth:** libsodium, OPAQUE, argon2, sha2
-- **Mail:** lettre
+Environment variables
+The server requires several environment variables. The primary ones (see `src/consts.rs` and `.env.sample`):
+- `BACKEND_URL` - server listener address (e.g. 0.0.0.0:80)
+- `FRONTEND_URL` - allowed CORS origin (used to set allowed origin header)
+- `DATABASE_URL` - full Postgres connection string (required)
+- `POSTGRESQL_USERNAME` - kept for compatibility (not used for connection when DATABASE_URL present)
+- `RUSTFS_USER` - S3 access key
+- `RUSTFS_PASSWORD` - S3 secret key
+- `RUSTFS_URL` - S3 endpoint URL (e.g. http://localhost:9000)
+- `S3_BUCKET_NAME` - bucket the service will ensure exists
+- `SERVER_MODE` - one of: master, slave, development
+- `SMTP_HOST`, `SMTP_MAIL`, `SMTP_PASSWORD` - SMTP configuration
+- `DUMMY_EMAIL` - email used for dummy data
 
-## Prerequisites
+Session and authentication
+- Sessions use tower-sessions MemoryStore (in-memory) and the cookie name is `user_session` by default.
+- Session lifetimes are controlled by: SESSION_DURATION_MINUTES and FRESH_SESSION_DURATION_MINUTES.
+- Authentication uses the OPAQUE protocol (server uses opaque-ke). Client implementations must perform matching OPAQUE client flows.
 
-- Rust toolchain (stable)
-- PostgreSQL (or a running container)
-- S3-compatible object storage (for local dev: RustFS)
-- `libsodium` development libraries
+Server modes
+- master: scheduler runs monthly reset task on the 1st UTC.
+- development: scheduler runs every minute (useful for testing; also prints emails to logs).
+- slave: scheduler is disabled.
 
-Linux packages (Debian/Ubuntu):
+API overview (high level)
+See `src/main.rs` and handlers under `src/api_handlers/` for full behavior. Main route groups include:
+- Public endpoints
+  - GET  `/api/config`
+  - POST `/api/register/start`
+  - POST `/api/register/end`
+  - POST `/api/login/start`
+  - POST `/api/reset-password/request`
+  - POST `/api/reset-password/end/{token}`
+  - POST `/api/verify-email/{id}`
 
-```bash
-sudo apt update
-sudo apt install -y libpq-dev libsodium-dev
-```
+- Authenticated endpoints (require session)
+  - GET  `/api/user`
+  - POST `/api/logout`
+  - GET  `/api/pubkey/{id}`
+  - GET  `/api/user/{email}/pubkey`
+  - GET/POST/DELETE `/api/user/saved-transfer`
+  - POST `/api/login/end` (completes login and creates session)
 
-Windows:
+- Fresh-login required (sensitive operations)
+  - DELETE `/api/user/{email}`
+  - PUT    `/api/user/addkey`
+  - POST   `/api/register/update`
 
-- Download the PostgreSQL `libpq` development files
-- Set the `PATH` environment variable to include the PostgreSQL `bin` directory, e.g.: `C:\Program Files\PostgreSQL\17\bin`
+- Link (anonymous/connected) transfers
+  - POST `/api/link/message/start`
+  - POST `/api/link/message` (upload metadata + create multipart upload)
+  - POST `/api/link/message/{id}/uploadfinish/{file_id}`
+  - POST `/api/link/message/{id}/login/start`
+  - POST `/api/link/message/{id}/login/end`
+  - GET  `/api/link/message/{id}/metadata`
+  - GET  `/api/link/message/{id}` (returns a presigned download URL)
+  - PUT/DELETE `/api/link/message/{id}`
 
-## Quick start (local development)
+For exact request/response shapes consult `src/api_handlers/*` - handlers perform validation and base64/OPAQUE decoding.
 
-1) Copy environment file:
+Storage
+- The server uses the AWS SDK for S3 and will create the bucket named by S3_BUCKET_NAME if it does not exist.
+- The `.env.sample` contains examples; the code does not rely on a separate anonymous bucket (only S3_BUCKET_NAME is ensured).
 
-```bash
-cp .env.sample .env
-```
+Email
+- Emails are sent using lettre. In `development` SERVER_MODE the email contents are printed to logs (the SMTP connection is still configured).
 
-2) Start local PostgreSQL + RustFS containers
+Database migrations
+- Diesel migrations are embedded and executed at startup via `diesel_migrations::embed_migrations!()`.
 
-3) Update `.env` for host-run backend (typical local values):
+Build, test, Docker
+- Run locally: `cargo run`
+- Build release: `cargo build --release`
+- Tests: `cargo test`
 
-```dotenv
-DATABASE_URL=postgres://postgres:postgres@localhost/just_transfer
-RUSTFS_URL=http://localhost:9000
-FRONTEND_URL=https://localhost
-```
+Docker: the Dockerfile builds and installs the `JustTransfer` binary and exposes port 80. Example:
+  docker build -t justtransfer-backend .
+  docker run --env-file .env -p 80:80 justtransfer-backend
 
-4) Run the backend:
+Notes & production considerations
+- Environment variables are required at startup; missing/invalid values cause initialization to fail.
+- Sessions are in-memory (MemoryStore). For production, replace with a persistent session store.
+- OPAQUE requires client-side support for the protocol used here - ensure clients implement compatible OPAQUE flows.
+- The service creates a dummy user and a dummy anonymous transfer on startup (see `src/server/init.rs`).
 
-```bash
-cargo run
-```
+Contributing
+Contributions welcome. Open an issue to discuss features or bugs, and submit PRs with tests where appropriate.
 
-The server binds to `0.0.0.0:80` (see `src/consts.rs`). On Linux, binding to port `80` may require elevated privileges or `CAP_NET_BIND_SERVICE`.
-
-## Environment variables
-
-Required variables are loaded at startup from the process environment:
-
-- `FRONTEND_URL`
-- `POSTGRESQL_USERNAME`
-- `DATABASE_URL`
-- `RUSTFS_USER`
-- `RUSTFS_PASSWORD`
-- `RUSTFS_URL`
-- `S3_BUCKET_NAME`
-- `S3_BUCKET_NAME_ANONYMOUS`
-- `SERVER_MODE` (`master`, `slave`, or `development`)
-- `SMTP_HOST`
-- `SMTP_MAIL`
-- `SMTP_PASSWORD`
-- `DUMMY_EMAIL` (to avoid timing attacks)
-
-Use `.env.sample` as the baseline configuration.
-
-## Database and Diesel
-
-Migrations are embedded and executed automatically on server startup.
-
-If you want Diesel CLI for schema/migration work:
-
-```bash
-cargo install diesel_cli --no-default-features --features postgres
-diesel setup
-diesel migration run
-diesel print-schema > src/schema.rs
-```
-
-## API overview
-
-Current route groups from `src/main.rs`:
-
-- Public: `/api/config`, register/login start/end, verify email, reset password
-- Authenticated: user info, logout, key lookups, message upload/download/delete
-- Fresh login required: delete account, add key, update registration
-- Anonymous transfer: create/upload/login flow and metadata/download endpoints
-
-The backend currently exposes JSON and multipart endpoints; formal OpenAPI documentation is not yet included.
-
-## Server modes
-
-- `master`: runs monthly quota reset task on month boundaries (UTC)
-- `development`: runs quota reset task every minute (for testing)
-- `slave`: does not run the quota reset scheduler
-
-## Project layout
-
-```text
-src/
-  api_handlers/      # HTTP handlers (anonymous/auth/connected/misc)
-  server/            # initialization, cron, mail, and service logic
-  models.rs          # Diesel models
-  schema.rs          # Diesel-generated schema
-  consts.rs          # limits, env key registry, app constants
-  main.rs            # router and middleware setup
-migrations/          # SQL migrations
-```
-
-## Testing
-
-Run tests with:
-
-```bash
-cargo test
-```
-
-> Note: current test module includes placeholder/failing exploration tests and should be expanded before production releases.
-
-## Contributing
-
-Contributions are welcome.
-
-- Open an issue to discuss bug fixes or feature ideas
-- Fork the repository and submit a pull request with your changes
-- Ensure code is well-documented and includes tests where appropriate
+License
+See LICENSE file for license details.
