@@ -541,6 +541,12 @@ pub struct UpdateLinkMessage {
     lifetime: i64,
     #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
     mac: String,
+    // The type already validates that the provided input is valid
+    sender_key_id: Option<Uuid>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    signature_metadata: Option<String>,
+    #[validate(length(min = MIN_LENGTH_BASE64, max = MAX_LENGTH_BASE64))]
+    signature: Option<String>,
 }
 
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
@@ -574,6 +580,9 @@ pub async fn link_message_update(
         payload.lifetime,
         URL_SAFE_NO_PAD.decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
+        payload.sender_key_id,
+        payload.signature_metadata.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
+        payload.signature.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
         &state.db,
     )
         .await?;

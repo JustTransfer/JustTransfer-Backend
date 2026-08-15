@@ -649,6 +649,9 @@ pub async fn update_link_transfer(
     max_downloads_param: i64,
     lifetime_param: i64,
     mac: Vec<u8>,
+    sender_key_id: Option<Uuid>,
+    signature_metadata: Option<Vec<u8>>,
+    signature: Option<Vec<u8>>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
 
@@ -673,6 +676,17 @@ pub async fn update_link_transfer(
     if !equal {
         return Err(ServerError::Unauthorized);
     }
+    
+    // Check if the transfer is signed must update the signature metadata and signature
+    if message.is_signed {
+        if sender_key_id.is_none() || signature_metadata.is_none() || signature.is_none() {
+            return Err(ServerError::Forbidden);
+        }
+    } else {
+        if sender_key_id.is_some() || signature_metadata.is_some() || signature.is_some() {
+            return Err(ServerError::Forbidden);
+        }
+    }
 
     // Update the transfer
     diesel::update(link_transfers.filter(link_transfers::id.eq(id)))
@@ -682,6 +696,9 @@ pub async fn update_link_transfer(
             link_transfers::max_downloads.eq(max_downloads_param),
             link_transfers::lifetime.eq(lifetime_param),
             link_transfers::mac.eq(mac),
+            link_transfers::sender_key_id.eq(sender_key_id),
+            link_transfers::signature_metadata.eq(signature_metadata),
+            link_transfers::signature.eq(signature),
         ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
