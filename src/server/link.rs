@@ -596,7 +596,7 @@ pub async fn link_send_message_end(
     if email_receiver.is_some() {
         server::mail::send_transfer_notification_email(
             email_receiver.as_ref().unwrap(),
-            &format!("{}/link/message/{}", FRONTEND_URL.get().unwrap(), message_id),
+            &format!("{}/link-transfer/{}", FRONTEND_URL.get().unwrap(), message_id),
             mailer,
         )
             .map_err(|_| ServerError::Internal)?;
