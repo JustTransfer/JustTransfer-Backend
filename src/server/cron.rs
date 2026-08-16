@@ -84,3 +84,68 @@ pub fn start_monthly_task(app_state: AppState) -> Result<(), ServerError> {
     
     Ok(())
 }
+
+pub fn start_daily_cleanup_task(app_state: AppState) -> Result<(), ServerError> {
+    let server_mode = SERVER_MODE.get().unwrap().to_string();
+
+    if server_mode == "slave" {
+        tracing::info!("Server mode is 'slave', daily cleanup task will not run");
+        return Ok(());
+    }
+
+    let db_clone = app_state.db.clone();
+    let s3_clone = app_state.s3.clone();
+
+    tokio::spawn(async move {
+        loop {
+            let duration = match server_mode.as_str() {
+                // For testing, run every minute
+                "development" => std::time::Duration::from_secs(60),
+
+                // For production, run the task at midnight UTC every day
+                "master" => {
+                    let now = Utc::now();
+                    let next_midnight = (now + std::time::Duration::from_hours(24))
+                        .date_naive()
+                        .and_hms_opt(0, 0, 0)
+                        .unwrap();
+                    let next_run = Utc.from_utc_datetime(&next_midnight);
+
+                    let time_until = (next_run - now)
+                        .to_std()
+                        .unwrap_or(std::time::Duration::from_secs(0));
+
+                    tracing::info!(
+                        "Server mode is 'master'. Daily cleanup task will run in {:?} at {}",
+                        time_until,
+                        next_run
+                    );
+
+                    time_until
+                }
+                _ => {
+                    tracing::error!(
+                        "Unknown server mode: {}. Daily cleanup task will not run.",
+                        server_mode
+                    );
+                    panic!(
+                        "Unknown server mode: {}. Daily cleanup task will not run.",
+                        server_mode
+                    );
+                }
+            };
+
+            tokio::time::sleep(duration).await;
+
+            match server::link::delete_expired_link_transfers(&db_clone, &s3_clone).await {
+                Ok(count) => tracing::info!(
+                    "Daily cleanup task completed successfully, deleted {} expired transfers",
+                    count
+                ),
+                Err(e) => tracing::error!("Error running daily cleanup task: {:?}", e),
+            }
+        }
+    });
+
+    Ok(())
+}

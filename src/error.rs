@@ -4,9 +4,6 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum ServerError {
-    #[error("username already exists")]
-    UsernameTaken,
-
     #[error("email already used")]
     EmailTaken,
 
@@ -49,7 +46,7 @@ impl From<DieselError> for ServerError {
 impl From<ServerError> for ApiError {
     fn from(err: ServerError) -> Self {
         match err {
-            ServerError::UsernameTaken | ServerError::EmailTaken => ApiError::Conflict,
+            ServerError::EmailTaken => ApiError::Conflict,
             ServerError::Internal => ApiError::ServerError,
             ServerError::Unauthorized => ApiError::Unauthorized,
             ServerError::Forbidden => ApiError::Forbidden,

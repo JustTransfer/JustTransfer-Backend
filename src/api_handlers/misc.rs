@@ -2,7 +2,7 @@ use aws_sdk_s3::Client;
 use diesel::{r2d2, PgConnection};
 use diesel::r2d2::ConnectionManager;
 use validator::{ValidationError, Validate};
-use crate::consts::{MAX_FILE_SIZE_ANONYMOUS, MAX_LENGTH_USERNAME, MAX_VALUE_INT, MAX_VALUE_INT_FILE_SIZE, MIN_LENGTH_USERNAME};
+use crate::consts::{MAX_FILE_SIZE_CONNECTED_PREMIUM, MAX_VALUE_INT, MAX_VALUE_INT_FILE_SIZE};
 
 pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
@@ -11,7 +11,6 @@ pub struct AppState {
     pub db: DbPool,
     pub s3: Client,
     pub bucket_name: String,
-    pub bucket_name_anonymous: String,
     pub mailer: lettre::SmtpTransport,
 }
 
@@ -44,11 +43,11 @@ pub fn validate_int_param_64(value: i64) -> Result<(), ValidationError> {
 }
 
 ///
-/// Validation functions for anonymous messages
+/// Validation functions for messages (already enforced by the API)
 ///
 
-pub fn validate_file_size_anonymous(size: i64) -> Result<(), ValidationError> {
-    if size == 0 || size > *MAX_FILE_SIZE_ANONYMOUS.get().unwrap() {
+pub fn validate_file_size(size: i64) -> Result<(), ValidationError> {
+    if size == 0 || size > *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap() {
         return Err(ValidationError::new("invalid_file_size"));
     }
     Ok(())
@@ -57,20 +56,6 @@ pub fn validate_file_size_anonymous(size: i64) -> Result<(), ValidationError> {
 ///
 /// Validation functions for connected messages
 ///
-
-pub fn validate_username(username: &str) -> Result<(), ValidationError> {
-    // Check length
-    if username.len() < MIN_LENGTH_USERNAME || username.len() > MAX_LENGTH_USERNAME {
-        return Err(ValidationError::new("invalid_length"));
-    }
-
-    // Allow only ASCII lowercase letters, digits, and underscores
-    if !username.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_') {
-        return Err(ValidationError::new("invalid_characters"));
-    }
-
-    Ok(())
-}
 
 pub fn validate_email(email: &str) -> Result<(), ValidationError> {
     #[derive(Validate)]
@@ -81,4 +66,12 @@ pub fn validate_email(email: &str) -> Result<(), ValidationError> {
 
     let email_validation = EmailValidation { email };
     email_validation.validate().map_err(|_| ValidationError::new("invalid_email"))
+}
+
+pub fn validate_optional_email(email: &str) -> Result<(), ValidationError> {
+    if email.trim().is_empty() {
+        return Err(ValidationError::new("invalid_email"));
+    }
+
+    validate_email(email)
 }

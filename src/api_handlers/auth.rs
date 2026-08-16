@@ -1,6 +1,9 @@
+use std::collections::HashSet;
+
 use axum::{http::StatusCode, response::Response};
 use serde::{Deserialize, Serialize};
 use axum::middleware::Next;
+use axum::extract::Path;
 use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
 
 use uuid::Uuid;
@@ -85,16 +88,15 @@ impl Role {
 
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct Claims {
+pub struct UserClaims {
     pub id: Uuid,
-    pub username: String,
+    pub email: String,
     pub role: Role,
     pub iat: i64, // Issued at timestamp
 }
 
-impl Claims {
+impl UserClaims {
     pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i64, file_size: i64, max_downloads: i64) -> Result<(), ApiError> {
-        
         // Creation time
         let now = Utc::now();
         if creation_time > now + chrono::Duration::minutes(MAX_TIME_MARGIN) || creation_time < now - chrono::Duration::minutes(MAX_TIME_MARGIN) {
@@ -118,6 +120,25 @@ impl Claims {
 
         Ok(())
     }
+    
+    pub fn authorize_update(&self, lifetime: i64, max_downloads: i64) -> Result<(), ApiError> {
+        // Lifetime
+        if lifetime < 1 || lifetime > self.role.max_lifetime() {
+            return Err(ApiError::Forbidden);
+        }
+
+        // Max downloads
+        if max_downloads < 1 || max_downloads > self.role.max_downloads() {
+            return Err(ApiError::Forbidden);
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LinkClaims {
+    pub id: Uuid,
 }
 
 pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<MemoryStore> {
@@ -137,9 +158,9 @@ pub async fn require_auth(
     next: Next,
 ) -> Result<Response, StatusCode> {
 
-    // Extend the request with the user's role and username for later use in handlers
-    let username = session
-        .get::<String>(AUTH_KEY_USERNAME)
+    // Extend the request with the user's role and email for later use in handlers
+    let email = session
+        .get::<String>(AUTH_KEY_EMAIL)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
@@ -163,9 +184,9 @@ pub async fn require_auth(
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
     req.extensions_mut().insert(
-        Claims {
+        UserClaims {
             id: user_id,
-            username: username,
+            email: email,
             role: Role::try_from(role.as_str()).unwrap_or(Role::User),
             iat: created_at,
         }
@@ -174,31 +195,63 @@ pub async fn require_auth(
     Ok(next.run(req).await)
 }
 
-pub async  fn require_auth_anonymous(
+#[derive(Deserialize)]
+pub struct LinkAuthParam {
+    id: Uuid,
+}
+pub async fn require_auth_link(
+    Path(params): Path<LinkAuthParam>,
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
 
-    let message_id = session
-        .get::<Uuid>(AUTH_KEY_ANONYMOUS)
+    let authorized_ids = session
+        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
         .await
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+        .unwrap_or_default();
+
+    if !authorized_ids.contains(&params.id) {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
 
     // Extend the request with the anonymous message ID for later use in handlers
-    req.extensions_mut().insert(Claims {
-        id: message_id,
-        username: "".to_string(),
-        role: Role::Anonymous,
-        iat: 0,
-    });
+    req.extensions_mut().insert(LinkClaims { id: params.id });
 
     Ok(next.run(req).await)
 }
 
+pub async fn optional_auth(
+    session: Session,
+    mut req: axum::http::Request<axum::body::Body>,
+    next: Next,
+) -> Response {
+
+    if let (
+        Ok(Some(email)),
+        Ok(Some(user_id)),
+        Ok(Some(role)),
+        Ok(Some(created_at)),
+    ) = (
+        session.get::<String>(AUTH_KEY_EMAIL).await,
+        session.get::<Uuid>(AUTH_KEY_USER_ID).await,
+        session.get::<String>(AUTH_KEY_ROLE).await,
+        session.get::<i64>(AUTH_KEY_CREATED_AT).await,
+    ) {
+        req.extensions_mut().insert(UserClaims {
+            id: user_id,
+            email,
+            role: Role::try_from(role.as_str()).unwrap_or(Role::User),
+            iat: created_at,
+        });
+    }
+
+    next.run(req).await
+}
+
 // Check if the iat of the session is recent
-pub async  fn require_fresh_login(
+pub async fn require_fresh_login(
     session: Session,
     req: axum::http::Request<axum::body::Body>,
     next: Next,
