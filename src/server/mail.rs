@@ -43,7 +43,7 @@ fn send_mail(receiver: &str, subject: &str, body: &str, mailer: &SmtpTransport) 
         }
         Err(e) => {
             tracing::error!("Could not send email to {}: {:?}", receiver, e);
-            Err(ServerError::EmailSendError)
+            Ok(())
         }
     }
 }
