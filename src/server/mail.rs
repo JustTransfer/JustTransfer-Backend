@@ -42,6 +42,7 @@ fn send_mail(receiver: &str, subject: &str, body: &str, mailer: &SmtpTransport) 
             Ok(())
         }
         Err(e) => {
+            // Log the error but returns success
             tracing::error!("Could not send email to {}: {:?}", receiver, e);
             Ok(())
         }
