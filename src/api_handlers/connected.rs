@@ -517,7 +517,8 @@ pub async fn delete_user(
     server::connected::delete_user(
         claims_session.id,
         &state.db,
-        &state.s3
+        &state.s3,
+        &state.mailer,
     )
         .await?;
 
