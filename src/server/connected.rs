@@ -595,6 +595,7 @@ pub async fn delete_user(
     user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
+    mailer: &lettre::SmtpTransport
 ) -> Result<(), ServerError> {
     use crate::schema::users;
     use crate::schema::saved_transfers;
@@ -603,6 +604,12 @@ pub async fn delete_user(
     use crate::schema::reset_tokens;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+    
+    let user = users::table
+        .filter(users::id.eq(user_id_param))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
 
     let orphaned_file_ids = conn.transaction::<Vec<Uuid>, ServerError, _>(|conn| {
 
@@ -658,7 +665,14 @@ pub async fn delete_user(
             .await
             .map_err(|_| ServerError::Internal)?;
     }
-
+    
+    // Send confirmation email to the user
+    server::mail::send_account_deletion_email(
+        user.email.as_str(),
+        mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
+    
     Ok(())
 }
 

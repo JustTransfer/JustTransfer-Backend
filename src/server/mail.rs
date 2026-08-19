@@ -96,3 +96,11 @@ pub fn send_transfer_notification_email(receiver: &str, url: &str, mailer: &Smtp
 
     send_mail(receiver, subject, &body, mailer)
 }
+
+pub fn send_account_deletion_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    let subject = "Your JustTransfer account has been deleted";
+    let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer account has been deleted. You can create a new account at any time by visiting the JustTransfer website.\n\nBest regards,\nJustTransfer Team", receiver);
+
+    send_mail(receiver, subject, &body, mailer)
+}
