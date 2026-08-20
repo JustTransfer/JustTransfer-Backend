@@ -24,6 +24,9 @@ pub enum ServerError {
 
     #[error("error sending email")]
     EmailSendError,
+
+    #[error("input validation error")]
+    InputValidation,
 }
 impl From<aws_sdk_s3::error::BuildError> for ServerError {
     fn from(_: aws_sdk_s3::error::BuildError) -> Self {
@@ -53,6 +56,7 @@ impl From<ServerError> for ApiError {
             ServerError::InsufficientStorage => ApiError::InsufficientStorage,
             ServerError::NotFound => ApiError::ServerNotFound,
             ServerError::EmailSendError => ApiError::ServerError,
+            ServerError::InputValidation => ApiError::InputValidation,
         }
     }
 }

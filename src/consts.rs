@@ -9,6 +9,11 @@ pub const MAX_TIME_MARGIN: i64 = 1; // minute
 pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.05; // 5%
 pub const MIN_ENC_SIZE_DIFF_BYTES: usize = 1024; // 1 KiB
 
+/// Const for Payrexx
+pub static PAYREXX_INSTANCE: OnceCell<String> = OnceCell::new();
+pub static PAYREXX_API_SECRET: OnceCell<String> = OnceCell::new();
+pub static PAYREXX_WEBHOOK_SECRET: OnceCell<String> = OnceCell::new();
+
 
 /// Const for Dummy User
 pub const DUMMY_PASSWORD_FILE: [u8; 192] = [148, 143, 115, 172, 138, 108, 10, 29, 2, 73, 157, 226, 13, 66, 220, 195, 230, 49, 19, 123, 205, 110, 223, 252, 84, 114, 222, 170, 62, 50, 119, 80, 36, 125, 253, 8, 126, 10, 121, 194, 128, 45, 191, 48, 57, 130, 133, 133, 249, 87, 10, 144, 194, 41, 59, 49, 215, 120, 61, 174, 224, 176, 95, 239, 233, 180, 244, 167, 13, 47, 4, 161, 242, 156, 103, 26, 159, 148, 103, 3, 194, 246, 22, 3, 218, 101, 13, 48, 107, 47, 157, 18, 149, 71, 203, 158, 220, 4, 110, 236, 230, 11, 204, 211, 144, 202, 240, 12, 160, 141, 253, 227, 74, 226, 246, 234, 100, 9, 33, 62, 192, 176, 160, 146, 169, 88, 17, 8, 118, 97, 187, 111, 110, 61, 175, 249, 112, 147, 193, 53, 209, 142, 231, 48, 166, 83, 117, 178, 138, 91, 217, 123, 146, 45, 135, 146, 30, 212, 104, 93, 213, 97, 126, 11, 17, 131, 168, 5, 151, 44, 20, 69, 148, 75, 232, 187, 244, 225, 8, 76, 231, 32, 128, 244, 141, 124, 160, 52, 206, 72, 209, 165];
@@ -57,7 +62,7 @@ pub const SIGN_LEN_SIGNATURE: usize = crypto_aead_aegis256_ABYTES  as usize;
 
 
 /// Environment variable list with their corresponding OnceCell keys
-pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 13] = [
+pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 16] = [
     ("BACKEND_URL", &BACKEND_URL),
     ("FRONTEND_URL", &FRONTEND_URL),
     ("POSTGRESQL_USERNAME", &POSTGRESQL_USERNAME),
@@ -71,6 +76,9 @@ pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 13] = [
     ("SMTP_MAIL", &SMTP_MAIL),
     ("SMTP_PASSWORD", &SMTP_PASSWORD),
     ("DUMMY_EMAIL", &DUMMY_EMAIL),
+    ("PAYREXX_INSTANCE", &PAYREXX_INSTANCE),
+    ("PAYREXX_API_SECRET", &PAYREXX_API_SECRET),
+    ("PAYREXX_WEBHOOK_SECRET", &PAYREXX_WEBHOOK_SECRET),
 ];
 
 pub const ENV_CELLS_I64: [(&str, &'static OnceCell<i64>); 20] = [

@@ -145,6 +145,8 @@ pub struct User {
 
     pub registration_token: Uuid,
     pub email_verified: bool,
+
+    pub payrexx_subscription_id: Option<i64>,
 }
 
 pub struct InfoUser {
@@ -165,6 +167,17 @@ pub struct NewUser<'a> {
 
     pub registration_token: Uuid,
     pub email_verified: bool,
+}
+
+///
+/// Subscription update
+///
+
+#[derive(AsChangeset)]
+#[diesel(table_name = crate::schema::users)]
+pub struct SubscriptionUpdate {
+    pub role: String,
+    pub payrexx_subscription_id: Option<i64>,
 }
 
 ///

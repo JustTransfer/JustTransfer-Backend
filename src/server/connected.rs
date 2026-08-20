@@ -888,6 +888,48 @@ pub fn delete_saved_transfer (
 }
 
 ///
+/// Subscription
+///
+
+pub fn activate_subscription(
+    user_id: Uuid,
+    plan: &str,
+    payrexx_subscription_id: Option<i64>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    diesel::update(users.find(user_id))
+        .set(SubscriptionUpdate {
+            role: plan.to_string(),
+            payrexx_subscription_id,
+        })
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
+pub fn deactivate_subscription(
+    user_id: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    diesel::update(users.find(user_id))
+        .set(SubscriptionUpdate {
+            role: "user".to_string(),
+            payrexx_subscription_id: None,
+        })
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
+///
 /// Admin
 ///
 
