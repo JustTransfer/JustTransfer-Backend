@@ -1,2 +1,4 @@
 target
 .env
+.git
+.DS_Store
