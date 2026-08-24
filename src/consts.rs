@@ -10,9 +10,9 @@ pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.05; // 5%
 pub const MIN_ENC_SIZE_DIFF_BYTES: usize = 1024; // 1 KiB
 
 /// Const for Payrexx
-pub static PAYREXX_INSTANCE: OnceCell<String> = OnceCell::new();
-pub static PAYREXX_API_SECRET: OnceCell<String> = OnceCell::new();
-pub static PAYREXX_WEBHOOK_SECRET: OnceCell<String> = OnceCell::new();
+pub static STRIPE_SECRET_KEY: OnceCell<String> = OnceCell::new();
+pub static STRIPE_WEBHOOK_SECRET: OnceCell<String> = OnceCell::new();
+pub static STRIPE_PRICE_ID_PREMIUM: OnceCell<String> = OnceCell::new(); // e.g. "price_1Nxxxxx"
 
 
 /// Const for Dummy User
@@ -76,9 +76,9 @@ pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 16] = [
     ("SMTP_MAIL", &SMTP_MAIL),
     ("SMTP_PASSWORD", &SMTP_PASSWORD),
     ("DUMMY_EMAIL", &DUMMY_EMAIL),
-    ("PAYREXX_INSTANCE", &PAYREXX_INSTANCE),
-    ("PAYREXX_API_SECRET", &PAYREXX_API_SECRET),
-    ("PAYREXX_WEBHOOK_SECRET", &PAYREXX_WEBHOOK_SECRET),
+    ("STRIPE_SECRET_KEY", &STRIPE_SECRET_KEY),
+    ("STRIPE_WEBHOOK_SECRET", &STRIPE_WEBHOOK_SECRET),
+    ("STRIPE_PRICE_ID_PREMIUM", &STRIPE_PRICE_ID_PREMIUM),
 ];
 
 pub const ENV_CELLS_I64: [(&str, &'static OnceCell<i64>); 20] = [

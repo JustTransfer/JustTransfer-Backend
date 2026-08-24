@@ -56,12 +56,13 @@ async fn main() {
         .route("/api/verify-email/{id}", post(api_handlers::connected::verify_email))
         .route("/api/reset-password/request", post(api_handlers::connected::request_password_reset))
         .route("/api/reset-password/end/{token}", post(api_handlers::connected::finish_password_reset))
-        .route("/api/webhook/payrexx", post(api_handlers::payment::payrexx_webhook));
+        .route("/api/webhook/stripe", post(api_handlers::payment::stripe_webhook));
 
     // Routes for authenticated users
     let account_app = Router::new()
         .route("/api/user", get(api_handlers::connected::get_user_info))
         .route("/api/subscription/checkout", post(api_handlers::payment::create_subscription_checkout))
+        .route("/api/subscription/cancel", post(api_handlers::payment::cancel_subscription))
         .route("/api/logout", post(api_handlers::connected::logout))
         .route("/api/pubkey/{id}", get(api_handlers::connected::get_pub_key))
         .route("/api/user/{email}/pubkey", get(api_handlers::connected::get_pub_key_user))// todo check if still needed

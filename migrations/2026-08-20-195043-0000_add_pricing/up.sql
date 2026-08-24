@@ -1,2 +1,3 @@
--- Add payrexx_subscription_id column to users table
-ALTER TABLE users ADD COLUMN payrexx_subscription_id BIGINT;
+-- up.sql
+ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT;
+ALTER TABLE users ADD COLUMN stripe_customer_id TEXT;

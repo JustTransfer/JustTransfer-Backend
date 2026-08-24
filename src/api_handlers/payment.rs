@@ -9,7 +9,7 @@ use crate::server;
 
 #[derive(Deserialize, Debug)]
 pub struct CreateCheckout {
-    plan: String, // "user" | "premium"
+    plan: String,
 }
 
 #[derive(Serialize)]
@@ -23,29 +23,37 @@ pub async fn create_subscription_checkout(
     State(state): State<AppState>,
     Json(payload): Json<CreateCheckout>,
 ) -> Result<impl IntoResponse, ApiError> {
-
-    if payload.plan != "premium" {
-        return Err(ApiError::InputValidation);
-    }
-
-    let checkout_url = server::payment::create_subscription_gateway(
+    let checkout_url = server::payment::create_subscription_checkout(
         claims_session.id,
         &claims_session.email,
         &payload.plan,
-    )
-        .await?;
+    ).await?;
 
     Ok((StatusCode::OK, Json(CreateCheckoutResult { checkout_url })))
 }
 
+#[instrument(skip(state), fields(user_id = %claims_session.id), err(Debug))]
+pub async fn cancel_subscription(
+    Extension(claims_session): Extension<UserClaims>,
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+    let Some(sub_id) = server::connected::get_stripe_subscription_id(claims_session.id, &state.db)? else {
+        return Err(ApiError::InputValidation); // nothing to cancel
+    };
+
+    server::payment::cancel_subscription(&sub_id).await?;
+    // role flips back to "user" once Stripe's customer.subscription.deleted webhook lands
+    Ok(StatusCode::OK)
+}
+
 #[instrument(skip_all, err(Debug))]
-pub async fn payrexx_webhook(
+pub async fn stripe_webhook(
     State(state): State<AppState>,
     headers: HeaderMap,
     body: axum::body::Bytes,
 ) -> Result<impl IntoResponse, ApiError> {
     let signature = headers
-        .get("X-Webhook-Signature")
+        .get("Stripe-Signature")
         .and_then(|v| v.to_str().ok())
         .ok_or(ApiError::Forbidden)?;
 
@@ -53,10 +61,10 @@ pub async fn payrexx_webhook(
         return Err(ApiError::Forbidden);
     }
 
-    let payload: server::payment::WebhookPayload =
+    let event: server::payment::StripeEvent =
         serde_json::from_slice(&body).map_err(|_| ApiError::InputValidation)?;
 
-    server::payment::handle_webhook(payload, &state.db).await?;
+    server::payment::handle_webhook(event, &state.db).await?;
 
     Ok(StatusCode::OK)
 }

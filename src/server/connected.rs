@@ -894,7 +894,8 @@ pub fn delete_saved_transfer (
 pub fn activate_subscription(
     user_id: Uuid,
     plan: &str,
-    payrexx_subscription_id: Option<i64>,
+    stripe_subscription_id: Option<String>,
+    stripe_customer_id: Option<String>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
@@ -903,7 +904,8 @@ pub fn activate_subscription(
     diesel::update(users.find(user_id))
         .set(SubscriptionUpdate {
             role: plan.to_string(),
-            payrexx_subscription_id,
+            stripe_subscription_id,
+            stripe_customer_id,
         })
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
@@ -921,12 +923,45 @@ pub fn deactivate_subscription(
     diesel::update(users.find(user_id))
         .set(SubscriptionUpdate {
             role: "user".to_string(),
-            payrexx_subscription_id: None,
+            stripe_subscription_id: None,
+            stripe_customer_id: None,
         })
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
+}
+
+// Needed by the cancel endpoint to know which Stripe subscription to cancel
+pub fn get_stripe_subscription_id(
+    user_id: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<Option<String>, ServerError> {
+    use crate::schema::users::dsl::*;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    users
+        .find(user_id)
+        .select(stripe_subscription_id)
+        .first::<Option<String>>(&mut conn)
+        .map_err(|_| ServerError::Internal)
+}
+
+// Needed by the webhook to find the user when Stripe sends a
+// customer.subscription.* event that only carries the subscription ID
+pub fn find_user_by_stripe_subscription_id(
+    sub_id: &str,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<Option<Uuid>, ServerError> {
+    use crate::schema::users::dsl::*;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    users
+        .filter(stripe_subscription_id.eq(sub_id))
+        .select(id)
+        .first::<Uuid>(&mut conn)
+        .optional()
+        .map_err(|_| ServerError::Internal)
 }
 
 ///
