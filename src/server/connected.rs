@@ -6,6 +6,7 @@ use diesel::dsl::{sql, now as sql_now};
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
 use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::*;
+use tracing::info;
 use uuid::Uuid;
 
 
@@ -910,6 +911,8 @@ pub fn activate_subscription(
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
+    info!("Activated subscription for user {} with plan {}", user_id, plan);
+
     Ok(())
 }
 
@@ -928,6 +931,8 @@ pub fn deactivate_subscription(
         })
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
+
+    info!("Deactivated subscription for user {}", user_id);
 
     Ok(())
 }
