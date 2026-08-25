@@ -10,6 +10,7 @@ libsodium-sys-stable = "1.24.0"
 argon2 = "0.6.0-rc.8"
 opaque-ke = { version = "4.1.0-pre.2", features = ["ristretto255", "argon2"] }
 sha2 = "0.10.9"
+hmac = "0.12"
 
 # Web framework and related libraries
 axum = { version = "0.8.9", features = ["multipart", "tokio", "macros"]}
@@ -17,6 +18,8 @@ http = "1.5.0"
 tower = { version = "0.5.3", features = ["timeout"] }
 tower-http = { version = "0.7.0", features = ["cors", "trace", "catch-panic"] }
 serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
 tokio = { version = "1.53.1", features = ["full"] }
 validator = { version = "0.21.0", features = ["derive"] }
 tracing = "0.1.44"
@@ -38,11 +41,4 @@ base64 = "0.23.1"
 uuid = { version = "1.24.1", features = ["v4", "serde"] }
 chrono = { version = "0.4.45", features = ["serde", "clock"] }
 thiserror = "2"
-
-
-# TMP
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-hmac = "0.12"
-serde_urlencoded = "0.7"
-serde_json = "1.0"
-hex = "0.4"

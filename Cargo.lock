@@ -23,7 +23,6 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "serde_urlencoded",
  "sha2 0.10.9",
  "thiserror",
  "tokio",

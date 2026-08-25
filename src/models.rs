@@ -175,6 +175,7 @@ pub struct NewUser<'a> {
 ///
 
 #[derive(AsChangeset)]
+#[diesel(treat_none_as_null = true)]
 #[diesel(table_name = crate::schema::users)]
 pub struct SubscriptionUpdate {
     pub role: String,

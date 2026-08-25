@@ -9,10 +9,11 @@ pub const MAX_TIME_MARGIN: i64 = 1; // minute
 pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.05; // 5%
 pub const MIN_ENC_SIZE_DIFF_BYTES: usize = 1024; // 1 KiB
 
-/// Const for Payrexx
+/// Const for Stripe
 pub static STRIPE_SECRET_KEY: OnceCell<String> = OnceCell::new();
 pub static STRIPE_WEBHOOK_SECRET: OnceCell<String> = OnceCell::new();
 pub static STRIPE_PRICE_ID_PREMIUM: OnceCell<String> = OnceCell::new(); // e.g. "price_1Nxxxxx"
+pub const WEBHOOK_TIMESTAMP_TOLERANCE_SECS: i64 = 300; // 5 minutes
 
 
 /// Const for Dummy User

@@ -2,6 +2,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use serde::Deserialize;
 use uuid::Uuid;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::consts::*;
 use crate::error::ServerError;
@@ -84,6 +85,20 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
         return false;
     };
 
+    // Reject stale (or implausibly future-dated) timestamps before doing any
+    // crypto — a validly-signed but old payload is still a replay.
+    let Ok(ts) = timestamp.parse::<i64>() else {
+        return false;
+    };
+    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+        return false;
+    };
+    let now = now.as_secs() as i64;
+    if (now - ts).abs() > WEBHOOK_TIMESTAMP_TOLERANCE_SECS {
+        return false;
+    }
+
+    // Check the MAC
     let Ok(mut mac) = HmacSha256::new_from_slice(STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes()) else {
         return false;
     };
@@ -103,8 +118,6 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
             expected.len(),
         ) == 0
     }
-    // Optionally also reject if `timestamp` is more than a few minutes old,
-    // to guard against replay of a captured webhook body.
 }
 
 #[derive(Deserialize, Debug)]
