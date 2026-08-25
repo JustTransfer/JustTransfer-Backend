@@ -85,6 +85,8 @@ diesel::table! {
         created_at -> Timestamptz,
         registration_token -> Uuid,
         email_verified -> Bool,
+        stripe_subscription_id -> Nullable<Text>,
+        stripe_customer_id -> Nullable<Text>,
     }
 }
 
