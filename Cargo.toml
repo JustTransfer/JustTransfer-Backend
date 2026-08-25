@@ -10,7 +10,6 @@ libsodium-sys-stable = "1.24.0"
 argon2 = "0.6.0-rc.8"
 opaque-ke = { version = "4.1.0-pre.2", features = ["ristretto255", "argon2"] }
 sha2 = "0.10.9"
-hmac = "0.12"
 
 # Web framework and related libraries
 axum = { version = "0.8.9", features = ["multipart", "tokio", "macros"]}

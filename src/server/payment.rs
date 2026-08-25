@@ -1,14 +1,10 @@
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use serde::Deserialize;
-use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
+use uuid::Uuid;
 
+use crate::api_handlers::misc::DbPool;
 use crate::consts::*;
 use crate::error::ServerError;
-use crate::api_handlers::misc::DbPool;
-
-type HmacSha256 = Hmac<Sha256>;
 
 pub async fn create_subscription_checkout(
     user_id: Uuid,
@@ -23,11 +19,29 @@ pub async fn create_subscription_checkout(
         ("mode".into(), "subscription".into()),
         ("client_reference_id".into(), user_id.to_string()),
         ("customer_email".into(), email.to_string()),
-        ("line_items[0][price]".into(), STRIPE_PRICE_ID_PREMIUM.get().unwrap().clone()),
+        (
+            "line_items[0][price]".into(),
+            STRIPE_PRICE_ID_PREMIUM.get().unwrap().clone(),
+        ),
         ("line_items[0][quantity]".into(), "1".into()),
-        ("success_url".into(), format!("{}/account?subscription=success", FRONTEND_URL.get().unwrap())),
-        ("cancel_url".into(), format!("{}/pricing?subscription=cancelled", FRONTEND_URL.get().unwrap())),
-        ("subscription_data[metadata][user_id]".into(), user_id.to_string()),
+        (
+            "success_url".into(),
+            format!(
+                "{}/account?subscription=success",
+                FRONTEND_URL.get().unwrap()
+            ),
+        ),
+        (
+            "cancel_url".into(),
+            format!(
+                "{}/pricing?subscription=cancelled",
+                FRONTEND_URL.get().unwrap()
+            ),
+        ),
+        (
+            "subscription_data[metadata][user_id]".into(),
+            user_id.to_string(),
+        ),
     ];
 
     let client = reqwest::Client::new();
@@ -42,12 +56,19 @@ pub async fn create_subscription_checkout(
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().await.unwrap_or_default();
-        tracing::error!("Stripe checkout session creation failed: {} — {}", status, body);
+        tracing::error!(
+            "Stripe checkout session creation failed: {} — {}",
+            status,
+            body
+        );
         return Err(ServerError::Internal);
     }
 
     let body: serde_json::Value = resp.json().await.map_err(|_| ServerError::Internal)?;
-    body["url"].as_str().map(str::to_string).ok_or(ServerError::Internal)
+    body["url"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or(ServerError::Internal)
 }
 
 pub async fn cancel_subscription(sub_id: &str) -> Result<(), ServerError> {
@@ -85,8 +106,7 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
         return false;
     };
 
-    // Reject stale (or implausibly future-dated) timestamps before doing any
-    // crypto — a validly-signed but old payload is still a replay.
+    // Reject stale timestamps
     let Ok(ts) = timestamp.parse::<i64>() else {
         return false;
     };
@@ -98,26 +118,54 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
         return false;
     }
 
-    // Check the MAC
-    let Ok(mut mac) = HmacSha256::new_from_slice(STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes()) else {
+    // Decode the signature from hex
+    let Ok(sig_bytes) = hex::decode(v1) else {
         return false;
     };
-    mac.update(timestamp.as_bytes());
-    mac.update(b".");
-    mac.update(raw_body);
-    let expected = hex::encode(mac.finalize().into_bytes());
-
-    if expected.len() != v1.len() {
+    if sig_bytes.len() != libsodium_sys::crypto_auth_hmacsha256_BYTES as usize {
         return false;
     }
 
-    unsafe {
+    // Check the MAC
+    let secret = STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes();
+    let mut computed = [0u8; libsodium_sys::crypto_auth_hmacsha256_BYTES as usize];
+
+    let hmac_ok = unsafe {
+        let mut state = std::mem::MaybeUninit::<libsodium_sys::crypto_auth_hmacsha256_state>::uninit();
+        if libsodium_sys::crypto_auth_hmacsha256_init(
+            state.as_mut_ptr(),
+            secret.as_ptr(),
+            secret.len(),
+        ) != 0 {
+            return false;
+        }
+        let mut state = state.assume_init();
+
+        libsodium_sys::crypto_auth_hmacsha256_update(
+            &mut state,
+            timestamp.as_ptr(),
+            timestamp.len() as u64,
+        );
+        libsodium_sys::crypto_auth_hmacsha256_update(&mut state, b".".as_ptr(), 1);
+        libsodium_sys::crypto_auth_hmacsha256_update(
+            &mut state,
+            raw_body.as_ptr(),
+            raw_body.len() as u64,
+        );
+
+        if libsodium_sys::crypto_auth_hmacsha256_final(&mut state, computed.as_mut_ptr()) != 0 {
+            return false;
+        }
+
+        // Check the MAC
         libsodium_sys::sodium_memcmp(
-            expected.as_ptr().cast(),
-            v1.as_ptr().cast(),
-            expected.len(),
+            computed.as_ptr() as *const _,
+            sig_bytes.as_ptr() as *const _,
+            computed.len(),
         ) == 0
-    }
+    };
+
+    hmac_ok
 }
 
 #[derive(Deserialize, Debug)]
@@ -136,17 +184,30 @@ pub async fn handle_webhook(event: StripeEvent, pool: &DbPool) -> Result<(), Ser
     match event.event_type.as_str() {
         "checkout.session.completed" => {
             let obj = &event.data.object;
-            let Some(user_id) = obj["client_reference_id"].as_str().and_then(|s| Uuid::parse_str(s).ok()) else {
+            let Some(user_id) = obj["client_reference_id"]
+                .as_str()
+                .and_then(|s| Uuid::parse_str(s).ok())
+            else {
                 return Ok(());
             };
             let sub_id = obj["subscription"].as_str().map(str::to_string);
             let customer_id = obj["customer"].as_str().map(str::to_string);
 
-            crate::server::connected::activate_subscription(user_id, "premium", sub_id, customer_id, pool)?;
+            crate::server::connected::activate_subscription(
+                user_id,
+                "premium",
+                sub_id,
+                customer_id,
+                pool,
+            )?;
         }
         "customer.subscription.deleted" => {
-            let Some(sub_id) = event.data.object["id"].as_str() else { return Ok(()) };
-            if let Some(user_id) = crate::server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+            let Some(sub_id) = event.data.object["id"].as_str() else {
+                return Ok(());
+            };
+            if let Some(user_id) =
+                crate::server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
+            {
                 crate::server::connected::deactivate_subscription(user_id, pool)?;
             }
         }
@@ -156,7 +217,9 @@ pub async fn handle_webhook(event: StripeEvent, pool: &DbPool) -> Result<(), Ser
             let status = obj["status"].as_str().unwrap_or("");
             if matches!(status, "canceled" | "unpaid" | "incomplete_expired") {
                 if let Some(sub_id) = obj["id"].as_str() {
-                    if let Some(user_id) = crate::server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+                    if let Some(user_id) =
+                        crate::server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
+                    {
                         crate::server::connected::deactivate_subscription(user_id, pool)?;
                     }
                 }
