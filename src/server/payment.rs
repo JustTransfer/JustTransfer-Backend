@@ -1,7 +1,8 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
+use crate::server;
 use crate::api_handlers::misc::DbPool;
 use crate::consts::*;
 use crate::error::ServerError;
@@ -74,14 +75,14 @@ pub async fn create_subscription_checkout(
 pub async fn cancel_subscription(sub_id: &str) -> Result<(), ServerError> {
     let client = reqwest::Client::new();
     let resp = client
-        .delete(format!("https://api.stripe.com/v1/subscriptions/{sub_id}"))
+        .post(format!("https://api.stripe.com/v1/subscriptions/{sub_id}"))
         .bearer_auth(STRIPE_SECRET_KEY.get().unwrap())
+        .form(&[("cancel_at_period_end", "true")])
         .send()
         .await
         .map_err(|_| ServerError::Internal)?;
 
     if !resp.status().is_success() {
-        tracing::error!("Stripe subscription cancellation failed: {}", resp.status());
         return Err(ServerError::Internal);
     }
 

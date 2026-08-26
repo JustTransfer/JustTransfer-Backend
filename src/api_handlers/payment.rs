@@ -42,7 +42,7 @@ pub async fn cancel_subscription(
     };
 
     server::payment::cancel_subscription(&sub_id).await?;
-    // role flips back to "user" once Stripe's customer.subscription.deleted webhook lands
+
     Ok(StatusCode::OK)
 }
 
