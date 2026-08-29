@@ -148,6 +148,7 @@ pub struct User {
 
     pub stripe_subscription_id: Option<String>,
     pub stripe_customer_id: Option<String>,
+    pub current_period_end: Option<chrono::DateTime<Utc>>,
 }
 
 pub struct InfoUser {
@@ -155,6 +156,7 @@ pub struct InfoUser {
     pub email: String,
     pub role: String,
     pub number_transfers: i64,
+    pub current_period_end: Option<chrono::DateTime<Utc>>,
 }
 
 #[derive(Insertable)]
@@ -181,6 +183,7 @@ pub struct SubscriptionUpdate {
     pub role: String,
     pub stripe_subscription_id: Option<String>,
     pub stripe_customer_id: Option<String>,
+    pub current_period_end: Option<chrono::DateTime<Utc>>,
 }
 
 ///

@@ -589,6 +589,7 @@ pub fn get_user(
         email: user.email,
         role: user.role,
         number_transfers: user.number_transfers,
+        current_period_end: user.current_period_end,
     })
 }
 
@@ -898,6 +899,7 @@ pub fn activate_subscription(
     stripe_subscription_id: Option<String>,
     stripe_customer_id: Option<String>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -907,11 +909,25 @@ pub fn activate_subscription(
             role: plan.to_string(),
             stripe_subscription_id,
             stripe_customer_id,
+            current_period_end: None,
         })
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
     info!("Activated subscription for user {} with plan {}", user_id, plan);
+
+    // Send email notification to the user
+    let email = users::table
+        .filter(users::id.eq(user_id))
+        .select(users::email)
+        .first::<String>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    server::mail::send_subscription_started_email(
+        email.as_str(),
+        &mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
@@ -919,6 +935,7 @@ pub fn activate_subscription(
 pub fn deactivate_subscription(
     user_id: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -928,11 +945,58 @@ pub fn deactivate_subscription(
             role: "user".to_string(),
             stripe_subscription_id: None,
             stripe_customer_id: None,
+            current_period_end: None,
         })
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
     info!("Deactivated subscription for user {}", user_id);
+
+    // Send email notification to the user
+    let email = users::table
+        .filter(users::id.eq(user_id))
+        .select(users::email)
+        .first::<String>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    server::mail::send_subscription_ended_email(
+        email.as_str(),
+        &mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
+
+    Ok(())
+}
+
+pub fn update_subscription_end(
+    user_id: Uuid,
+    current_period_end: chrono::DateTime<chrono::Utc>,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+    mailer: &lettre::SmtpTransport,
+) -> Result<(), ServerError> {
+    use crate::schema::users;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    diesel::update(users.find(user_id))
+        .set(
+            crate::schema::users::current_period_end.eq::<Option<chrono::DateTime<chrono::Utc>>>(Some(current_period_end))
+        )
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    // Send email notification to the user
+    let email = users::table
+        .filter(users::id.eq(user_id))
+        .select(users::email)
+        .first::<String>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    server::mail::send_subscription_cancellation_scheduled_email(
+        email.as_str(),
+        current_period_end.to_string().as_str(),
+        &mailer,
+    )
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }

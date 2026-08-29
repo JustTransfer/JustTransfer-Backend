@@ -72,7 +72,12 @@ pub async fn create_subscription_checkout(
         .ok_or(ServerError::Internal)
 }
 
-pub async fn cancel_subscription(sub_id: &str) -> Result<(), ServerError> {
+pub async fn cancel_subscription(
+    user_id: Uuid,
+    sub_id: &str,
+    pool: &DbPool,
+    mailer: &lettre::SmtpTransport,
+) -> Result<(), ServerError> {
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("https://api.stripe.com/v1/subscriptions/{sub_id}"))
@@ -85,6 +90,30 @@ pub async fn cancel_subscription(sub_id: &str) -> Result<(), ServerError> {
     if !resp.status().is_success() {
         return Err(ServerError::Internal);
     }
+
+    let body = resp
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|_| ServerError::Internal)?;
+
+    let current_period_end = body
+        .get("items")
+        .and_then(|v| v.get("data"))
+        .and_then(|v| v.get(0))
+        .and_then(|v| v.get("current_period_end"))
+        .and_then(|v| v.as_i64())
+        .ok_or(ServerError::Internal)?;
+
+    // convert to chrono::DateTime<chrono::Utc>
+    let end_time_utc = chrono::DateTime::<chrono::Utc>::from_timestamp(current_period_end, 0)
+        .ok_or(ServerError::Internal)?;
+
+    server::connected::update_subscription_end(
+        user_id,
+        end_time_utc,
+        pool,
+        mailer
+    )?;
 
     Ok(())
 }
@@ -181,7 +210,11 @@ pub struct StripeEventData {
     pub object: serde_json::Value,
 }
 
-pub async fn handle_webhook(event: StripeEvent, pool: &DbPool) -> Result<(), ServerError> {
+pub async fn handle_webhook(
+    event: StripeEvent,
+    pool: &DbPool,
+    mailer: &lettre::SmtpTransport
+) -> Result<(), ServerError> {
     match event.event_type.as_str() {
         "checkout.session.completed" => {
             let obj = &event.data.object;
@@ -194,22 +227,21 @@ pub async fn handle_webhook(event: StripeEvent, pool: &DbPool) -> Result<(), Ser
             let sub_id = obj["subscription"].as_str().map(str::to_string);
             let customer_id = obj["customer"].as_str().map(str::to_string);
 
-            crate::server::connected::activate_subscription(
+            server::connected::activate_subscription(
                 user_id,
                 "premium",
                 sub_id,
                 customer_id,
                 pool,
+                mailer
             )?;
         }
         "customer.subscription.deleted" => {
             let Some(sub_id) = event.data.object["id"].as_str() else {
                 return Ok(());
             };
-            if let Some(user_id) =
-                crate::server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
-            {
-                crate::server::connected::deactivate_subscription(user_id, pool)?;
+            if let Some(user_id) = server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+                server::connected::deactivate_subscription(user_id, pool, mailer)?;
             }
         }
         // e.g. failed renewal payment -> status becomes "past_due"/"unpaid"
@@ -218,10 +250,8 @@ pub async fn handle_webhook(event: StripeEvent, pool: &DbPool) -> Result<(), Ser
             let status = obj["status"].as_str().unwrap_or("");
             if matches!(status, "canceled" | "unpaid" | "incomplete_expired") {
                 if let Some(sub_id) = obj["id"].as_str() {
-                    if let Some(user_id) =
-                        crate::server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
-                    {
-                        crate::server::connected::deactivate_subscription(user_id, pool)?;
+                    if let Some(user_id) = server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+                        server::connected::deactivate_subscription(user_id, pool, mailer)?;
                     }
                 }
             }

@@ -49,6 +49,10 @@ fn send_mail(receiver: &str, subject: &str, body: &str, mailer: &SmtpTransport) 
     }
 }
 
+///
+/// Account
+///
+
 pub fn send_verification_email(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "Welcome to JustTransfer! Please verify your email address";
@@ -89,6 +93,18 @@ pub fn send_password_changed_notification_email(receiver: &str, mailer: &SmtpTra
     send_mail(receiver, subject, &body, mailer)
 }
 
+pub fn send_account_deletion_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    let subject = "Your JustTransfer account has been deleted";
+    let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer account has been deleted. You can create a new account at any time by visiting the JustTransfer website.\n\nBest regards,\nJustTransfer Team", receiver);
+
+    send_mail(receiver, subject, &body, mailer)
+}
+
+///
+/// Transfer notification
+///
+
 pub fn send_transfer_notification_email(receiver: &str, url: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "You have received a new file transfer on JustTransfer";
@@ -97,10 +113,30 @@ pub fn send_transfer_notification_email(receiver: &str, url: &str, mailer: &Smtp
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_account_deletion_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+///
+/// Subscription
+///
 
-    let subject = "Your JustTransfer account has been deleted";
-    let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer account has been deleted. You can create a new account at any time by visiting the JustTransfer website.\n\nBest regards,\nJustTransfer Team", receiver);
+pub fn send_subscription_started_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    let subject = "Your JustTransfer Premium subscription is now active";
+    let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer Premium subscription is now active. You can enjoy all the benefits of Premium access immediately.\n\nIf you did not request this subscription, please contact us immediately.\n\nBest regards,\nJustTransfer Team", receiver);
+
+    send_mail(receiver, subject, &body, mailer)
+}
+
+pub fn send_subscription_cancellation_scheduled_email(receiver: &str, period_end: &str, mailer: &SmtpTransport, ) -> Result<(), ServerError> {
+
+    let subject = "Your JustTransfer Premium subscription is set to cancel";
+    let body = format!("Hello {},\n\nWe've received your request to cancel your JustTransfer Premium subscription. You will keep full Premium access until {}, after which your account will automatically switch to the Free plan.\n\nChanged your mind? You can resume your subscription any time before then from your account page.\n\nIf you did not request this cancellation, please contact us immediately.\n\nBest regards,\nJustTransfer Team", receiver, period_end);
+
+    send_mail(receiver, subject, &body, mailer)
+}
+
+pub fn send_subscription_ended_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    let subject = "Your JustTransfer Premium subscription has ended";
+    let body = format!("Hello {},\n\nYour JustTransfer Premium subscription has now ended and your account has been switched to the Free plan. Any files or transfers exceeding the Free plan's limits may be affected going forward.\n\nYou can re-subscribe to Premium at any time from your account page.\n\nBest regards,\nJustTransfer Team", receiver);
 
     send_mail(receiver, subject, &body, mailer)
 }

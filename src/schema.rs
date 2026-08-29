@@ -87,6 +87,7 @@ diesel::table! {
         email_verified -> Bool,
         stripe_subscription_id -> Nullable<Text>,
         stripe_customer_id -> Nullable<Text>,
+        current_period_end -> Nullable<Timestamptz>,
     }
 }
 
