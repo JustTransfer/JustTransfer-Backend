@@ -23,6 +23,12 @@ pub async fn create_subscription_checkout(
     State(state): State<AppState>,
     Json(payload): Json<CreateCheckout>,
 ) -> Result<impl IntoResponse, ApiError> {
+
+    // Refuse to start a second subscription if one is already active
+    if server::connected::get_stripe_subscription_id(claims_session.id, &state.db)?.is_some() {
+        return Err(ApiError::InputValidation);
+    }
+
     let checkout_url = server::payment::create_subscription_checkout(
         claims_session.id,
         &claims_session.email,
@@ -41,8 +47,8 @@ pub async fn cancel_subscription(
         return Err(ApiError::InputValidation); // nothing to cancel
     };
 
-    server::payment::cancel_subscription(&sub_id).await?;
-    // role flips back to "user" once Stripe's customer.subscription.deleted webhook lands
+    server::payment::cancel_subscription(claims_session.id, &sub_id, &state.db, &state.mailer).await?;
+
     Ok(StatusCode::OK)
 }
 
@@ -64,7 +70,7 @@ pub async fn stripe_webhook(
     let event: server::payment::StripeEvent =
         serde_json::from_slice(&body).map_err(|_| ApiError::InputValidation)?;
 
-    server::payment::handle_webhook(event, &state.db).await?;
+    server::payment::handle_webhook(event, &state.db, &state.mailer).await?;
 
     Ok(StatusCode::OK)
 }

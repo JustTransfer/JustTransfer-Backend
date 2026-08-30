@@ -483,6 +483,7 @@ pub struct UserInfoResult {
     email: String,
     role: String,
     number_transfers: i64,
+    current_period_end: Option<chrono::DateTime<chrono::Utc>>,
 }
 #[instrument(skip_all, fields(user_id = %claims_session.id), err(Debug))]
 pub async fn get_user_info(
@@ -496,6 +497,7 @@ pub async fn get_user_info(
         email: user_info.email,
         role: user_info.role,
         number_transfers: user_info.number_transfers,
+        current_period_end: user_info.current_period_end,
     })))
 }
 
