@@ -20,6 +20,7 @@ pub async fn create_subscription_checkout(
         ("mode".into(), "subscription".into()),
         ("client_reference_id".into(), user_id.to_string()),
         ("customer_email".into(), email.to_string()),
+        ("allow_promotion_codes".into(), "true".into()),
         (
             "line_items[0][price]".into(),
             STRIPE_PRICE_ID_PREMIUM.get().unwrap().clone(),
