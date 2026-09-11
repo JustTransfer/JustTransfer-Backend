@@ -553,11 +553,11 @@ pub async fn link_send_message_end(
         .ok_or(ServerError::Internal)?;
 
     if message.file_id != file_id_param {
-        return Err(ServerError::Unauthorized);
+        return Err(ServerError::Forbidden);
     }
 
     if message.upload_id != upload_id_param {
-        return Err(ServerError::Unauthorized);
+        return Err(ServerError::Forbidden);
     }
 
     // Set the upload_id to empty string
@@ -674,7 +674,7 @@ pub async fn update_link_transfer(
     };
 
     if !equal {
-        return Err(ServerError::Unauthorized);
+        return Err(ServerError::Forbidden);
     }
     
     // Check if the transfer is signed must update the signature metadata and signature
@@ -732,7 +732,7 @@ pub async fn delete_link_transfer(
     };
 
     if !equal {
-        return Err(ServerError::Unauthorized);
+        return Err(ServerError::Forbidden);
     }
 
     // Delete the file
@@ -775,7 +775,7 @@ pub fn link_change_password_end(
     };
 
     if !equal {
-        return Err(ServerError::Unauthorized);
+        return Err(ServerError::Forbidden);
     }
 
     let password_file_param =
