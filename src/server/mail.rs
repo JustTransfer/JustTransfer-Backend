@@ -61,6 +61,14 @@ pub fn send_verification_email(receiver: &str, link: &str, mailer: &SmtpTranspor
     send_mail(receiver, subject, &body, mailer)
 }
 
+pub fn send_verification_email_reattempt(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
+
+    let subject = "Finish verifying your JustTransfer account";
+    let body = format!("Hello {},\n\nWe received an attempt to create a JustTransfer account using your email address. You already have an account, but it hasn't been verified yet. If you initiated this request, please click the following link to verify your email address and finish setting up your account:\n\n{}\n\nIf you did not initiate this request, please ignore this email. No changes have been made to your account, and no one can access it without verifying this email address.\n\nBest regards,\nJustTransfer Team", receiver, link);
+
+    send_mail(receiver, subject, &body, mailer)
+}
+
 pub fn send_notification_account_creation_email_taken(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
 
     let subject = "JustTransfer account creation attempt";
