@@ -142,11 +142,17 @@ pub fn registration_finish(
         }
     })?;
 
+    let user = users::table
+        .filter(users::email.eq(email_param))
+        .first::<User>(&mut conn)
+        .optional()?
+        .ok_or(ServerError::Internal)?;
+
     // Email verification
     let url = format!(
         "{}/verify-email/{}",
         FRONTEND_URL.get().unwrap(),
-        new_user.registration_token
+        user.registration_token
     );
 
     match outcome {
@@ -161,12 +167,22 @@ pub fn registration_finish(
             Ok(())
         }
         RegistrationOutcome::EmailTaken => {
-            // Send dummy email to prevent user enumeration
-            server::mail::send_notification_account_creation_email_taken(
-                new_user.email.as_str(),
-                mailer,
-            )
-                .map_err(|_| ServerError::Internal)?;
+            if !user.email_verified {
+                // Resend verification email if the account is not verified
+                server::mail::send_verification_email_reattempt(
+                    user.email.as_str(),
+                    url.as_str(),
+                    mailer,
+                )
+                    .map_err(|_| ServerError::Internal)?;
+            } else {
+                // Send notification email that the account already exists
+                server::mail::send_notification_account_creation_email_taken(
+                    new_user.email.as_str(),
+                    mailer,
+                )
+                    .map_err(|_| ServerError::Internal)?;
+            }
 
             Ok(())
         }
