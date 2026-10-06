@@ -1,6 +1,6 @@
 [package]
-name = "JustTransfer"
-version = "0.1.0"
+name = "justtransfer-backend"
+version = "0.2.4-beta"
 edition = "2021"
 
 [dependencies]

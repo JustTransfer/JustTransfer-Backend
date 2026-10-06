@@ -131,7 +131,7 @@ async fn main() {
                 .timeout(std::time::Duration::from_secs(30)),
         );
 
-    tracing::info!("Server running on {}", BACKEND_URL.get().unwrap());
+    tracing::info!("JustTransfer {} running on {}", consts::VERSION, BACKEND_URL.get().unwrap());
     let listener = tokio::net::TcpListener::bind(BACKEND_URL.get().unwrap()).await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }

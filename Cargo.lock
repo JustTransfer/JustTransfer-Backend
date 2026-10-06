@@ -3,39 +3,6 @@
 version = 4
 
 [[package]]
-name = "JustTransfer"
-version = "0.1.0"
-dependencies = [
- "argon2 0.6.0-rc.8",
- "aws-sdk-s3",
- "axum",
- "base64 0.23.1",
- "chrono",
- "diesel",
- "diesel_migrations",
- "hex",
- "http 1.5.0",
- "lettre",
- "libsodium-sys-stable",
- "once_cell",
- "opaque-ke",
- "reqwest",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "thiserror",
- "tokio",
- "tower",
- "tower-http 0.7.0",
- "tower-sessions",
- "tracing",
- "tracing-subscriber",
- "urlencoding",
- "uuid",
- "validator",
-]
-
-[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1874,6 +1841,39 @@ dependencies = [
  "cfg-if",
  "futures-util",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "justtransfer-backend"
+version = "0.2.4-beta"
+dependencies = [
+ "argon2 0.6.0-rc.8",
+ "aws-sdk-s3",
+ "axum",
+ "base64 0.23.1",
+ "chrono",
+ "diesel",
+ "diesel_migrations",
+ "hex",
+ "http 1.5.0",
+ "lettre",
+ "libsodium-sys-stable",
+ "once_cell",
+ "opaque-ke",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror",
+ "tokio",
+ "tower",
+ "tower-http 0.7.0",
+ "tower-sessions",
+ "tracing",
+ "tracing-subscriber",
+ "urlencoding",
+ "uuid",
+ "validator",
 ]
 
 [[package]]

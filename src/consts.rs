@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 
 /// Const for Server
+pub const VERSION: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 pub const MAX_BODY_SIZE: usize = 10 * 1024 * 1024; // 10 MiB
 pub const MAX_TIME_MARGIN: i64 = 1; // minute
 pub const MAX_ENC_SIZE_DIFF_PERCENT: f64 = 0.05; // 5%

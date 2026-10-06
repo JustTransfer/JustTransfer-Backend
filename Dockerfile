@@ -1,14 +1,19 @@
-FROM rust:1.97 as builder
+FROM rust:1.97 AS builder
 WORKDIR /usr/src/myapp
+
+# Build deps: libpq headers for diesel/postgres
+RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev pkg-config && rm -rf /var/lib/apt/lists/*
+
 COPY . .
-RUN cargo install --path .
+RUN cargo install --locked --path .
 
 FROM debian:forky-slim
 
-RUN apt-get update && apt-get install -y libpq5 && rm -rf /var/lib/apt/lists/*
+# libpq5 for postgres, ca-certificates for outbound TLS (Stripe, SMTP, S3)
+RUN apt-get update && apt-get install -y --no-install-recommends libpq5 ca-certificates && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/local/cargo/bin/JustTransfer /usr/local/bin/JustTransfer
+COPY --from=builder /usr/local/cargo/bin/justtransfer-backend /usr/local/bin/justtransfer-backend
 
 EXPOSE 80
 
-CMD ["JustTransfer"]
+CMD ["justtransfer-backend"]
