@@ -28,6 +28,7 @@ use crate::models::*;
 #[derive(Serialize)]
 pub struct RootResponse {
     result: String,
+    version: String,
     max_lifetime_link: i64,
     max_file_size_link: i64,
     max_downloads_link: i64,
@@ -49,6 +50,7 @@ pub async fn config() -> Result<impl IntoResponse, ApiError> {
         StatusCode::OK,
         Json(RootResponse {
             result: "JustTransfer API is running".to_string(),
+            version: VERSION.to_string(),
             max_lifetime_link: *MAX_LIFETIME_ANONYMOUS.get().unwrap(),
             max_file_size_link: *MAX_FILE_SIZE_ANONYMOUS.get().unwrap(),
             max_downloads_link: *MAX_DOWNLOADS_ANONYMOUS.get().unwrap(),
