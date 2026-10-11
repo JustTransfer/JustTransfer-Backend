@@ -481,6 +481,12 @@ pub async fn upload_link_message_finish_multipart(
         _ => return Err(ApiError::InputValidation),
     };
 
+    // Verify the signing key belongs to the authenticated user
+    if let Some(key_id) = sender_key_id {
+        let claims = user_claims.as_ref().ok_or(ApiError::Forbidden)?;
+        server::connected::verify_sender_key(claims.id, key_id, &state.db)?;
+    }
+
     let (signature_metadata, signature) = if sender_key_id.is_some() {
         (payload.signature_metadata.clone(), payload.signature.clone())
     } else {
@@ -570,6 +576,11 @@ pub async fn link_message_update(
 
     // Authorize the upload based on the user role and the provided parameters
     user_claims.authorize_update(payload.lifetime, payload.max_downloads)?;
+
+    // Verify the signing key belongs to the authenticated user
+    if let Some(key_id) = payload.sender_key_id {
+        server::connected::verify_sender_key(user_claims.id, key_id, &state.db)?;
+    }
 
     server::link::update_link_transfer(
         id,

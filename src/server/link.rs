@@ -163,10 +163,11 @@ pub async fn login_start_link(
     s3: &aws_sdk_s3::Client,
 ) -> Result<CredentialResponse<DefaultCipherSuite>, ServerError> {
     use crate::schema::link_transfers;
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Delete invalid messages
     delete_invalid_link_transfer_db(pool, s3, id_param).await?;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let link_message_opt = link_transfers::table
         .filter(link_transfers::id.eq(id_param))
@@ -349,11 +350,10 @@ pub async fn link_get_message(
 ) -> Result<String, ServerError> {
     use crate::schema::link_transfers;
 
-    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
     // Delete invalid messages
     delete_invalid_link_transfer_db(pool, s3, id_param).await?;
 
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let transaction_result = conn.transaction::<LinkTransfer, ServerError, _>(|conn| {
 

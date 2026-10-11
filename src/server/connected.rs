@@ -841,6 +841,36 @@ pub fn get_pub_key_user(
 }
 
 ///
+/// Check if the user owns the sender key
+///
+
+pub fn verify_sender_key(
+    user_id_param: Uuid,
+    sender_key_id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    use crate::schema::key_pairs;
+
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let owns_key = diesel::select(diesel::dsl::exists(
+        key_pairs::table
+            .filter(key_pairs::id.eq(sender_key_id_param))
+            .filter(key_pairs::owner_id.eq(user_id_param))
+            .filter(key_pairs::is_active.eq(true)),
+    ))
+        .get_result::<bool>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    if !owns_key {
+        // Same error whether the key doesn't exist or belongs to someone else
+        return Err(ServerError::Forbidden);
+    }
+
+    Ok(())
+}
+
+///
 /// Saved transfer
 ///
 
