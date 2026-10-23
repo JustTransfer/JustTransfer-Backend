@@ -24,8 +24,8 @@ pub fn start_monthly_task(app_state: AppState) -> Result<(), ServerError> {
         loop {
             let duration = match server_mode.as_str() {
 
-                // For testing, run the task every minute
-                "development" => std::time::Duration::from_secs(60),
+                // For testing, run the task every 2 minutes
+                "development" => std::time::Duration::from_secs(120),
 
                 // For production, run the task at the 1st of every month at 00:00:00 UTC
                 "master" => {

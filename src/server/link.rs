@@ -15,6 +15,7 @@ use crate::api_handlers::auth::Role;
 use crate::consts::*;
 use crate::models::{LinkTransfer, LinkTransferMetadataNoSender, LinkTransferMetadata, NewLinkTransfer};
 use crate::schema::link_transfers::dsl::link_transfers;
+use crate::schema::users;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
 use crate::server;
@@ -428,6 +429,8 @@ pub async fn link_send_message(
     lifetime_param: i64,
     creation_time_param: chrono::DateTime<Utc>,
     file_size_param: i64,
+    role: Role,
+    user_id: Option<Uuid>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(Vec<String>, String), ServerError> {
@@ -460,20 +463,25 @@ pub async fn link_send_message(
     };
 
     conn.transaction::<_, ServerError, _>(|conn| {
-
-        // Count the number of anonymous messages
-        let sent_messages_count: i64 = link_transfers::table
-            .count()
-            .get_result(conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        // Enforce limit
-        if let Some(max) = Role::Anonymous.max_messages() {
-            if sent_messages_count >= max {
-                return Err(ServerError::InsufficientStorage);
-            }
+        let created_transfers = if role == Role::Anonymous {
+            link_transfers::table
+                .filter(link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
+                .count()
+                .get_result(conn)
+                .map_err(|_| ServerError::Internal)?
         } else {
-            return Err(ServerError::Internal);
+            let user_id = user_id.ok_or(ServerError::Internal)?;
+
+            users::table
+                .filter(users::id.eq(user_id))
+                .select(users::number_transfers)
+                .first::<i64>(conn)
+                .map_err(|_| ServerError::Internal)?
+        };
+
+        let max_transfers = role.max_messages().ok_or(ServerError::Internal)?;
+        if created_transfers >= max_transfers {
+            return Err(ServerError::InsufficientStorage);
         }
 
         // Insert the new message into the database

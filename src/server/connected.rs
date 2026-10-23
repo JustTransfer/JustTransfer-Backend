@@ -609,6 +609,24 @@ pub fn get_user(
     })
 }
 
+pub fn increment_number_transfers(
+    user_id_param: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<(), ServerError> {
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    let updated_rows = diesel::update(users.filter(crate::schema::users::id.eq(user_id_param)))
+        .set(crate::schema::users::number_transfers.eq(crate::schema::users::number_transfers + 1))
+        .execute(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
+
+    if updated_rows != 1 {
+        return Err(ServerError::Internal);
+    }
+
+    Ok(())
+}
+
 pub async fn delete_user(
     user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
