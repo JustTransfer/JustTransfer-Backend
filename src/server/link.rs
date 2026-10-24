@@ -15,6 +15,7 @@ use crate::api_handlers::auth::Role;
 use crate::consts::*;
 use crate::models::{LinkTransfer, LinkTransferMetadataNoSender, LinkTransferMetadata, NewLinkTransfer};
 use crate::schema::link_transfers::dsl::link_transfers;
+use crate::schema::users;
 use crate::api_handlers::misc::DbPool;
 use crate::error::ServerError;
 use crate::server;
@@ -428,6 +429,8 @@ pub async fn link_send_message(
     lifetime_param: i64,
     creation_time_param: chrono::DateTime<Utc>,
     file_size_param: i64,
+    role: Role,
+    user_id: Option<Uuid>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(Vec<String>, String), ServerError> {
@@ -460,28 +463,44 @@ pub async fn link_send_message(
     };
 
     conn.transaction::<_, ServerError, _>(|conn| {
+        // Serialize creations so concurrent requests can't both pass the check
+        diesel::sql_query("SELECT pg_advisory_xact_lock(7312001)")
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
 
-        // Count the number of anonymous messages
-        let sent_messages_count: i64 = link_transfers::table
+        let total_live: i64 = link_transfers::table
+            .filter(link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
             .count()
             .get_result(conn)
             .map_err(|_| ServerError::Internal)?;
 
-        // Enforce limit
-        if let Some(max) = Role::Anonymous.max_messages() {
-            if sent_messages_count >= max {
+        let max_total = *MAX_NUMBER_TRANSFERS_TOT.get().unwrap();
+        let reserved = *RESERVED_TRANSFERS_ACCOUNTS.get().unwrap();
+
+        if role == Role::Anonymous {
+            if total_live >= max_total - reserved {
                 return Err(ServerError::InsufficientStorage);
             }
         } else {
-            return Err(ServerError::Internal);
+            if total_live >= max_total {
+                return Err(ServerError::InsufficientStorage);
+            }
+            let user_id = user_id.ok_or(ServerError::Internal)?;
+            let created = users::table
+                .filter(users::id.eq(user_id))
+                .select(users::number_transfers)
+                .first::<i64>(conn)
+                .map_err(|_| ServerError::Internal)?;
+            let max_user = role.max_messages().ok_or(ServerError::Internal)?;
+            if created >= max_user {
+                return Err(ServerError::QuotaExceeded);
+            }
         }
 
-        // Insert the new message into the database
         diesel::insert_into(link_transfers::table)
             .values(&new_message)
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
-
         Ok(())
     })?;
 

@@ -325,9 +325,10 @@ pub async fn upload_link_message(
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     // Authorize the upload based on the user role and the provided parameters
-    if user_claims.is_some() {
-        let claims = user_claims.unwrap().0;
+    let (role, user_id) = if let Some(claims) = user_claims.as_ref() {
+        let claims = &claims.0;
         claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+        (claims.role.clone(), Some(claims.id))
     } else {
         let claims = UserClaims {
             id: payload.id,
@@ -336,7 +337,8 @@ pub async fn upload_link_message(
             iat: 0,
         };
         claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
-    }
+        (claims.role, None)
+    };
 
     // Decode the base64 encoded fields
     let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
@@ -366,6 +368,8 @@ pub async fn upload_link_message(
         payload.lifetime,
         payload.creation_time,
         payload.file_size,
+        role,
+        user_id,
         &state.db,
         &state.s3,
     )
@@ -444,11 +448,15 @@ pub async fn upload_link_message_finish_multipart(
         return Err(ApiError::Forbidden);
     }
 
+    // Check if the user is connected and get the connected user id if available
     let is_connected = user_claims.is_some() && (
         user_claims.clone().unwrap().role == auth::Role::User ||
         user_claims.clone().unwrap().role == auth::Role::Premium ||
         user_claims.clone().unwrap().role == auth::Role::Admin
     );
+    let connected_user_id = user_claims.as_ref().and_then(|claims| {
+        is_connected.then_some(claims.0.id)
+    });
 
     // Authorize only the other role than Anonymous to send email
     let receiver_email = if let Some(email) = payload.receiver_email.clone() {
@@ -519,6 +527,10 @@ pub async fn upload_link_message_finish_multipart(
         signature.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
         &state.db,
     )?;
+
+    if let Some(user_id) = connected_user_id {
+        server::connected::increment_number_transfers(user_id, &state.db)?;
+    }
 
     // Only return the auth_key if the user is logged in
     let auth_key = if is_connected {
