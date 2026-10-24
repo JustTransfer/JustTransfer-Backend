@@ -1997,7 +1997,7 @@ dependencies = [
 
 [[package]]
 name = "justtransfer-backend"
-version = "0.2.4-beta"
+version = "0.2.5-beta"
 dependencies = [
  "argon2 0.6.0",
  "aws-sdk-s3",
