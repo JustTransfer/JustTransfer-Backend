@@ -83,11 +83,12 @@ pub const ENV_CELLS: [(&str, &'static OnceCell<String>); 16] = [
     ("STRIPE_PRICE_ID_PREMIUM", &STRIPE_PRICE_ID_PREMIUM),
 ];
 
-pub const ENV_CELLS_I64: [(&str, &'static OnceCell<i64>); 20] = [
+pub const ENV_CELLS_I64: [(&str, &'static OnceCell<i64>); 21] = [
     ("SESSION_DURATION_MINUTES", &SESSION_DURATION_MINUTES),
     ("FRESH_SESSION_DURATION_MINUTES", &FRESH_SESSION_DURATION_MINUTES),
     ("RESET_PASSWORD_TOKEN_DURATION_MINUTES", &RESET_PASSWORD_TOKEN_DURATION_MINUTES),
-    ("MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT", &MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT),
+    ("MAX_NUMBER_TRANSFERS_TOT", &MAX_NUMBER_TRANSFERS_TOT),
+    ("RESERVED_TRANSFERS_ACCOUNTS", &RESERVED_TRANSFERS_ACCOUNTS),
     ("MAX_LIFETIME_ANONYMOUS", &MAX_LIFETIME_ANONYMOUS),
     ("MAX_FILE_SIZE_ANONYMOUS", &MAX_FILE_SIZE_ANONYMOUS),
     ("CHUNK_SIZE_ANONYMOUS", &CHUNK_SIZE_ANONYMOUS),
@@ -130,9 +131,13 @@ pub static SESSION_DURATION_MINUTES: OnceCell<i64> = OnceCell::new();
 pub static FRESH_SESSION_DURATION_MINUTES: OnceCell<i64> = OnceCell::new();
 pub static RESET_PASSWORD_TOKEN_DURATION_MINUTES: OnceCell<i64> = OnceCell::new();
 
+/// Global transfer capacity (shared by anonymous and connected users)
+/// Hard cap on all live link transfers
+pub static MAX_NUMBER_TRANSFERS_TOT: OnceCell<i64> = OnceCell::new();
+/// Capacity anonymous users cannot use (anonymous limit = TOT - RESERVED)
+pub static RESERVED_TRANSFERS_ACCOUNTS: OnceCell<i64> = OnceCell::new();
 
 /// Const for Anonymous Transfer
-pub static MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT: OnceCell<i64> = OnceCell::new();
 pub static MAX_LIFETIME_ANONYMOUS: OnceCell<i64> = OnceCell::new();
 pub static MAX_FILE_SIZE_ANONYMOUS: OnceCell<i64> = OnceCell::new();
 pub static CHUNK_SIZE_ANONYMOUS: OnceCell<i64> = OnceCell::new();

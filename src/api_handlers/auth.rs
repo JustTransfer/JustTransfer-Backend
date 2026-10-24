@@ -81,7 +81,7 @@ impl Role {
             Role::User => Some(*MAX_NUMBER_CONNECTED_TRANSFERS_MONTH.get().unwrap()),
             Role::Premium => Some(*MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH.get().unwrap()),
             Role::Admin => Some(*MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH.get().unwrap()),
-            Role::Anonymous => Some(*MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT.get().unwrap()),
+            Role::Anonymous => None,
         }
     }
 }

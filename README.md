@@ -78,7 +78,8 @@ The server uses the following environment variables:
 
 These are loaded as integer values from environment variables and drive the allowed transfer limits:
 
-- `MAX_NUMBER_ANONYMOUS_TRANSFERS_TOT`
+- `MAX_NUMBER_TRANSFERS_TOT`
+- `RESERVED_TRANSFERS_ACCOUNTS`
 - `MAX_LIFETIME_ANONYMOUS`
 - `MAX_FILE_SIZE_ANONYMOUS`
 - `CHUNK_SIZE_ANONYMOUS`

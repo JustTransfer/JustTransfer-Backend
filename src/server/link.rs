@@ -462,7 +462,7 @@ pub async fn link_send_message(
         is_signed: &false,
     };
 
-    conn.transaction::<_, ServerError, _>(|conn| {
+    /*conn.transaction::<_, ServerError, _>(|conn| {
         let created_transfers = if role == Role::Anonymous {
             link_transfers::table
                 .filter(link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
@@ -490,6 +490,48 @@ pub async fn link_send_message(
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
+        Ok(())
+    })?;*/
+
+    conn.transaction::<_, ServerError, _>(|conn| {
+        // Serialize creations so concurrent requests can't both pass the check
+        diesel::sql_query("SELECT pg_advisory_xact_lock(7312001)")
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        let total_live: i64 = link_transfers::table
+            .filter(link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
+            .count()
+            .get_result(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        let max_total = *MAX_NUMBER_TRANSFERS_TOT.get().unwrap();
+        let reserved = *RESERVED_TRANSFERS_ACCOUNTS.get().unwrap();
+
+        if role == Role::Anonymous {
+            if total_live >= max_total - reserved {
+                return Err(ServerError::InsufficientStorage);
+            }
+        } else {
+            if total_live >= max_total {
+                return Err(ServerError::InsufficientStorage);
+            }
+            let user_id = user_id.ok_or(ServerError::Internal)?;
+            let created = users::table
+                .filter(users::id.eq(user_id))
+                .select(users::number_transfers)
+                .first::<i64>(conn)
+                .map_err(|_| ServerError::Internal)?;
+            let max_user = role.max_messages().ok_or(ServerError::Internal)?;
+            if created >= max_user {
+                return Err(ServerError::InsufficientStorage);
+            }
+        }
+
+        diesel::insert_into(link_transfers::table)
+            .values(&new_message)
+            .execute(conn)
+            .map_err(|_| ServerError::Internal)?;
         Ok(())
     })?;
 
