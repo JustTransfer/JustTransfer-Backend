@@ -19,6 +19,9 @@ pub enum ServerError {
     #[error("insufficient storage")]
     InsufficientStorage,
 
+    #[error("monthly transfer quota reached")]
+    QuotaExceeded,
+
     #[error("resource not found")]
     NotFound,
 
@@ -54,6 +57,7 @@ impl From<ServerError> for ApiError {
             ServerError::Unauthorized => ApiError::Unauthorized,
             ServerError::Forbidden => ApiError::Forbidden,
             ServerError::InsufficientStorage => ApiError::InsufficientStorage,
+            ServerError::QuotaExceeded => ApiError::QuotaExceeded,
             ServerError::NotFound => ApiError::ServerNotFound,
             ServerError::EmailSendError => ApiError::ServerError,
             ServerError::InputValidation => ApiError::InputValidation,
@@ -75,6 +79,7 @@ pub enum ApiError {
     Forbidden,
     Conflict,
     InsufficientStorage,
+    QuotaExceeded,
 }
 
 impl IntoResponse for ApiError {
@@ -90,6 +95,7 @@ impl IntoResponse for ApiError {
             ApiError::Forbidden => StatusCode::FORBIDDEN,
             ApiError::Conflict => StatusCode::CONFLICT,
             ApiError::InsufficientStorage => StatusCode::INSUFFICIENT_STORAGE,
+            ApiError::QuotaExceeded => StatusCode::TOO_MANY_REQUESTS,
         };
 
         status.into_response()

@@ -524,7 +524,7 @@ pub async fn link_send_message(
                 .map_err(|_| ServerError::Internal)?;
             let max_user = role.max_messages().ok_or(ServerError::Internal)?;
             if created >= max_user {
-                return Err(ServerError::InsufficientStorage);
+                return Err(ServerError::QuotaExceeded);
             }
         }
 
