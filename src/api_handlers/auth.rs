@@ -1,15 +1,15 @@
 use std::collections::HashSet;
 
+use axum::extract::Path;
+use axum::middleware::Next;
 use axum::{http::StatusCode, response::Response};
 use serde::{Deserialize, Serialize};
-use axum::middleware::Next;
-use axum::extract::Path;
-use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
+use tower_sessions::{cookie::time::Duration, Expiry, MemoryStore, Session, SessionManagerLayer};
 
-use uuid::Uuid;
 use chrono::Utc;
 use std::fmt;
-use tracing::{warn};
+use tracing::warn;
+use uuid::Uuid;
 
 use crate::consts::*;
 use crate::error::*;
@@ -46,6 +46,13 @@ impl fmt::Display for Role {
         };
         write!(f, "{s}")
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoleLimits {
+    pub max_lifetime: i64,
+    pub max_file_size: i64,
+    pub max_downloads: i64,
 }
 
 impl Role {
@@ -86,7 +93,6 @@ impl Role {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserClaims {
     pub id: Uuid,
@@ -96,39 +102,75 @@ pub struct UserClaims {
 }
 
 impl UserClaims {
-    pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i64, file_size: i64, max_downloads: i64) -> Result<(), ApiError> {
-        // Creation time
-        let now = Utc::now();
-        if creation_time > now + chrono::Duration::minutes(MAX_TIME_MARGIN) || creation_time < now - chrono::Duration::minutes(MAX_TIME_MARGIN) {
+    pub fn authorize_upload_at(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        limits: RoleLimits,
+        creation_time: chrono::DateTime<chrono::Utc>,
+        lifetime: i64,
+        file_size: i64,
+        max_downloads: i64,
+    ) -> Result<(), ApiError> {
+        if creation_time > now + chrono::Duration::minutes(MAX_TIME_MARGIN)
+            || creation_time < now - chrono::Duration::minutes(MAX_TIME_MARGIN)
+            || lifetime < 1
+            || lifetime > limits.max_lifetime
+            || file_size < 1
+            || file_size > limits.max_file_size
+            || max_downloads < 1
+            || max_downloads > limits.max_downloads
+        {
             return Err(ApiError::Forbidden);
         }
-        
-        // Lifetime
-        if lifetime < 1 || lifetime > self.role.max_lifetime() {
-            return Err(ApiError::Forbidden);
-        }
-
-        // File size
-        if file_size > self.role.max_file_size() {
-            return Err(ApiError::Forbidden);
-        }
-
-        // Max downloads
-        if max_downloads < 1 || max_downloads > self.role.max_downloads() {
-            return Err(ApiError::Forbidden);
-        }
-
         Ok(())
     }
-    
+
+    pub fn authorize_upload(
+        &self,
+        creation_time: chrono::DateTime<chrono::Utc>,
+        lifetime: i64,
+        file_size: i64,
+        max_downloads: i64,
+    ) -> Result<(), ApiError> {
+        self.authorize_upload_at(
+            Utc::now(),
+            RoleLimits {
+                max_lifetime: self.role.max_lifetime(),
+                max_file_size: self.role.max_file_size(),
+                max_downloads: self.role.max_downloads(),
+            },
+            creation_time,
+            lifetime,
+            file_size,
+            max_downloads,
+        )
+    }
+
     pub fn authorize_update(&self, lifetime: i64, max_downloads: i64) -> Result<(), ApiError> {
+        self.authorize_update_with_limits(
+            RoleLimits {
+                max_lifetime: self.role.max_lifetime(),
+                max_file_size: self.role.max_file_size(),
+                max_downloads: self.role.max_downloads(),
+            },
+            lifetime,
+            max_downloads,
+        )
+    }
+
+    pub fn authorize_update_with_limits(
+        &self,
+        limits: RoleLimits,
+        lifetime: i64,
+        max_downloads: i64,
+    ) -> Result<(), ApiError> {
         // Lifetime
-        if lifetime < 1 || lifetime > self.role.max_lifetime() {
+        if lifetime < 1 || lifetime > limits.max_lifetime {
             return Err(ApiError::Forbidden);
         }
 
         // Max downloads
-        if max_downloads < 1 || max_downloads > self.role.max_downloads() {
+        if max_downloads < 1 || max_downloads > limits.max_downloads {
             return Err(ApiError::Forbidden);
         }
 
@@ -147,7 +189,9 @@ pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<Memor
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name(cookie_name)
         .with_secure(true)
-        .with_expiry(Expiry::OnInactivity(Duration::minutes(*SESSION_DURATION_MINUTES.get().unwrap())));
+        .with_expiry(Expiry::OnInactivity(Duration::minutes(
+            *SESSION_DURATION_MINUTES.get().unwrap(),
+        )));
 
     session_layer
 }
@@ -157,7 +201,6 @@ pub async fn require_auth(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-
     // Extend the request with the user's role and email for later use in handlers
     let email = session
         .get::<String>(AUTH_KEY_EMAIL)
@@ -183,14 +226,12 @@ pub async fn require_auth(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    req.extensions_mut().insert(
-        UserClaims {
-            id: user_id,
-            email: email,
-            role: Role::try_from(role.as_str()).unwrap_or(Role::User),
-            iat: created_at,
-        }
-    );
+    req.extensions_mut().insert(UserClaims {
+        id: user_id,
+        email: email,
+        role: Role::try_from(role.as_str()).unwrap_or(Role::User),
+        iat: created_at,
+    });
 
     Ok(next.run(req).await)
 }
@@ -205,7 +246,6 @@ pub async fn require_auth_link(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-
     let authorized_ids = session
         .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
         .await
@@ -227,13 +267,7 @@ pub async fn optional_auth(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-
-    if let (
-        Ok(Some(email)),
-        Ok(Some(user_id)),
-        Ok(Some(role)),
-        Ok(Some(created_at)),
-    ) = (
+    if let (Ok(Some(email)), Ok(Some(user_id)), Ok(Some(role)), Ok(Some(created_at))) = (
         session.get::<String>(AUTH_KEY_EMAIL).await,
         session.get::<Uuid>(AUTH_KEY_USER_ID).await,
         session.get::<String>(AUTH_KEY_ROLE).await,
@@ -256,7 +290,6 @@ pub async fn require_fresh_login(
     req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-
     // Check if the user is connected
     let _user_id = session
         .get::<Uuid>(AUTH_KEY_USER_ID)
@@ -270,7 +303,12 @@ pub async fn require_fresh_login(
         let now = Utc::now().timestamp();
 
         if (now - ts).abs() > (FRESH_SESSION_DURATION_MINUTES.get().unwrap() * 60) {
-            warn!("Session is not fresh: created at {}, now is {}, difference is {} seconds", ts, now, (now - ts).abs());
+            warn!(
+                "Session is not fresh: created at {}, now is {}, difference is {} seconds",
+                ts,
+                now,
+                (now - ts).abs()
+            );
             return Err(StatusCode::UNAUTHORIZED);
         }
     } else {

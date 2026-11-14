@@ -29,6 +29,70 @@ pub struct RegisterUserStart {
     client_registration_start: String,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use validator::Validate;
+
+    fn encoded() -> String {
+        "A".repeat(MIN_LENGTH_BASE64 as usize)
+    }
+
+    #[test]
+    fn should_validate_login_and_reset_email_inputs() {
+        let login = LoginStart {
+            email: "not-an-email".to_owned(),
+            client_registration_start: encoded(),
+        };
+        assert!(login.validate().is_err());
+
+        let reset = ResetPasswordRequest {
+            email: "user@example.com".to_owned(),
+        };
+        assert!(reset.validate().is_ok());
+    }
+
+    #[test]
+    fn should_reject_malformed_reset_payloads() {
+        let payload = ResetPasswordEnd {
+            client_registration_finish: "short".to_owned(),
+            cpriv_enc: encoded(),
+            nonce_priv_enc: encoded(),
+            pub_enc: encoded(),
+            cpriv_sign: encoded(),
+            nonce_priv_sign: encoded(),
+            pub_sign: encoded(),
+        };
+        assert!(payload.validate().is_err());
+    }
+
+    #[test]
+    fn should_reject_incomplete_key_payloads() {
+        let payload = AddKeyParam {
+            enc_public_key: encoded(),
+            enc_nonce_private_key: encoded(),
+            enc_cipher_private_key: "short".to_owned(),
+            sign_public_key: encoded(),
+            sign_nonce_private_key: encoded(),
+            sign_cipher_private_key: encoded(),
+        };
+        assert!(payload.validate().is_err());
+    }
+
+    #[test]
+    fn should_validate_saved_transfer_payload_shape() {
+        let payload = AddTransfer {
+            nonce_transfer_id: encoded(),
+            enc_transfer_id: encoded(),
+            nonce_password: encoded(),
+            enc_password: encoded(),
+            nonce_auth_key: Some(encoded()),
+            enc_auth_key: Some(encoded()),
+        };
+        assert!(payload.validate().is_ok());
+    }
+}
+
 #[derive(Serialize)]
 pub struct RegisterUserStartResult {
     result: String,

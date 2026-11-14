@@ -44,6 +44,105 @@ pub struct RootResponse {
     max_transfer_month_connected_premium: i64,
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use validator::Validate;
+
+    fn encoded() -> String {
+        "A".repeat(MIN_LENGTH_BASE64 as usize)
+    }
+
+    #[test]
+    fn should_reject_short_opaque_login_payloads() {
+        let payload = LinkLoginStart {
+            client_login_start: "short".to_owned(),
+        };
+        assert!(payload.validate().is_err());
+    }
+
+    #[test]
+    fn should_accept_valid_upload_metadata() {
+        let _ = MAX_FILE_SIZE_CONNECTED_PREMIUM.set(MAX_VALUE_INT_FILE_SIZE);
+        let payload = UploadLinkMessageFinish {
+            id: Uuid::nil(),
+            client_registration_finish: encoded(),
+            c_enc_key: encoded(),
+            nonce_enc_key: encoded(),
+            c_mac_key: encoded(),
+            nonce_mac_key: encoded(),
+            cfilename: encoded(),
+            nonce_filename: encoded(),
+            max_downloads: 1,
+            lifetime: 1,
+            creation_time: chrono::Utc::now(),
+            file_size: 1,
+        };
+        assert!(payload.validate().is_ok());
+    }
+
+    #[test]
+    fn should_reject_invalid_upload_metadata_boundaries() {
+        let _ = MAX_FILE_SIZE_CONNECTED_PREMIUM.set(MAX_VALUE_INT_FILE_SIZE);
+        let mut payload = UploadLinkMessageFinish {
+            id: Uuid::nil(),
+            client_registration_finish: encoded(),
+            c_enc_key: encoded(),
+            nonce_enc_key: encoded(),
+            c_mac_key: encoded(),
+            nonce_mac_key: encoded(),
+            cfilename: encoded(),
+            nonce_filename: encoded(),
+            max_downloads: 0,
+            lifetime: 0,
+            creation_time: chrono::Utc::now(),
+            file_size: 0,
+        };
+        assert!(payload.validate().is_err());
+
+        payload.max_downloads = MAX_VALUE_INT_FILE_SIZE + 1;
+        payload.lifetime = MAX_VALUE_INT_FILE_SIZE + 1;
+        payload.file_size = MAX_VALUE_INT_FILE_SIZE + 1;
+        assert!(payload.validate().is_err());
+    }
+
+    #[test]
+    fn should_require_complete_signature_metadata() {
+        let payload = UploadLinkMessageFinishMultipart {
+            upload_id: "upload".to_owned(),
+            etags: vec!["etag".to_owned()],
+            hash_file: encoded(),
+            mac: encoded(),
+            receiver_email: None,
+            is_signed: false,
+            sender_key_id: Some(Uuid::nil()),
+            signature_metadata: None,
+            signature: None,
+        };
+        assert!(payload.validate().is_ok());
+        assert!(matches!(
+            (&payload.sender_key_id, &payload.signature_metadata, &payload.signature),
+            (Some(_), None, None)
+        ));
+    }
+
+    #[test]
+    fn should_reject_invalid_update_values() {
+        let payload = UpdateLinkMessage {
+            auth_key: Uuid::nil(),
+            cfilename: encoded(),
+            nonce_filename: encoded(),
+            max_downloads: -1,
+            lifetime: 0,
+            mac: encoded(),
+            sender_key_id: None,
+            signature_metadata: None,
+            signature: None,
+        };
+        assert!(payload.validate().is_err());
+    }
+}
+
 #[instrument(err(Debug))]
 pub async fn config() -> Result<impl IntoResponse, ApiError> {
     Ok((

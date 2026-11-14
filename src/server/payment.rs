@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::server;
 use crate::api_handlers::misc::DbPool;
 use crate::consts::*;
 use crate::error::ServerError;
+use crate::server;
 
 pub async fn create_subscription_checkout(
     user_id: Uuid,
@@ -109,12 +109,7 @@ pub async fn cancel_subscription(
     let end_time_utc = chrono::DateTime::<chrono::Utc>::from_timestamp(current_period_end, 0)
         .ok_or(ServerError::Internal)?;
 
-    server::connected::update_subscription_end(
-        user_id,
-        end_time_utc,
-        pool,
-        mailer
-    )?;
+    server::connected::update_subscription_end(user_id, end_time_utc, pool, mailer)?;
 
     Ok(())
 }
@@ -122,6 +117,23 @@ pub async fn cancel_subscription(
 /// Verifies `Stripe-Signature: t=<unix_ts>,v1=<hex hmac>`.
 /// HMAC is computed over "{timestamp}.{raw_body}" with the webhook secret.
 pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool {
+    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+        return false;
+    };
+    verify_webhook_signature_at(
+        raw_body,
+        signature_header,
+        STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes(),
+        now.as_secs() as i64,
+    )
+}
+
+pub fn verify_webhook_signature_at(
+    raw_body: &[u8],
+    signature_header: &str,
+    secret: &[u8],
+    now: i64,
+) -> bool {
     let mut timestamp: Option<&str> = None;
     let mut v1: Option<&str> = None;
 
@@ -141,10 +153,6 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
     let Ok(ts) = timestamp.parse::<i64>() else {
         return false;
     };
-    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
-        return false;
-    };
-    let now = now.as_secs() as i64;
     if (now - ts).abs() > WEBHOOK_TIMESTAMP_TOLERANCE_SECS {
         return false;
     }
@@ -158,16 +166,17 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
     }
 
     // Check the MAC
-    let secret = STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes();
     let mut computed = [0u8; libsodium_sys::crypto_auth_hmacsha256_BYTES as usize];
 
     let hmac_ok = unsafe {
-        let mut state = std::mem::MaybeUninit::<libsodium_sys::crypto_auth_hmacsha256_state>::uninit();
+        let mut state =
+            std::mem::MaybeUninit::<libsodium_sys::crypto_auth_hmacsha256_state>::uninit();
         if libsodium_sys::crypto_auth_hmacsha256_init(
             state.as_mut_ptr(),
             secret.as_ptr(),
             secret.len(),
-        ) != 0 {
+        ) != 0
+        {
             return false;
         }
         let mut state = state.assume_init();
@@ -214,7 +223,7 @@ pub struct StripeEventData {
 pub async fn handle_webhook(
     event: StripeEvent,
     pool: &DbPool,
-    mailer: &lettre::SmtpTransport
+    mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
     match event.event_type.as_str() {
         "checkout.session.completed" => {
@@ -234,14 +243,16 @@ pub async fn handle_webhook(
                 sub_id,
                 customer_id,
                 pool,
-                mailer
+                mailer,
             )?;
         }
         "customer.subscription.deleted" => {
             let Some(sub_id) = event.data.object["id"].as_str() else {
                 return Ok(());
             };
-            if let Some(user_id) = server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+            if let Some(user_id) =
+                server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
+            {
                 server::connected::deactivate_subscription(user_id, pool, mailer)?;
             }
         }
@@ -251,7 +262,9 @@ pub async fn handle_webhook(
             let status = obj["status"].as_str().unwrap_or("");
             if matches!(status, "canceled" | "unpaid" | "incomplete_expired") {
                 if let Some(sub_id) = obj["id"].as_str() {
-                    if let Some(user_id) = server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+                    if let Some(user_id) =
+                        server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
+                    {
                         server::connected::deactivate_subscription(user_id, pool, mailer)?;
                     }
                 }

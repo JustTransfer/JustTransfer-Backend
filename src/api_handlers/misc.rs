@@ -1,8 +1,8 @@
-use aws_sdk_s3::Client;
-use diesel::{r2d2, PgConnection};
-use diesel::r2d2::ConnectionManager;
-use validator::{ValidationError, Validate};
 use crate::consts::{MAX_FILE_SIZE_CONNECTED_PREMIUM, MAX_VALUE_INT, MAX_VALUE_INT_FILE_SIZE};
+use aws_sdk_s3::Client;
+use diesel::r2d2::ConnectionManager;
+use diesel::{r2d2, PgConnection};
+use validator::{Validate, ValidationError};
 
 pub type DbPool = r2d2::Pool<ConnectionManager<PgConnection>>;
 
@@ -47,7 +47,12 @@ pub fn validate_int_param_64(value: i64) -> Result<(), ValidationError> {
 ///
 
 pub fn validate_file_size(size: i64) -> Result<(), ValidationError> {
-    if size == 0 || size > *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap() {
+    let max_size = *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap();
+    validate_file_size_with_limit(size, max_size)
+}
+
+pub fn validate_file_size_with_limit(size: i64, max_size: i64) -> Result<(), ValidationError> {
+    if size <= 0 || size > max_size {
         return Err(ValidationError::new("invalid_file_size"));
     }
     Ok(())
@@ -65,7 +70,9 @@ pub fn validate_email(email: &str) -> Result<(), ValidationError> {
     }
 
     let email_validation = EmailValidation { email };
-    email_validation.validate().map_err(|_| ValidationError::new("invalid_email"))
+    email_validation
+        .validate()
+        .map_err(|_| ValidationError::new("invalid_email"))
 }
 
 pub fn validate_optional_email(email: &str) -> Result<(), ValidationError> {

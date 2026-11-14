@@ -5,25 +5,42 @@ use crate::consts::SERVER_MODE;
 use crate::error::ServerError;
 use crate::server;
 
-pub fn start_monthly_task(app_state: AppState) -> Result<(), ServerError> {
+pub fn next_monthly_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
+    let year = if now.month() == 12 {
+        now.year() + 1
+    } else {
+        now.year()
+    };
+    let month = if now.month() == 12 {
+        1
+    } else {
+        now.month() + 1
+    };
+    Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).unwrap()
+}
 
-    let server_mode = SERVER_MODE
-        .get()
-        .unwrap()
-        .to_string();
-    
+pub fn next_daily_run(now: chrono::DateTime<Utc>) -> chrono::DateTime<Utc> {
+    let next_midnight = (now + std::time::Duration::from_secs(24 * 60 * 60))
+        .date_naive()
+        .and_hms_opt(0, 0, 0)
+        .unwrap();
+    Utc.from_utc_datetime(&next_midnight)
+}
+
+pub fn start_monthly_task(app_state: AppState) -> Result<(), ServerError> {
+    let server_mode = SERVER_MODE.get().unwrap().to_string();
+
     // If server mode is "slave", do not run the monthly task
     if server_mode == "slave" {
         tracing::info!("Server mode is 'slave', monthly task will not run");
         return Ok(());
     }
-    
+
     // Run the monthly task in a background task
     let db_clone = app_state.db.clone();
     tokio::spawn(async move {
         loop {
             let duration = match server_mode.as_str() {
-
                 // For testing, run the task every 2 minutes
                 "development" => std::time::Duration::from_secs(120),
 
@@ -32,20 +49,7 @@ pub fn start_monthly_task(app_state: AppState) -> Result<(), ServerError> {
                     let now = Utc::now();
 
                     // Calculate next 1st of month at 00:00:00 UTC
-                    let next_run = {
-                        let year = if now.month() == 12 {
-                            now.year() + 1
-                        } else {
-                            now.year()
-                        };
-                        let month = if now.month() == 12 {
-                            1
-                        } else {
-                            now.month() + 1
-                        };
-
-                        Utc.with_ymd_and_hms(year, month, 1, 0, 0, 0).unwrap()
-                    };
+                    let next_run = next_monthly_run(now);
 
                     let time_next_month = (next_run - now)
                         .to_std()
@@ -81,7 +85,7 @@ pub fn start_monthly_task(app_state: AppState) -> Result<(), ServerError> {
             }
         }
     });
-    
+
     Ok(())
 }
 
@@ -105,11 +109,7 @@ pub fn start_daily_cleanup_task(app_state: AppState) -> Result<(), ServerError> 
                 // For production, run the task at midnight UTC every day
                 "master" => {
                     let now = Utc::now();
-                    let next_midnight = (now + std::time::Duration::from_hours(24))
-                        .date_naive()
-                        .and_hms_opt(0, 0, 0)
-                        .unwrap();
-                    let next_run = Utc.from_utc_datetime(&next_midnight);
+                    let next_run = next_daily_run(now);
 
                     let time_until = (next_run - now)
                         .to_std()
