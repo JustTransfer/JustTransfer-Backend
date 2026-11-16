@@ -47,11 +47,8 @@ pub struct RootResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::encoded;
     use validator::Validate;
-
-    fn encoded() -> String {
-        "A".repeat(MIN_LENGTH_BASE64 as usize)
-    }
 
     #[test]
     fn should_reject_short_opaque_login_payloads() {
