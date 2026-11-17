@@ -21,26 +21,30 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      rustfs:
+        image: rustfs/rustfs:1.0.4
+        env:
+          RUSTFS_ACCESS_KEY: justtransfer
+          RUSTFS_SECRET_KEY: justtransfer-test-password
+          RUSTFS_ADDRESS: 0.0.0.0:9000
+        ports:
+          - 9000:9000
     env:
       # Test-only variables, so the suite never picks up an application database.
       TEST_DATABASE_URL: postgres://justtransfer:justtransfer@localhost:5432/justtransfer_test
       TEST_S3_URL: http://localhost:9000
       TEST_S3_ACCESS_KEY: justtransfer
       TEST_S3_SECRET_KEY: justtransfer-test-password
+      TEST_S3_BUCKET: justtransfer-test
     steps:
       - uses: actions/checkout@v6
-      # Service containers cannot be given a command, and MinIO needs `server /data`.
-      - name: Start MinIO
+      - name: Wait for RustFS
         run: |
-          docker run -d --name minio -p 9000:9000 \
-            -e MINIO_ROOT_USER="$TEST_S3_ACCESS_KEY" \
-            -e MINIO_ROOT_PASSWORD="$TEST_S3_SECRET_KEY" \
-            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
           for _ in $(seq 1 30); do
-            curl -fsS http://localhost:9000/minio/health/live && exit 0
+            [ "$(curl -s -o /dev/null -w '%{http_code}' "$TEST_S3_URL")" != "000" ] && exit 0
             sleep 1
           done
-          docker logs minio
+          echo "RustFS did not answer on $TEST_S3_URL"
           exit 1
       - uses: dtolnay/rust-toolchain@stable
         with:
