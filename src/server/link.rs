@@ -1,25 +1,27 @@
-use libsodium_sys::*;
+use crate::api_handlers::auth::Role;
+use crate::api_handlers::misc::DbPool;
+use crate::consts::*;
+use crate::error::ServerError;
+use crate::models::{
+    LinkTransfer, LinkTransferMetadata, LinkTransferMetadataNoSender, NewLinkTransfer,
+};
+use crate::schema::link_transfers::dsl::link_transfers;
+use crate::schema::users;
+use crate::server;
+use crate::server::init::{delete_invalid_file_size, get_opaque_settings, DefaultCipherSuite};
 use aws_sdk_s3::presigning::PresigningConfig;
 use aws_sdk_s3::types::{CompletedMultipartUpload, CompletedPart};
 use chrono::Utc;
-use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
-use diesel::r2d2::ConnectionManager;
+use diesel::dsl::{now as sql_now, sql};
 use diesel::prelude::*;
+use diesel::r2d2::ConnectionManager;
 use diesel::sql_types::Timestamptz;
-use diesel::dsl::{sql, now as sql_now};
+use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
+use libsodium_sys::*;
 use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::*;
 use tracing::info;
 use uuid::Uuid;
-use crate::api_handlers::auth::Role;
-use crate::consts::*;
-use crate::models::{LinkTransfer, LinkTransferMetadataNoSender, LinkTransferMetadata, NewLinkTransfer};
-use crate::schema::link_transfers::dsl::link_transfers;
-use crate::schema::users;
-use crate::api_handlers::misc::DbPool;
-use crate::error::ServerError;
-use crate::server;
-use crate::server::init::{DefaultCipherSuite, get_opaque_settings, delete_invalid_file_size};
 
 ///
 /// Link Transfer
@@ -40,9 +42,12 @@ pub async fn delete_expired_link_transfers(
         let batch = link_transfers
             .filter(crate::schema::link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
             .filter(
-                crate::schema::link_transfers::number_downloads.ge(crate::schema::link_transfers::max_downloads).or(
-                    sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
-                ),
+                crate::schema::link_transfers::number_downloads
+                    .ge(crate::schema::link_transfers::max_downloads)
+                    .or(
+                        sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')")
+                            .le(sql_now),
+                    ),
             )
             .limit(BATCH_SIZE)
             .load::<LinkTransfer>(&mut conn)
@@ -140,9 +145,13 @@ async fn delete_invalid_link_transfer_db(
     // Check if the message is expired or has reached max downloads
     let message_opt = link_transfers
         .filter(link_transfers::id.eq(id_param))
-        .filter(link_transfers::number_downloads.ge(link_transfers::max_downloads).or(
-            sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
-        ))
+        .filter(
+            link_transfers::number_downloads
+                .ge(link_transfers::max_downloads)
+                .or(
+                    sql::<Timestamptz>("creation_time + (lifetime * INTERVAL '1 day')").le(sql_now),
+                ),
+        )
         .first::<LinkTransfer>(&mut conn)
         .optional()?;
 
@@ -180,7 +189,7 @@ pub async fn login_start_link(
 
         Some(
             ServerRegistration::<DefaultCipherSuite>::deserialize(&password_file_bytes)
-                .map_err(|_| ServerError::Internal)?
+                .map_err(|_| ServerError::Internal)?,
         )
     } else {
         // Deserialize a dummy password file to prevent user enumeration
@@ -200,7 +209,7 @@ pub async fn login_start_link(
         id_param.as_bytes(),
         ServerLoginParameters::default(),
     )
-        .map_err(|_| ServerError::Internal)?;
+    .map_err(|_| ServerError::Internal)?;
 
     // Use dummy id if the message does not exist to prevent user enumeration
     let link_transfer_id = if link_message_opt.is_some() {
@@ -210,9 +219,10 @@ pub async fn login_start_link(
     };
 
     diesel::update(link_transfers::table.filter(link_transfers::id.eq(link_transfer_id)))
-        .set(link_transfers::server_login.eq(Some(
-            server_login_start_result.state.serialize().to_vec(),
-        )))
+        .set(
+            link_transfers::server_login
+                .eq(Some(server_login_start_result.state.serialize().to_vec())),
+        )
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -230,28 +240,28 @@ pub async fn login_end_link(
 
     // Load the ServerLogin state from the DB
     // Transaction to get the server login state and delete it from the DB
-    let transaction_result = conn.transaction::<ServerLogin<DefaultCipherSuite>, ServerError, _>(|conn| {
-        let server_login_state_bytes = link_transfers::table
-            .filter(link_transfers::id.eq(id_param))
-            .select(link_transfers::server_login)
-            .first::<Option<Vec<u8>>>(conn)
-            .optional()?
-            .ok_or(ServerError::Internal)?
-            .ok_or(ServerError::Internal)?;
+    let transaction_result =
+        conn.transaction::<ServerLogin<DefaultCipherSuite>, ServerError, _>(|conn| {
+            let server_login_state_bytes = link_transfers::table
+                .filter(link_transfers::id.eq(id_param))
+                .select(link_transfers::server_login)
+                .first::<Option<Vec<u8>>>(conn)
+                .optional()?
+                .ok_or(ServerError::Internal)?
+                .ok_or(ServerError::Internal)?;
 
-        diesel::update(link_transfers::table.filter(link_transfers::id.eq(id_param)))
-            .set(link_transfers::server_login.eq::<Option<Vec<u8>>>(None))
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;
+            diesel::update(link_transfers::table.filter(link_transfers::id.eq(id_param)))
+                .set(link_transfers::server_login.eq::<Option<Vec<u8>>>(None))
+                .execute(conn)
+                .map_err(|_| ServerError::Internal)?;
 
-        Ok(ServerLogin::deserialize(&server_login_state_bytes).map_err(|_| ServerError::Internal)?)
-    })?;
+            Ok(ServerLogin::deserialize(&server_login_state_bytes)
+                .map_err(|_| ServerError::Internal)?)
+        })?;
 
-    transaction_result.finish(
-            client_login_finish_result,
-            ServerLoginParameters::default(),
-    ).map_err(|_| ServerError::Internal)?;
-
+    transaction_result
+        .finish(client_login_finish_result, ServerLoginParameters::default())
+        .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
@@ -260,8 +270,8 @@ pub async fn link_get_message_metadata(
     id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<LinkTransferMetadata, ServerError> {
-    use crate::schema::link_transfers;
     use crate::schema::key_pairs;
+    use crate::schema::link_transfers;
     use crate::schema::users;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -289,7 +299,7 @@ pub async fn link_get_message_metadata(
             link_transfers::is_signed,
             link_transfers::sender_key_id,
             link_transfers::signature_metadata,
-            link_transfers::signature
+            link_transfers::signature,
         ))
         .first::<LinkTransferMetadataNoSender>(&mut conn)
         .optional()?
@@ -314,7 +324,7 @@ pub async fn link_get_message_metadata(
                 .select(users::email)
                 .first::<String>(&mut conn)
                 .optional()?
-                .ok_or(ServerError::Internal)?
+                .ok_or(ServerError::Internal)?,
         );
     }
 
@@ -357,7 +367,6 @@ pub async fn link_get_message(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let transaction_result = conn.transaction::<LinkTransfer, ServerError, _>(|conn| {
-
         // Get the message
         let link_transfer = link_transfers
             .filter(link_transfers::id.eq(id_param))
@@ -382,7 +391,7 @@ pub async fn link_get_message(
         .key(transaction_result.file_id.to_string())
         .presigned(
             PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
-                .map_err(|_| ServerError::Internal)?
+                .map_err(|_| ServerError::Internal)?,
         )
         .await
         .map_err(|_| ServerError::Internal)?
@@ -401,16 +410,14 @@ pub fn link_send_message_start(
     client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<RegistrationResponse<DefaultCipherSuite>, ServerError> {
-
-    let server_opaque = get_opaque_settings(pool)
-        .map_err(|_| ServerError::Internal)?;
+    let server_opaque = get_opaque_settings(pool).map_err(|_| ServerError::Internal)?;
 
     let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
         &server_opaque,
         client_registration_start_result,
         id_param.as_bytes(),
     )
-        .map_err(|_| ServerError::Internal)?;
+    .map_err(|_| ServerError::Internal)?;
 
     Ok(server_registration_start_result.message)
 }
@@ -504,12 +511,13 @@ pub async fn link_send_message(
         Ok(())
     })?;
 
-
     // Calculate the Number of chunks
-    let num_chunks = (file_size_param as f64 / *CHUNK_SIZE_ANONYMOUS.get().unwrap() as f64).ceil() as i32;
+    let num_chunks =
+        (file_size_param as f64 / *CHUNK_SIZE_ANONYMOUS.get().unwrap() as f64).ceil() as i32;
 
     // Create multipart upload
-    let create_multipart_upload_output = s3.create_multipart_upload()
+    let create_multipart_upload_output = s3
+        .create_multipart_upload()
         .bucket(S3_BUCKET_NAME.get().unwrap())
         .key(file_id_param.to_string())
         .send()
@@ -519,7 +527,7 @@ pub async fn link_send_message(
     let upload_id = create_multipart_upload_output
         .upload_id()
         .ok_or(ServerError::Internal)?;
-    
+
     // Put the upload_id in the DB
     diesel::update(link_transfers::table.filter(link_transfers::id.eq(id_transfer)))
         .set(link_transfers::upload_id.eq(upload_id))
@@ -530,14 +538,15 @@ pub async fn link_send_message(
     let mut upload_urls: Vec<String> = Vec::new();
 
     for part_number in 1..=num_chunks {
-        let upload_url = s3.upload_part()
+        let upload_url = s3
+            .upload_part()
             .bucket(S3_BUCKET_NAME.get().unwrap())
             .key(file_id_param.to_string())
             .part_number(part_number)
             .upload_id(upload_id)
             .presigned(
                 PresigningConfig::expires_in(std::time::Duration::from_secs(3600))
-                    .map_err(|_| ServerError::Internal)?
+                    .map_err(|_| ServerError::Internal)?,
             )
             .await
             .map_err(|_| ServerError::Internal)?
@@ -586,12 +595,16 @@ pub async fn link_send_message_end(
         .map_err(|_| ServerError::Internal)?;
 
     // Prepare the parts for completing the multipart upload
-    let parts = etags_param.iter().enumerate().map(|(i, p)| {
-        CompletedPart::builder()
-            .part_number(i as i32 + 1)
-            .e_tag(p.clone())
-            .build()
-    }).collect::<Vec<_>>();
+    let parts = etags_param
+        .iter()
+        .enumerate()
+        .map(|(i, p)| {
+            CompletedPart::builder()
+                .part_number(i as i32 + 1)
+                .e_tag(p.clone())
+                .build()
+        })
+        .collect::<Vec<_>>();
 
     // Complete multipart upload
     let completed_multipart_upload: CompletedMultipartUpload = CompletedMultipartUpload::builder()
@@ -615,10 +628,14 @@ pub async fn link_send_message_end(
     if email_receiver.is_some() {
         server::mail::send_transfer_notification_email(
             email_receiver.as_ref().unwrap(),
-            &format!("{}/link-transfer/{}", FRONTEND_URL.get().unwrap(), message_id),
+            &format!(
+                "{}/link-transfer/{}",
+                FRONTEND_URL.get().unwrap(),
+                message_id
+            ),
             mailer,
         )
-            .map_err(|_| ServerError::Internal)?;
+        .map_err(|_| ServerError::Internal)?;
     }
 
     // Get the auth_key from the db
@@ -627,7 +644,7 @@ pub async fn link_send_message_end(
         .select(link_transfers::auth_key)
         .first::<Uuid>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
-    
+
     Ok(auth_key)
 }
 
@@ -641,7 +658,6 @@ pub fn update_message_mac(
     signature: Option<Vec<u8>>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
-
     use crate::schema::link_transfers;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -673,7 +689,6 @@ pub async fn update_link_transfer(
     signature: Option<Vec<u8>>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
-
     use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -695,7 +710,7 @@ pub async fn update_link_transfer(
     if !equal {
         return Err(ServerError::Forbidden);
     }
-    
+
     // Check if the transfer is signed must update the signature metadata and signature
     if message.is_signed {
         if sender_key_id.is_none() || signature_metadata.is_none() || signature.is_none() {
@@ -731,7 +746,6 @@ pub async fn delete_link_transfer(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
 ) -> Result<(), ServerError> {
-
     use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -755,11 +769,7 @@ pub async fn delete_link_transfer(
     }
 
     // Delete the file
-    delete_link_transfer_db(
-        pool,
-        s3,
-        message,
-    ).await?;
+    delete_link_transfer_db(pool, s3, message).await?;
 
     Ok(())
 }
@@ -774,7 +784,6 @@ pub fn link_change_password_end(
     nonce_mac_key: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
-
     use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 

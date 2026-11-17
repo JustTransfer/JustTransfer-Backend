@@ -1,25 +1,30 @@
 use std::collections::HashSet;
 
-use axum::{extract::{Path, State}, http::StatusCode, response::IntoResponse, Extension, Json};
-use tower_sessions::{Session};
+use axum::{
+    extract::{Path, State},
+    http::StatusCode,
+    response::IntoResponse,
+    Extension, Json,
+};
+use tower_sessions::Session;
 
 use serde::{Deserialize, Serialize};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use opaque_ke::*;
 use uuid::Uuid;
-use validator::{Validate};
+use validator::Validate;
 
-use tracing::{instrument};
+use tracing::instrument;
 
-use crate::api_handlers::*;
-use crate::server;
-use crate::server::init::DefaultCipherSuite;
+use crate::api_handlers::auth::{LinkClaims, UserClaims};
 use crate::api_handlers::misc::*;
-use crate::api_handlers::auth::{UserClaims, LinkClaims};
+use crate::api_handlers::*;
 use crate::consts::*;
 use crate::error::ApiError;
 use crate::models::*;
+use crate::server;
+use crate::server::init::DefaultCipherSuite;
 
 ///
 /// Root
@@ -63,7 +68,9 @@ pub async fn config() -> Result<impl IntoResponse, ApiError> {
             max_lifetime_connected_premium: *MAX_LIFETIME_CONNECTED_PREMIUM.get().unwrap(),
             max_file_size_connected_premium: *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap(),
             max_downloads_connected_premium: *MAX_DOWNLOADS_CONNECTED_PREMIUM.get().unwrap(),
-            max_transfer_month_connected_premium: *MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH.get().unwrap(),
+            max_transfer_month_connected_premium: *MAX_NUMBER_CONNECTED_PREMIUM_TRANSFERS_MONTH
+                .get()
+                .unwrap(),
         }),
     ))
 }
@@ -89,22 +96,16 @@ pub async fn link_message_login_start(
     State(state): State<AppState>,
     Json(payload): Json<LinkLoginStart>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_start)
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_login_start)
         .map_err(|_| ApiError::Base64)?;
     let req = CredentialRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let server_login_start = server::link::login_start_link(
-        id,
-        req,
-        &state.db,
-        &state.s3,
-    )
-        .await?;
+    let server_login_start = server::link::login_start_link(id, req, &state.db, &state.s3).await?;
 
     Ok((
         StatusCode::OK,
@@ -127,17 +128,16 @@ pub async fn link_message_login_end(
     session: Session,
     Json(payload): Json<LinkLoginEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_login_finish_result)
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_login_finish_result)
         .map_err(|_| ApiError::Base64)?;
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    server::link::login_end_link(id, req, &state.db)
-        .await?;
+    server::link::login_end_link(id, req, &state.db).await?;
 
     // Create session
     let mut authorized_ids = session
@@ -148,7 +148,8 @@ pub async fn link_message_login_end(
 
     authorized_ids.insert(id);
 
-    session.insert(AUTH_KEY_LINK, authorized_ids)
+    session
+        .insert(AUTH_KEY_LINK, authorized_ids)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -166,14 +167,12 @@ pub async fn link_message_get_one_metadata(
     Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Check that the path correspond to the id in session
     if id != link_claims.id {
         return Err(ApiError::Forbidden);
     }
 
-    let message = server::link::link_get_message_metadata(id, &state.db)
-        .await?;
+    let message = server::link::link_get_message_metadata(id, &state.db).await?;
 
     let resp = Json(LinkGetMessageResult {
         message: LinkTransferMetadataEncoded {
@@ -197,7 +196,9 @@ pub async fn link_message_get_one_metadata(
             is_signed: message.is_signed,
             sender_pub_key: message.sender_pub_key.map(|s| URL_SAFE_NO_PAD.encode(s)),
             sender_email: message.sender_email,
-            signature_metadata: message.signature_metadata.map(|s| URL_SAFE_NO_PAD.encode(s)),
+            signature_metadata: message
+                .signature_metadata
+                .map(|s| URL_SAFE_NO_PAD.encode(s)),
             signature: message.signature.map(|s| URL_SAFE_NO_PAD.encode(s)),
         },
     });
@@ -216,18 +217,19 @@ pub async fn link_message_get_download_url(
     Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Check that the path correspond to the id in session
     if id != link_claims.id {
         return Err(ApiError::Forbidden);
     }
 
-    let presigned_url = server::link::link_get_message(id, &state.db, &state.s3)
-        .await?;
+    let presigned_url = server::link::link_get_message(id, &state.db, &state.s3).await?;
 
-    Ok((StatusCode::OK, Json(LinkGetMessageResultDownloadUrl {
-        download_url: presigned_url,
-    })))
+    Ok((
+        StatusCode::OK,
+        Json(LinkGetMessageResultDownloadUrl {
+            download_url: presigned_url,
+        }),
+    ))
 }
 
 ///
@@ -252,11 +254,11 @@ pub async fn link_message_send_start(
     State(state): State<AppState>,
     Json(payload): Json<LinkSendMessageStart>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start)
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_start)
         .map_err(|_| ApiError::Base64)?;
     let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
@@ -273,8 +275,8 @@ pub async fn link_message_send_start(
             id: id,
             result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
             chunk_size: *CHUNK_SIZE_ANONYMOUS.get().unwrap(),
-        })),
-    )
+        }),
+    ))
 }
 
 #[derive(Deserialize, Validate, Debug)]
@@ -320,14 +322,18 @@ pub async fn upload_link_message(
     user_claims: Option<Extension<UserClaims>>,
     Json(payload): Json<UploadLinkMessageFinish>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
     // Authorize the upload based on the user role and the provided parameters
     let (role, user_id) = if let Some(claims) = user_claims.as_ref() {
         let claims = &claims.0;
-        claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+        claims.authorize_upload(
+            payload.creation_time,
+            payload.lifetime,
+            payload.file_size,
+            payload.max_downloads,
+        )?;
         (claims.role.clone(), Some(claims.id))
     } else {
         let claims = UserClaims {
@@ -336,12 +342,18 @@ pub async fn upload_link_message(
             role: auth::Role::Anonymous,
             iat: 0,
         };
-        claims.authorize_upload(payload.creation_time, payload.lifetime, payload.file_size, payload.max_downloads)?;
+        claims.authorize_upload(
+            payload.creation_time,
+            payload.lifetime,
+            payload.file_size,
+            payload.max_downloads,
+        )?;
         (claims.role, None)
     };
 
     // Decode the base64 encoded fields
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_finish)
         .map_err(|_| ApiError::Base64)?;
     let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
@@ -351,17 +363,23 @@ pub async fn upload_link_message(
     let (upload_urls, upload_id) = server::link::link_send_message(
         req,
         payload.id,
-        URL_SAFE_NO_PAD.decode(&payload.c_enc_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.c_enc_key)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_enc_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.nonce_enc_key)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.c_mac_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.c_mac_key)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_mac_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.nonce_mac_key)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.cfilename)
+        URL_SAFE_NO_PAD
+            .decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
+        URL_SAFE_NO_PAD
+            .decode(&payload.nonce_filename)
             .map_err(|_| ApiError::Base64)?,
         file_id,
         payload.max_downloads,
@@ -373,7 +391,7 @@ pub async fn upload_link_message(
         &state.db,
         &state.s3,
     )
-        .await?;
+    .await?;
 
     // Create session
     let mut authorized_ids = session
@@ -384,18 +402,20 @@ pub async fn upload_link_message(
 
     authorized_ids.insert(payload.id);
 
-    session.insert(AUTH_KEY_LINK, authorized_ids)
+    session
+        .insert(AUTH_KEY_LINK, authorized_ids)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
     Ok((
-        StatusCode::OK, Json(UploadLinkMessageFinishResult {
-        upload_urls,
-        transfer_id: payload.id,
-        upload_id,
-        message_file_id: file_id,
-    }))
-    )
+        StatusCode::OK,
+        Json(UploadLinkMessageFinishResult {
+            upload_urls,
+            transfer_id: payload.id,
+            upload_id,
+            message_file_id: file_id,
+        }),
+    ))
 }
 
 #[derive(Deserialize)]
@@ -463,7 +483,6 @@ pub async fn upload_link_message_finish_multipart(
     State(state): State<AppState>,
     Json(payload): Json<UploadLinkMessageFinishMultipart>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
@@ -473,14 +492,13 @@ pub async fn upload_link_message_finish_multipart(
     }
 
     // Check if the user is connected and get the connected user id if available
-    let is_connected = user_claims.is_some() && (
-        user_claims.clone().unwrap().role == auth::Role::User ||
-        user_claims.clone().unwrap().role == auth::Role::Premium ||
-        user_claims.clone().unwrap().role == auth::Role::Admin
-    );
-    let connected_user_id = user_claims.as_ref().and_then(|claims| {
-        is_connected.then_some(claims.0.id)
-    });
+    let is_connected = user_claims.is_some()
+        && (user_claims.clone().unwrap().role == auth::Role::User
+            || user_claims.clone().unwrap().role == auth::Role::Premium
+            || user_claims.clone().unwrap().role == auth::Role::Admin);
+    let connected_user_id = user_claims
+        .as_ref()
+        .and_then(|claims| is_connected.then_some(claims.0.id));
 
     // Authorize only the other role than Anonymous to send email
     let receiver_email = if let Some(email) = payload.receiver_email.clone() {
@@ -492,7 +510,7 @@ pub async fn upload_link_message_finish_multipart(
     } else {
         None
     };
-    
+
     let sender_key_id = resolve_sender_key(
         is_connected,
         payload.is_signed,
@@ -508,7 +526,10 @@ pub async fn upload_link_message_finish_multipart(
     }
 
     let (signature_metadata, signature) = if sender_key_id.is_some() {
-        (payload.signature_metadata.clone(), payload.signature.clone())
+        (
+            payload.signature_metadata.clone(),
+            payload.signature.clone(),
+        )
     } else {
         (None, None)
     };
@@ -525,18 +546,26 @@ pub async fn upload_link_message_finish_multipart(
         &state.s3,
         &state.mailer,
     )
-        .await?;
+    .await?;
 
     server::link::update_message_mac(
         params.file_id,
-        URL_SAFE_NO_PAD.decode(&payload.hash_file)
+        URL_SAFE_NO_PAD
+            .decode(&payload.hash_file)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.mac)
+        URL_SAFE_NO_PAD
+            .decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
         is_signed,
         sender_key_id,
-        signature_metadata.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
-        signature.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
+        signature_metadata
+            .as_ref()
+            .map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64))
+            .transpose()?,
+        signature
+            .as_ref()
+            .map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64))
+            .transpose()?,
         &state.db,
     )?;
 
@@ -545,11 +574,7 @@ pub async fn upload_link_message_finish_multipart(
     }
 
     // Only return the auth_key if the user is logged in
-    let auth_key = if is_connected {
-        auth_key
-    } else {
-        Uuid::nil()
-    };
+    let auth_key = if is_connected { auth_key } else { Uuid::nil() };
     let response = UploadLinkMessageFinishMultipartResult { auth_key };
 
     Ok((StatusCode::OK, Json(response)))
@@ -589,7 +614,6 @@ pub async fn link_message_update(
     State(state): State<AppState>,
     Json(payload): Json<UpdateLinkMessage>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
@@ -609,20 +633,31 @@ pub async fn link_message_update(
     server::link::update_link_transfer(
         id,
         payload.auth_key,
-        URL_SAFE_NO_PAD.decode(&payload.cfilename)
+        URL_SAFE_NO_PAD
+            .decode(&payload.cfilename)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_filename)
+        URL_SAFE_NO_PAD
+            .decode(&payload.nonce_filename)
             .map_err(|_| ApiError::Base64)?,
         payload.max_downloads,
         payload.lifetime,
-        URL_SAFE_NO_PAD.decode(&payload.mac)
+        URL_SAFE_NO_PAD
+            .decode(&payload.mac)
             .map_err(|_| ApiError::Base64)?,
         payload.sender_key_id,
-        payload.signature_metadata.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
-        payload.signature.as_ref().map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64)).transpose()?,
+        payload
+            .signature_metadata
+            .as_ref()
+            .map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64))
+            .transpose()?,
+        payload
+            .signature
+            .as_ref()
+            .map(|s| URL_SAFE_NO_PAD.decode(s).map_err(|_| ApiError::Base64))
+            .transpose()?,
         &state.db,
     )
-        .await?;
+    .await?;
 
     Ok((StatusCode::ACCEPTED, Json(())))
 }
@@ -645,19 +680,12 @@ pub async fn link_message_delete(
     State(state): State<AppState>,
     Json(payload): Json<DeleteLinkMessage>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Check that the path correspond to the id in session
     if id != link_claims.id {
         return Err(ApiError::Forbidden);
     }
 
-    server::link::delete_link_transfer(
-        id,
-        payload.auth_key,
-        &state.db,
-        &state.s3,
-    )
-        .await?;
+    server::link::delete_link_transfer(id, payload.auth_key, &state.db, &state.s3).await?;
 
     Ok((StatusCode::OK, Json(())))
 }
@@ -685,7 +713,6 @@ pub async fn link_message_password_change_start(
     State(state): State<AppState>,
     Json(payload): Json<LinkMessagePasswordChangeStart>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Check that the path correspond to the id in session
     if id != link_claims.id {
         return Err(ApiError::Forbidden);
@@ -694,7 +721,8 @@ pub async fn link_message_password_change_start(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_start)
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_start)
         .map_err(|_| ApiError::Base64)?;
     let req = RegistrationRequest::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
@@ -703,12 +731,12 @@ pub async fn link_message_password_change_start(
         server::link::link_send_message_start(id, req, &state.db)?;
 
     Ok((
-           StatusCode::OK,
-           Json(LinkMessagePasswordChangeStartResult {
-               id: id,
-               result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
-           })),
-    )
+        StatusCode::OK,
+        Json(LinkMessagePasswordChangeStartResult {
+            id: id,
+            result: URL_SAFE_NO_PAD.encode(server_registration_start_result.serialize()),
+        }),
+    ))
 }
 
 #[derive(Deserialize, Validate, Debug)]
@@ -733,7 +761,6 @@ pub async fn link_message_password_change_end(
     State(state): State<AppState>,
     Json(payload): Json<LinkMessagePasswordChangeEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Check that the path correspond to the id in session
     if id != link_claims.id {
         return Err(ApiError::Forbidden);
@@ -742,7 +769,8 @@ pub async fn link_message_password_change_end(
     // Validate payload
     payload.validate().map_err(|_| ApiError::InputValidation)?;
 
-    let bytes = URL_SAFE_NO_PAD.decode(&payload.client_registration_finish)
+    let bytes = URL_SAFE_NO_PAD
+        .decode(&payload.client_registration_finish)
         .map_err(|_| ApiError::Base64)?;
     let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
@@ -751,15 +779,19 @@ pub async fn link_message_password_change_end(
         id,
         payload.auth_key,
         req,
-        URL_SAFE_NO_PAD.decode(&payload.c_enc_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.c_enc_key)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_enc_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.nonce_enc_key)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.c_mac_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.c_mac_key)
             .map_err(|_| ApiError::Base64)?,
-        URL_SAFE_NO_PAD.decode(&payload.nonce_mac_key)
+        URL_SAFE_NO_PAD
+            .decode(&payload.nonce_mac_key)
             .map_err(|_| ApiError::Base64)?,
-        &state.db
+        &state.db,
     )?;
 
     Ok((StatusCode::OK, Json(())))
@@ -787,7 +819,9 @@ mod tests {
                 file_size: 1,
             },
             &[
-                ("short registration", |p| p.client_registration_finish = "short".into()),
+                ("short registration", |p| {
+                    p.client_registration_finish = "short".into()
+                }),
                 ("short key", |p| p.c_enc_key = "short".into()),
                 ("short nonce", |p| p.nonce_mac_key = "short".into()),
                 ("long filename", |p| p.cfilename = too_long()),
@@ -821,7 +855,9 @@ mod tests {
                 ("short mac", |p| p.mac = "short".into()),
                 ("short hash", |p| p.hash_file = "short".into()),
                 ("blank receiver", |p| p.receiver_email = Some(" ".into())),
-                ("invalid receiver", |p| p.receiver_email = Some("nope".into())),
+                ("invalid receiver", |p| {
+                    p.receiver_email = Some("nope".into())
+                }),
                 ("short signature", |p| p.signature = Some("short".into())),
                 ("long metadata", |p| p.signature_metadata = Some(too_long())),
             ],
@@ -864,7 +900,9 @@ mod tests {
                 nonce_mac_key: encoded(),
             },
             &[
-                ("short registration", |p| p.client_registration_finish = "short".into()),
+                ("short registration", |p| {
+                    p.client_registration_finish = "short".into()
+                }),
                 ("long key", |p| p.c_mac_key = too_long()),
             ],
         );
@@ -877,9 +915,10 @@ mod tests {
         let all = (key, Some(&sig), Some(&sig));
         let none = (None, None, None);
 
-        let resolve = |connected, signed, (k, m, s): (Option<Uuid>, Option<&String>, Option<&String>)| {
-            resolve_sender_key(connected, signed, k, m, s)
-        };
+        let resolve =
+            |connected, signed, (k, m, s): (Option<Uuid>, Option<&String>, Option<&String>)| {
+                resolve_sender_key(connected, signed, k, m, s)
+            };
 
         assert!(matches!(resolve(true, true, all), Ok(k) if k == key));
         assert!(matches!(resolve(true, false, none), Ok(None)));
@@ -887,10 +926,22 @@ mod tests {
         // Claiming a signature without fields stores the transfer unsigned.
         assert!(matches!(resolve(true, true, none), Ok(None)));
 
-        assert!(matches!(resolve(false, true, all), Err(ApiError::Forbidden)));
-        assert!(matches!(resolve(false, true, none), Err(ApiError::Forbidden)));
-        assert!(matches!(resolve(true, false, all), Err(ApiError::InputValidation)));
-        assert!(matches!(resolve(false, false, all), Err(ApiError::InputValidation)));
+        assert!(matches!(
+            resolve(false, true, all),
+            Err(ApiError::Forbidden)
+        ));
+        assert!(matches!(
+            resolve(false, true, none),
+            Err(ApiError::Forbidden)
+        ));
+        assert!(matches!(
+            resolve(true, false, all),
+            Err(ApiError::InputValidation)
+        ));
+        assert!(matches!(
+            resolve(false, false, all),
+            Err(ApiError::InputValidation)
+        ));
         for partial in [
             (key, None, None),
             (key, Some(&sig), None),

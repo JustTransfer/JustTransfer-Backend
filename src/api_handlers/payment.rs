@@ -1,4 +1,9 @@
-use axum::{extract::State, http::{HeaderMap, StatusCode}, response::IntoResponse, Extension, Json};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    response::IntoResponse,
+    Extension, Json,
+};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
@@ -23,7 +28,6 @@ pub async fn create_subscription_checkout(
     State(state): State<AppState>,
     Json(payload): Json<CreateCheckout>,
 ) -> Result<impl IntoResponse, ApiError> {
-
     // Refuse to start a second subscription if one is already active
     if server::connected::get_stripe_subscription_id(claims_session.id, &state.db)?.is_some() {
         return Err(ApiError::InputValidation);
@@ -33,7 +37,8 @@ pub async fn create_subscription_checkout(
         claims_session.id,
         &claims_session.email,
         &payload.plan,
-    ).await?;
+    )
+    .await?;
 
     Ok((StatusCode::OK, Json(CreateCheckoutResult { checkout_url })))
 }
@@ -43,11 +48,13 @@ pub async fn cancel_subscription(
     Extension(claims_session): Extension<UserClaims>,
     State(state): State<AppState>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let Some(sub_id) = server::connected::get_stripe_subscription_id(claims_session.id, &state.db)? else {
+    let Some(sub_id) = server::connected::get_stripe_subscription_id(claims_session.id, &state.db)?
+    else {
         return Err(ApiError::InputValidation); // nothing to cancel
     };
 
-    server::payment::cancel_subscription(claims_session.id, &sub_id, &state.db, &state.mailer).await?;
+    server::payment::cancel_subscription(claims_session.id, &sub_id, &state.db, &state.mailer)
+        .await?;
 
     Ok(StatusCode::OK)
 }

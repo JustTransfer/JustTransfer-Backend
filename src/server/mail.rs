@@ -1,13 +1,14 @@
-use lettre::message::{Mailbox, header::ContentType};
-use lettre::transport::smtp::authentication::Credentials;
-use lettre::{Message, SmtpTransport, Transport};
 use crate::consts::SERVER_MODE;
 use crate::error::ServerError;
+use lettre::message::{header::ContentType, Mailbox};
+use lettre::transport::smtp::authentication::Credentials;
+use lettre::{Message, SmtpTransport, Transport};
 
 pub fn init_mailer(smtp_server: &str, smtp_username: &str, smtp_password: &str) -> SmtpTransport {
-
     if SERVER_MODE.get().unwrap() == "development" {
-        tracing::info!("Server mode is 'development', emails will be printed to console instead of being sent");
+        tracing::info!(
+            "Server mode is 'development', emails will be printed to console instead of being sent"
+        );
         tracing::warn!("The connection will still be established to the SMTP server");
     }
 
@@ -20,16 +21,36 @@ pub fn init_mailer(smtp_server: &str, smtp_username: &str, smtp_password: &str) 
         .build()
 }
 
-fn send_mail(receiver: &str, subject: &str, body: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+fn send_mail(
+    receiver: &str,
+    subject: &str,
+    body: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     if SERVER_MODE.get().unwrap() == "development" {
-        tracing::info!("--- Email to {} ---\nSubject: {}\n\n{}\n--- End of email ---", receiver, subject, body);
+        tracing::info!(
+            "--- Email to {} ---\nSubject: {}\n\n{}\n--- End of email ---",
+            receiver,
+            subject,
+            body
+        );
         return Ok(());
     }
 
     let email = Message::builder()
-        .from(Mailbox::new(Some("JustTransfer".to_owned()), crate::consts::SMTP_MAIL.get().unwrap().to_owned().parse().unwrap()))
-        .to(Mailbox::new(Some(receiver.to_owned()), receiver.parse().unwrap()))
+        .from(Mailbox::new(
+            Some("JustTransfer".to_owned()),
+            crate::consts::SMTP_MAIL
+                .get()
+                .unwrap()
+                .to_owned()
+                .parse()
+                .unwrap(),
+        ))
+        .to(Mailbox::new(
+            Some(receiver.to_owned()),
+            receiver.parse().unwrap(),
+        ))
         .subject(subject.to_owned())
         .header(ContentType::TEXT_PLAIN)
         .body(body.to_owned())
@@ -53,56 +74,73 @@ fn send_mail(receiver: &str, subject: &str, body: &str, mailer: &SmtpTransport) 
 /// Account
 ///
 
-pub fn send_verification_email(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_verification_email(
+    receiver: &str,
+    link: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Welcome to JustTransfer! Please verify your email address";
     let body = format!("Hello {},\n\nThank you for registering with JustTransfer! To complete your registration, please click the following link to verify your email address:\n\n{}\n\nIf you did not create an account with JustTransfer, please ignore this email.\n\nBest regards,\nJustTransfer Team", receiver, link);
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_verification_email_reattempt(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_verification_email_reattempt(
+    receiver: &str,
+    link: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Finish verifying your JustTransfer account";
     let body = format!("Hello {},\n\nWe received an attempt to create a JustTransfer account using your email address. You already have an account, but it hasn't been verified yet. If you initiated this request, please click the following link to verify your email address and finish setting up your account:\n\n{}\n\nIf you did not initiate this request, please ignore this email. No changes have been made to your account, and no one can access it without verifying this email address.\n\nBest regards,\nJustTransfer Team", receiver, link);
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_notification_account_creation_email_taken(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_notification_account_creation_email_taken(
+    receiver: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "JustTransfer account creation attempt";
     let body = format!("Hello {},\n\nWe received an attempt to create a JustTransfer account using your email address. You already have an account, so nothing was created or changed. If you initiated this request, you can simply log in instead. If you did not, please ignore this email, or reset your password if you're concerned:\n\n{}/reset-password\n\nBest regards,\nJustTransfer Team", receiver, crate::consts::FRONTEND_URL.get().unwrap());
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_password_reset_email(receiver: &str, link: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_password_reset_email(
+    receiver: &str,
+    link: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "JustTransfer password reset request";
     let body = format!("Hello {},\n\nWe received a request to reset your JustTransfer password. If you initiated this request, please click the following link to reset your password:\n\n{}\n\nIf you did not request a password reset, please ignore this email. Your password will remain unchanged.\n\nBest regards,\nJustTransfer Team", receiver, link);
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_password_reset_confirmation_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_password_reset_confirmation_email(
+    receiver: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Your JustTransfer password has been reset";
     let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer password has been reset. If you did not initiate this request, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", receiver);
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_password_changed_notification_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_password_changed_notification_email(
+    receiver: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Your JustTransfer password has been changed";
     let body = format!("Hello {},\n\nThis is a notification that your JustTransfer password has been changed. If you did not initiate this change, please go to the JustTransfer website and reset your password immediately.\n\nBest regards,\nJustTransfer Team", receiver);
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_account_deletion_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_account_deletion_email(
+    receiver: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Your JustTransfer account has been deleted";
     let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer account has been deleted. You can create a new account at any time by visiting the JustTransfer website.\n\nBest regards,\nJustTransfer Team", receiver);
 
@@ -113,8 +151,11 @@ pub fn send_account_deletion_email(receiver: &str, mailer: &SmtpTransport) -> Re
 /// Transfer notification
 ///
 
-pub fn send_transfer_notification_email(receiver: &str, url: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_transfer_notification_email(
+    receiver: &str,
+    url: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "You have received a new file transfer on JustTransfer";
     let body = format!("Hello {},\n\nYou have received a new file transfer on JustTransfer. Use the following link to access the transfer:\n\n{}\n\nBest regards,\nJustTransfer Team", receiver, url);
 
@@ -125,24 +166,31 @@ pub fn send_transfer_notification_email(receiver: &str, url: &str, mailer: &Smtp
 /// Subscription
 ///
 
-pub fn send_subscription_started_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_subscription_started_email(
+    receiver: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Your JustTransfer Premium subscription is now active";
     let body = format!("Hello {},\n\nThis is a confirmation that your JustTransfer Premium subscription is now active. You can enjoy all the benefits of Premium access immediately.\n\nIf you did not request this subscription, please contact us immediately.\n\nBest regards,\nJustTransfer Team", receiver);
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_subscription_cancellation_scheduled_email(receiver: &str, period_end: &str, mailer: &SmtpTransport, ) -> Result<(), ServerError> {
-
+pub fn send_subscription_cancellation_scheduled_email(
+    receiver: &str,
+    period_end: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Your JustTransfer Premium subscription is set to cancel";
     let body = format!("Hello {},\n\nWe've received your request to cancel your JustTransfer Premium subscription. You will keep full Premium access until {}, after which your account will automatically switch to the Free plan.\n\nChanged your mind? You can resume your subscription any time before then from your account page.\n\nIf you did not request this cancellation, please contact us immediately.\n\nBest regards,\nJustTransfer Team", receiver, period_end);
 
     send_mail(receiver, subject, &body, mailer)
 }
 
-pub fn send_subscription_ended_email(receiver: &str, mailer: &SmtpTransport) -> Result<(), ServerError> {
-
+pub fn send_subscription_ended_email(
+    receiver: &str,
+    mailer: &SmtpTransport,
+) -> Result<(), ServerError> {
     let subject = "Your JustTransfer Premium subscription has ended";
     let body = format!("Hello {},\n\nYour JustTransfer Premium subscription has now ended and your account has been switched to the Free plan. Any files or transfers exceeding the Free plan's limits may be affected going forward.\n\nYou can re-subscribe to Premium at any time from your account page.\n\nBest regards,\nJustTransfer Team", receiver);
 

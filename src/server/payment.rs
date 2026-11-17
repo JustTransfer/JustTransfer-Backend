@@ -375,7 +375,9 @@ mod tests {
         for event in events {
             let parsed: StripeEvent = serde_json::from_value(event.clone()).unwrap();
             assert!(
-                handle_webhook(parsed, &offline_db(), &mailer()).await.is_ok(),
+                handle_webhook(parsed, &offline_db(), &mailer())
+                    .await
+                    .is_ok(),
                 "{event}"
             );
         }

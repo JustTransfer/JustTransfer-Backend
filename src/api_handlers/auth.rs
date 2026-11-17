@@ -373,10 +373,42 @@ mod tests {
     fn role_limits_come_from_the_matching_configuration() {
         init_config();
         let expected = [
-            (Role::Anonymous, (ANON_MAX_LIFETIME, ANON_MAX_FILE_SIZE, ANON_MAX_DOWNLOADS, None)),
-            (Role::User, (USER_MAX_LIFETIME, USER_MAX_FILE_SIZE, USER_MAX_DOWNLOADS, Some(USER_MONTHLY_TRANSFERS))),
-            (Role::Premium, (PREMIUM_MAX_LIFETIME, PREMIUM_MAX_FILE_SIZE, PREMIUM_MAX_DOWNLOADS, Some(PREMIUM_MONTHLY_TRANSFERS))),
-            (Role::Admin, (PREMIUM_MAX_LIFETIME, PREMIUM_MAX_FILE_SIZE, PREMIUM_MAX_DOWNLOADS, Some(PREMIUM_MONTHLY_TRANSFERS))),
+            (
+                Role::Anonymous,
+                (
+                    ANON_MAX_LIFETIME,
+                    ANON_MAX_FILE_SIZE,
+                    ANON_MAX_DOWNLOADS,
+                    None,
+                ),
+            ),
+            (
+                Role::User,
+                (
+                    USER_MAX_LIFETIME,
+                    USER_MAX_FILE_SIZE,
+                    USER_MAX_DOWNLOADS,
+                    Some(USER_MONTHLY_TRANSFERS),
+                ),
+            ),
+            (
+                Role::Premium,
+                (
+                    PREMIUM_MAX_LIFETIME,
+                    PREMIUM_MAX_FILE_SIZE,
+                    PREMIUM_MAX_DOWNLOADS,
+                    Some(PREMIUM_MONTHLY_TRANSFERS),
+                ),
+            ),
+            (
+                Role::Admin,
+                (
+                    PREMIUM_MAX_LIFETIME,
+                    PREMIUM_MAX_FILE_SIZE,
+                    PREMIUM_MAX_DOWNLOADS,
+                    Some(PREMIUM_MONTHLY_TRANSFERS),
+                ),
+            ),
         ];
         for (role, limits) in expected {
             let actual = (
@@ -393,7 +425,12 @@ mod tests {
     fn upload_accepts_values_on_the_limits() {
         let margin = ChronoDuration::minutes(MAX_TIME_MARGIN);
         assert!(upload(now(), 1, 1, 1));
-        assert!(upload(now(), LIMITS.max_lifetime, LIMITS.max_file_size, LIMITS.max_downloads));
+        assert!(upload(
+            now(),
+            LIMITS.max_lifetime,
+            LIMITS.max_file_size,
+            LIMITS.max_downloads
+        ));
         assert!(upload(now() - margin, 1, 1, 1));
         assert!(upload(now() + margin, 1, 1, 1));
     }
@@ -438,12 +475,22 @@ mod tests {
         let anonymous = claims(Role::Anonymous);
         let premium = claims(Role::Premium);
 
-        assert!(anonymous.authorize_upload(created, ANON_MAX_LIFETIME, ANON_MAX_FILE_SIZE, 1).is_ok());
-        assert!(anonymous.authorize_upload(created, 1, ANON_MAX_FILE_SIZE + 1, 1).is_err());
-        assert!(premium.authorize_upload(created, 1, ANON_MAX_FILE_SIZE + 1, 1).is_ok());
+        assert!(anonymous
+            .authorize_upload(created, ANON_MAX_LIFETIME, ANON_MAX_FILE_SIZE, 1)
+            .is_ok());
+        assert!(anonymous
+            .authorize_upload(created, 1, ANON_MAX_FILE_SIZE + 1, 1)
+            .is_err());
+        assert!(premium
+            .authorize_upload(created, 1, ANON_MAX_FILE_SIZE + 1, 1)
+            .is_ok());
 
-        assert!(claims(Role::User).authorize_update(USER_MAX_LIFETIME, 1).is_ok());
-        assert!(claims(Role::User).authorize_update(USER_MAX_LIFETIME + 1, 1).is_err());
+        assert!(claims(Role::User)
+            .authorize_update(USER_MAX_LIFETIME, 1)
+            .is_ok());
+        assert!(claims(Role::User)
+            .authorize_update(USER_MAX_LIFETIME + 1, 1)
+            .is_err());
         assert!(premium.authorize_update(USER_MAX_LIFETIME + 1, 1).is_ok());
     }
 }

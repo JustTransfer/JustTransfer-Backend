@@ -65,8 +65,6 @@ impl From<ServerError> for ApiError {
     }
 }
 
-
-
 #[derive(Debug)]
 pub enum ApiError {
     InputValidation,
@@ -102,7 +100,6 @@ impl IntoResponse for ApiError {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -123,7 +120,10 @@ mod tests {
             (ApiError::Unauthorized, StatusCode::UNAUTHORIZED),
             (ApiError::Forbidden, StatusCode::FORBIDDEN),
             (ApiError::Conflict, StatusCode::CONFLICT),
-            (ApiError::InsufficientStorage, StatusCode::INSUFFICIENT_STORAGE),
+            (
+                ApiError::InsufficientStorage,
+                StatusCode::INSUFFICIENT_STORAGE,
+            ),
             (ApiError::QuotaExceeded, StatusCode::TOO_MANY_REQUESTS),
         ];
         for (error, expected) in cases {
@@ -139,11 +139,17 @@ mod tests {
             (ServerError::Internal, StatusCode::INTERNAL_SERVER_ERROR),
             (ServerError::Unauthorized, StatusCode::UNAUTHORIZED),
             (ServerError::Forbidden, StatusCode::FORBIDDEN),
-            (ServerError::InsufficientStorage, StatusCode::INSUFFICIENT_STORAGE),
+            (
+                ServerError::InsufficientStorage,
+                StatusCode::INSUFFICIENT_STORAGE,
+            ),
             (ServerError::QuotaExceeded, StatusCode::TOO_MANY_REQUESTS),
             (ServerError::NotFound, StatusCode::NOT_FOUND),
             // Mail failures must not leak as a distinct status.
-            (ServerError::EmailSendError, StatusCode::INTERNAL_SERVER_ERROR),
+            (
+                ServerError::EmailSendError,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
             (ServerError::InputValidation, StatusCode::BAD_REQUEST),
         ];
         for (error, expected) in cases {

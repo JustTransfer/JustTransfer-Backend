@@ -1,23 +1,22 @@
 use chrono::{Duration, Utc};
-use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
-use diesel::r2d2::ConnectionManager;
+use diesel::dsl::{now as sql_now, sql};
 use diesel::prelude::*;
-use diesel::dsl::{sql, now as sql_now};
+use diesel::r2d2::ConnectionManager;
 use diesel::result::{DatabaseErrorKind, Error as DieselError};
+use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::*;
 use tracing::info;
 use uuid::Uuid;
 
-
 use crate::consts::*;
-use crate::models::*;
-use crate::server;
-use crate::schema::users::dsl::users;
 use crate::error::ServerError;
+use crate::models::*;
 use crate::schema::key_pairs::dsl::key_pairs;
 use crate::schema::saved_transfers::dsl::saved_transfers;
-use crate::server::init::{DefaultCipherSuite, get_opaque_settings};
+use crate::schema::users::dsl::users;
+use crate::server;
+use crate::server::init::{get_opaque_settings, DefaultCipherSuite};
 
 ///
 /// Register
@@ -28,16 +27,14 @@ pub fn registration_start(
     client_registration_start_result: RegistrationRequest<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<RegistrationResponse<DefaultCipherSuite>, ServerError> {
-
-    let server_opaque = get_opaque_settings(pool)
-        .map_err(|_| ServerError::Internal)?;
+    let server_opaque = get_opaque_settings(pool).map_err(|_| ServerError::Internal)?;
 
     let server_registration_start_result = ServerRegistration::<DefaultCipherSuite>::start(
         &server_opaque,
         client_registration_start_result,
         email_param.as_bytes(),
     )
-        .map_err(|_| ServerError::Internal)?;
+    .map_err(|_| ServerError::Internal)?;
 
     Ok(server_registration_start_result.message)
 }
@@ -63,7 +60,10 @@ pub fn registration_finish(
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if max user number is reached
-    let user_count = users::table.count().get_result::<i64>(&mut conn).map_err(|_| ServerError::Internal)?;
+    let user_count = users::table
+        .count()
+        .get_result::<i64>(&mut conn)
+        .map_err(|_| ServerError::Internal)?;
     if user_count >= *MAX_NUMBER_ACCOUNTS.get().unwrap() {
         return Err(ServerError::InsufficientStorage);
     }
@@ -130,7 +130,8 @@ pub fn registration_finish(
                 Ok(RegistrationOutcome::Created)
             }
             Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info))
-            if info.constraint_name().unwrap_or("").contains("email") => {
+                if info.constraint_name().unwrap_or("").contains("email") =>
+            {
                 // Savepoint was rolled back, outer transaction is still valid here
                 diesel::insert_into(crate::schema::key_pairs::table)
                     .values(&dummy_key)
@@ -157,11 +158,7 @@ pub fn registration_finish(
 
     match outcome {
         RegistrationOutcome::Created => {
-            server::mail::send_verification_email(
-                new_user.email.as_str(),
-                url.as_str(),
-                mailer,
-            )
+            server::mail::send_verification_email(new_user.email.as_str(), url.as_str(), mailer)
                 .map_err(|_| ServerError::Internal)?;
 
             Ok(())
@@ -174,14 +171,14 @@ pub fn registration_finish(
                     url.as_str(),
                     mailer,
                 )
-                    .map_err(|_| ServerError::Internal)?;
+                .map_err(|_| ServerError::Internal)?;
             } else {
                 // Send notification email that the account already exists
                 server::mail::send_notification_account_creation_email_taken(
                     new_user.email.as_str(),
                     mailer,
                 )
-                    .map_err(|_| ServerError::Internal)?;
+                .map_err(|_| ServerError::Internal)?;
             }
 
             Ok(())
@@ -208,56 +205,57 @@ pub fn registration_finish_update(
 
     let password_file_bytes = password_file_param.serialize();
 
-    let result = conn.transaction::<(Vec<KeyPairs>, String), ServerError, _>(|conn| {
-        let user_id = users::table
-            .filter(users::email.eq(email_param))
-            .select(users::id)
-            .first::<Uuid>(conn)
-            .optional()?
-            .ok_or(ServerError::Internal)?;
+    let result = conn
+        .transaction::<(Vec<KeyPairs>, String), ServerError, _>(|conn| {
+            let user_id = users::table
+                .filter(users::email.eq(email_param))
+                .select(users::id)
+                .first::<Uuid>(conn)
+                .optional()?
+                .ok_or(ServerError::Internal)?;
 
-        let user = diesel::update(users.find(user_id))
-            .set((
-                users::password_file.eq(password_file_bytes.to_vec()),
-            ))
-            .returning(User::as_returning())
-            .get_result(conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        // Update keys
-        for key in keys {
-            let updated = diesel::update(crate::schema::key_pairs::table)
-                .filter(crate::schema::key_pairs::id.eq(key.id))
-                .filter(crate::schema::key_pairs::owner_id.eq(user_id))
-                .set((
-                    crate::schema::key_pairs::enc_public_key.eq(key.enc_public_key),
-                    crate::schema::key_pairs::enc_nonce_private_key.eq(key.enc_nonce_private_key),
-                    crate::schema::key_pairs::enc_cipher_private_key.eq(key.enc_cipher_private_key),
-                    crate::schema::key_pairs::sign_public_key.eq(key.sign_public_key),
-                    crate::schema::key_pairs::sign_nonce_private_key.eq(key.sign_nonce_private_key),
-                    crate::schema::key_pairs::sign_cipher_private_key.eq(key.sign_cipher_private_key),
-                ))
-                .execute(conn)
+            let user = diesel::update(users.find(user_id))
+                .set((users::password_file.eq(password_file_bytes.to_vec()),))
+                .returning(User::as_returning())
+                .get_result(conn)
                 .map_err(|_| ServerError::Internal)?;
 
-            if updated == 0 {
-                return Err(ServerError::Forbidden);
+            // Update keys
+            for key in keys {
+                let updated = diesel::update(crate::schema::key_pairs::table)
+                    .filter(crate::schema::key_pairs::id.eq(key.id))
+                    .filter(crate::schema::key_pairs::owner_id.eq(user_id))
+                    .set((
+                        crate::schema::key_pairs::enc_public_key.eq(key.enc_public_key),
+                        crate::schema::key_pairs::enc_nonce_private_key
+                            .eq(key.enc_nonce_private_key),
+                        crate::schema::key_pairs::enc_cipher_private_key
+                            .eq(key.enc_cipher_private_key),
+                        crate::schema::key_pairs::sign_public_key.eq(key.sign_public_key),
+                        crate::schema::key_pairs::sign_nonce_private_key
+                            .eq(key.sign_nonce_private_key),
+                        crate::schema::key_pairs::sign_cipher_private_key
+                            .eq(key.sign_cipher_private_key),
+                    ))
+                    .execute(conn)
+                    .map_err(|_| ServerError::Internal)?;
+
+                if updated == 0 {
+                    return Err(ServerError::Forbidden);
+                }
             }
-        }
 
-        let keys = crate::schema::key_pairs::table
-            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
-            .load::<KeyPairs>(conn)
-            .map_err(|_| ServerError::Internal)?;
+            let keys = crate::schema::key_pairs::table
+                .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+                .load::<KeyPairs>(conn)
+                .map_err(|_| ServerError::Internal)?;
 
-        Ok((keys, user.email))
-    }).map_err(|_| ServerError::Internal)?;
+            Ok((keys, user.email))
+        })
+        .map_err(|_| ServerError::Internal)?;
 
     // Email notification of password change
-    server::mail::send_password_changed_notification_email(
-        result.1.as_str(),
-        mailer,
-    )
+    server::mail::send_password_changed_notification_email(result.1.as_str(), mailer)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(result.0)
@@ -281,14 +279,14 @@ pub fn verify_email(
         .ok_or(ServerError::Internal)?;
 
     if user.email_verified {
-        return Ok(())
+        return Ok(());
     }
 
     diesel::update(users.find(user.id))
         .set((
-                 users::email_verified.eq(true),
-                 users::registration_token.eq::<Uuid>(Uuid::new_v4()), // Invalidate the old registration toke
-             ))
+            users::email_verified.eq(true),
+            users::registration_token.eq::<Uuid>(Uuid::new_v4()), // Invalidate the old registration toke
+        ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
@@ -304,8 +302,8 @@ pub fn request_password_reset(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
-    use crate::schema::users;
     use crate::schema::reset_tokens;
+    use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Generate a new registration token for password reset
@@ -329,17 +327,18 @@ pub fn request_password_reset(
         .values((
             reset_tokens::account_id.eq(user_id),
             reset_tokens::token.eq(new_registration_token),
-            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(*RESET_PASSWORD_TOKEN_DURATION_MINUTES.get().unwrap()))
+            reset_tokens::expires_at.eq(Utc::now()
+                + Duration::minutes(*RESET_PASSWORD_TOKEN_DURATION_MINUTES.get().unwrap())),
         ))
         .on_conflict(reset_tokens::account_id)
         .do_update()
         .set((
             reset_tokens::token.eq(new_registration_token),
-            reset_tokens::expires_at.eq(Utc::now() + Duration::minutes(*RESET_PASSWORD_TOKEN_DURATION_MINUTES.get().unwrap()))
+            reset_tokens::expires_at.eq(Utc::now()
+                + Duration::minutes(*RESET_PASSWORD_TOKEN_DURATION_MINUTES.get().unwrap())),
         ))
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
-
 
     let user_email = if let Some(user) = &user_opt {
         user.email.as_str()
@@ -356,11 +355,7 @@ pub fn request_password_reset(
         new_registration_token,
         urlencoding::encode(&user_email)
     );
-    server::mail::send_password_reset_email(
-        user_email,
-        url.as_str(),
-        mailer,
-    )
+    server::mail::send_password_reset_email(user_email, url.as_str(), mailer)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
@@ -373,7 +368,6 @@ pub fn registration_finish_password_reset(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
-
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the token is valid
@@ -388,78 +382,79 @@ pub fn registration_finish_password_reset(
         return Err(ServerError::Forbidden);
     }
 
-    let transaction_result = conn.transaction::<User, ServerError, _>(|conn| {
+    let transaction_result = conn
+        .transaction::<User, ServerError, _>(|conn| {
+            // Get the user of the token
+            let user = crate::schema::users::table
+                .filter(crate::schema::users::id.eq(reset_token.account_id))
+                .first::<User>(conn)
+                .optional()?
+                .ok_or(ServerError::Internal)?;
 
-        // Get the user of the token
-        let user = crate::schema::users::table
-            .filter(crate::schema::users::id.eq(reset_token.account_id))
-            .first::<User>(conn)
-            .optional()?
-            .ok_or(ServerError::Internal)?;
+            // Create new keys
+            let new_key = NewKeyPairs {
+                id: &Uuid::new_v4(),
+                owner_id: &user.id,
 
-        // Create new keys
-        let new_key = NewKeyPairs {
-            id: &Uuid::new_v4(),
-            owner_id: &user.id,
+                enc_public_key: &key.enc_public_key,
+                enc_nonce_private_key: &key.enc_nonce_private_key,
+                enc_cipher_private_key: &key.enc_cipher_private_key,
 
-            enc_public_key: &key.enc_public_key,
-            enc_nonce_private_key: &key.enc_nonce_private_key,
-            enc_cipher_private_key: &key.enc_cipher_private_key,
+                sign_public_key: &key.sign_public_key,
+                sign_nonce_private_key: &key.sign_nonce_private_key,
+                sign_cipher_private_key: &key.sign_cipher_private_key,
 
-            sign_public_key: &key.sign_public_key,
-            sign_nonce_private_key: &key.sign_nonce_private_key,
-            sign_cipher_private_key: &key.sign_cipher_private_key,
+                is_active: &true,
+                revoked_at: None,
+            };
 
-            is_active: &true,
-            revoked_at: None,
-        };
+            // Delete the token to prevent reuse
+            diesel::delete(crate::schema::reset_tokens::table)
+                .filter(crate::schema::reset_tokens::token.eq(token))
+                .execute(conn)
+                .map_err(|_| ServerError::Internal)?;
 
-        // Delete the token to prevent reuse
-        diesel::delete(crate::schema::reset_tokens::table)
-            .filter(crate::schema::reset_tokens::token.eq(token))
+            // Update password file
+            let password_file_bytes =
+                ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result)
+                    .serialize();
+            let user = diesel::update(users.find(user.id))
+                .set((crate::schema::users::password_file.eq(password_file_bytes.to_vec()),))
+                .returning(User::as_returning())
+                .get_result(conn)
+                .map_err(|_| ServerError::Internal)?;
+
+            // Delete all saved transfers of the user to prevent access with old keys
+            diesel::delete(
+                crate::schema::saved_transfers::table
+                    .filter(crate::schema::saved_transfers::owner_id.eq(user.id)),
+            )
             .execute(conn)
             .map_err(|_| ServerError::Internal)?;
 
-        // Update password file
-        let password_file_bytes = ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result).serialize();
-        let user = diesel::update(users.find(user.id))
-            .set((
-                crate::schema::users::password_file.eq(password_file_bytes.to_vec()),
-            ))
-            .returning(User::as_returning())
-            .get_result(conn)
-            .map_err(|_| ServerError::Internal)?;
+            // Mark all keys as revoked and set the revoked_at date
+            diesel::update(crate::schema::key_pairs::table)
+                .filter(crate::schema::key_pairs::owner_id.eq(user.id))
+                .filter(crate::schema::key_pairs::is_active.eq(true))
+                .set((
+                    crate::schema::key_pairs::is_active.eq(false),
+                    crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
+                ))
+                .execute(conn)
+                .map_err(|_| ServerError::Internal)?;
 
-        // Delete all saved transfers of the user to prevent access with old keys
-        diesel::delete(crate::schema::saved_transfers::table.filter(crate::schema::saved_transfers::owner_id.eq(user.id)))
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;
+            // Insert the new key
+            let _ = diesel::insert_into(crate::schema::key_pairs::table)
+                .values(&new_key)
+                .execute(conn)
+                .map_err(|_| ServerError::Internal)?;
 
-        // Mark all keys as revoked and set the revoked_at date
-        diesel::update(crate::schema::key_pairs::table)
-            .filter(crate::schema::key_pairs::owner_id.eq(user.id))
-            .filter(crate::schema::key_pairs::is_active.eq(true))
-            .set((
-                crate::schema::key_pairs::is_active.eq(false),
-                crate::schema::key_pairs::revoked_at.eq(Some(Utc::now())),
-            ))
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        // Insert the new key
-        let _ = diesel::insert_into(crate::schema::key_pairs::table)
-            .values(&new_key)
-            .execute(conn)
-            .map_err(|_| ServerError::Internal)?;
-
-        Ok(user)
-    }).map_err(|_| ServerError::Internal)?;
+            Ok(user)
+        })
+        .map_err(|_| ServerError::Internal)?;
 
     // Email notification of password change
-    server::mail::send_password_reset_confirmation_email(
-        transaction_result.email.as_str(),
-        mailer,
-    )
+    server::mail::send_password_reset_confirmation_email(transaction_result.email.as_str(), mailer)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
@@ -498,8 +493,7 @@ pub fn login_start(
         None
     };
 
-    let server_opaque = get_opaque_settings(pool)
-        .map_err(|_| ServerError::Internal)?;
+    let server_opaque = get_opaque_settings(pool).map_err(|_| ServerError::Internal)?;
 
     let mut server_rng = OsRng;
     let server_login_start_result = ServerLogin::start(
@@ -510,7 +504,7 @@ pub fn login_start(
         email_param.as_bytes(),
         ServerLoginParameters::default(),
     )
-        .map_err(|_| ServerError::Internal)?;
+    .map_err(|_| ServerError::Internal)?;
 
     // Use the dummy user id if the user does not exist to prevent user enumeration
     let user_id = if let Some(user) = &user_opt {
@@ -520,9 +514,7 @@ pub fn login_start(
     };
 
     diesel::update(users.find(user_id))
-        .set(users::server_login.eq(Some(
-            server_login_start_result.state.serialize().to_vec(),
-        )))
+        .set(users::server_login.eq(Some(server_login_start_result.state.serialize().to_vec())))
         .returning(User::as_returning())
         .get_result(&mut conn)?;
 
@@ -533,10 +525,9 @@ pub fn login_finish(
     email_param: &str,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<Vec<KeyPairs>,ServerError> {
+) -> Result<Vec<KeyPairs>, ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-
 
     // Load the ServerLogin state from the DB
     let server_login_start_result = {
@@ -553,14 +544,12 @@ pub fn login_finish(
             .execute(&mut conn)
             .map_err(|_| ServerError::Internal)?;
 
-        ServerLogin::deserialize(&server_login_state_bytes)
-            .map_err(|_| ServerError::Internal)?
+        ServerLogin::deserialize(&server_login_state_bytes).map_err(|_| ServerError::Internal)?
     };
 
-    server_login_start_result.finish(
-        client_login_finish_result,
-        ServerLoginParameters::default(),
-    ).map_err(|_| ServerError::Internal)?;
+    server_login_start_result
+        .finish(client_login_finish_result, ServerLoginParameters::default())
+        .map_err(|_| ServerError::Internal)?;
 
     // Check if the account is verified
     let user = users::table
@@ -570,7 +559,7 @@ pub fn login_finish(
         .ok_or(ServerError::Internal)?;
 
     if !user.email_verified {
-            return Err(ServerError::Forbidden);
+        return Err(ServerError::Forbidden);
     }
 
     // Get all the keys of the user
@@ -631,16 +620,16 @@ pub async fn delete_user(
     user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
-    mailer: &lettre::SmtpTransport
+    mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
-    use crate::schema::users;
-    use crate::schema::saved_transfers;
     use crate::schema::key_pairs;
     use crate::schema::link_transfers;
     use crate::schema::reset_tokens;
+    use crate::schema::saved_transfers;
+    use crate::schema::users;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-    
+
     let user = users::table
         .filter(users::id.eq(user_id_param))
         .first::<User>(&mut conn)
@@ -648,7 +637,6 @@ pub async fn delete_user(
         .ok_or(ServerError::Internal)?;
 
     let orphaned_file_ids = conn.transaction::<Vec<Uuid>, ServerError, _>(|conn| {
-
         // Delete all saved transfers of the user
         diesel::delete(saved_transfers.filter(saved_transfers::owner_id.eq(user_id_param)))
             .execute(conn)
@@ -701,14 +689,11 @@ pub async fn delete_user(
             .await
             .map_err(|_| ServerError::Internal)?;
     }
-    
+
     // Send confirmation email to the user
-    server::mail::send_account_deletion_email(
-        user.email.as_str(),
-        mailer,
-    )
+    server::mail::send_account_deletion_email(user.email.as_str(), mailer)
         .map_err(|_| ServerError::Internal)?;
-    
+
     Ok(())
 }
 
@@ -734,11 +719,11 @@ fn delete_old_keys_for_user(
                     SELECT 1
                     FROM link_transfers
                     WHERE sender_key_id = key_pairs.id
-                )"
-            ))
+                )",
+            )),
     )
-        .execute(conn)
-        .map_err(|_| ServerError::Internal)?;
+    .execute(conn)
+    .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
@@ -747,12 +732,11 @@ fn delete_old_keys_for_user(
 /// Add Key
 ///
 
-pub fn add_key (
+pub fn add_key(
     user_id_param: Uuid,
     key: NewKeyPairsDecoded,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<Vec<KeyPairs>, ServerError> {
-
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let new_key = NewKeyPairs {
@@ -772,7 +756,6 @@ pub fn add_key (
     };
 
     let transaction_result = conn.transaction::<Vec<KeyPairs>, ServerError, _>(|conn| {
-
         // Insert the new key
         diesel::insert_into(crate::schema::key_pairs::table)
             .values(&new_key)
@@ -830,8 +813,12 @@ pub fn get_pub_key(
     Ok((
         keys.id,
         user.email.clone(),
-        keys.enc_public_key.try_into().map_err(|_| ServerError::Internal)?,
-        keys.sign_public_key.try_into().map_err(|_| ServerError::Internal)?,
+        keys.enc_public_key
+            .try_into()
+            .map_err(|_| ServerError::Internal)?,
+        keys.sign_public_key
+            .try_into()
+            .map_err(|_| ServerError::Internal)?,
     ))
 }
 
@@ -853,8 +840,12 @@ pub fn get_pub_key_user(
 
     Ok((
         keys.id,
-        keys.enc_public_key.try_into().map_err(|_| ServerError::Internal)?,
-        keys.sign_public_key.try_into().map_err(|_| ServerError::Internal)?,
+        keys.enc_public_key
+            .try_into()
+            .map_err(|_| ServerError::Internal)?,
+        keys.sign_public_key
+            .try_into()
+            .map_err(|_| ServerError::Internal)?,
     ))
 }
 
@@ -877,8 +868,8 @@ pub fn verify_sender_key(
             .filter(key_pairs::owner_id.eq(user_id_param))
             .filter(key_pairs::is_active.eq(true)),
     ))
-        .get_result::<bool>(&mut conn)
-        .map_err(|_| ServerError::Internal)?;
+    .get_result::<bool>(&mut conn)
+    .map_err(|_| ServerError::Internal)?;
 
     if !owns_key {
         // Same error whether the key doesn't exist or belongs to someone else
@@ -897,16 +888,16 @@ pub fn get_saved_transfers(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<Vec<SavedTransfer>, ServerError> {
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
-    
+
     let transfers = crate::schema::saved_transfers::table
         .filter(crate::schema::saved_transfers::owner_id.eq(user_id_param))
         .load::<SavedTransfer>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
-    
+
     Ok(transfers)
 }
 
-pub fn add_saved_transfer (
+pub fn add_saved_transfer(
     user_id_param: Uuid,
     nonce_transfer_id_param: Vec<u8>,
     enc_transfer_id_param: Vec<u8>,
@@ -937,7 +928,7 @@ pub fn add_saved_transfer (
     Ok(())
 }
 
-pub fn delete_saved_transfer (
+pub fn delete_saved_transfer(
     user_id_param: Uuid,
     saved_transfer_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
@@ -982,7 +973,10 @@ pub fn activate_subscription(
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    info!("Activated subscription for user {} with plan {}", user_id, plan);
+    info!(
+        "Activated subscription for user {} with plan {}",
+        user_id, plan
+    );
 
     // Send email notification to the user
     let email = users::table
@@ -991,10 +985,7 @@ pub fn activate_subscription(
         .first::<String>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    server::mail::send_subscription_started_email(
-        email.as_str(),
-        &mailer,
-    )
+    server::mail::send_subscription_started_email(email.as_str(), &mailer)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
@@ -1027,10 +1018,7 @@ pub fn deactivate_subscription(
         .first::<String>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    server::mail::send_subscription_ended_email(
-        email.as_str(),
-        &mailer,
-    )
+    server::mail::send_subscription_ended_email(email.as_str(), &mailer)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
@@ -1047,7 +1035,8 @@ pub fn update_subscription_end(
 
     diesel::update(users.find(user_id))
         .set(
-            crate::schema::users::current_period_end.eq::<Option<chrono::DateTime<chrono::Utc>>>(Some(current_period_end))
+            crate::schema::users::current_period_end
+                .eq::<Option<chrono::DateTime<chrono::Utc>>>(Some(current_period_end)),
         )
         .execute(&mut conn)
         .map_err(|_| ServerError::Internal)?;
@@ -1064,7 +1053,7 @@ pub fn update_subscription_end(
         current_period_end.to_string().as_str(),
         &mailer,
     )
-        .map_err(|_| ServerError::Internal)?;
+    .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
