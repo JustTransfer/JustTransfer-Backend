@@ -1,0 +1,51 @@
+name: Test
+
+on:
+  pull_request:
+
+jobs:
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: justtransfer
+          POSTGRES_PASSWORD: justtransfer
+          POSTGRES_DB: justtransfer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U justtransfer -d justtransfer_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      # Test-only variables, so the suite never picks up an application database.
+      TEST_DATABASE_URL: postgres://justtransfer:justtransfer@localhost:5432/justtransfer_test
+      TEST_S3_URL: http://localhost:9000
+      TEST_S3_ACCESS_KEY: justtransfer
+      TEST_S3_SECRET_KEY: justtransfer-test-password
+    steps:
+      - uses: actions/checkout@v6
+      # Service containers cannot be given a command, and MinIO needs `server /data`.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9000:9000 \
+            -e MINIO_ROOT_USER="$TEST_S3_ACCESS_KEY" \
+            -e MINIO_ROOT_PASSWORD="$TEST_S3_SECRET_KEY" \
+            minio/minio:RELEASE.2025-04-22T22-12-26Z server /data
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:9000/minio/health/live && exit 0
+            sleep 1
+          done
+          docker logs minio
+          exit 1
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets --all-features
+      - run: cargo test --all-targets
