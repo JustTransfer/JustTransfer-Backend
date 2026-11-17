@@ -527,7 +527,10 @@ fn finish_body(upload: &Upload, receiver: Option<&str>, signing_key: Option<Uuid
     })
 }
 
-async fn link_login(client: &mut TestClient, id: Uuid) -> StatusCode {
+/// Logs into a transfer with `PASSWORD`. For a missing transfer the server
+/// answers with a decoy that the client cannot finish, which counts as a
+/// failed login.
+async fn link_login(client: &mut TestClient, id: Uuid) -> bool {
     let (state, request) = opaque_login_start(PASSWORD);
     let response = client
         .post(
@@ -538,14 +541,16 @@ async fn link_login(client: &mut TestClient, id: Uuid) -> StatusCode {
     assert_eq!(response.status, StatusCode::OK);
     let server_response =
         CredentialResponse::<Cs>::deserialize(&unb64(&response.json["result"])).unwrap();
-    let finalization = opaque_login_finish(state, PASSWORD, server_response).unwrap();
-    client
+    let Ok(finalization) = opaque_login_finish(state, PASSWORD, server_response) else {
+        return false;
+    };
+    let end = client
         .post(
             &format!("/api/link/message/{id}/login/end"),
             json!({"client_login_finish_result": b64(finalization.serialize())}),
         )
-        .await
-        .status
+        .await;
+    end.status == StatusCode::OK
 }
 
 #[tokio::test]
@@ -609,7 +614,7 @@ async fn anonymous_transfer_upload_and_single_download() {
         receiver.get(&metadata_uri).await.status,
         StatusCode::UNAUTHORIZED
     );
-    assert_eq!(link_login(&mut receiver, upload.id).await, StatusCode::OK);
+    assert!(link_login(&mut receiver, upload.id).await);
     let other = format!("/api/link/message/{}/metadata", Uuid::new_v4());
     assert_eq!(
         receiver.get(&other).await.status,
@@ -632,7 +637,7 @@ async fn anonymous_transfer_upload_and_single_download() {
 
     // max_downloads = 1: the transfer is gone for the next receiver.
     let mut late = sender.fresh();
-    assert_ne!(link_login(&mut late, upload.id).await, StatusCode::OK);
+    assert!(!link_login(&mut late, upload.id).await);
     assert!(load_link(&pool, upload.id).is_none());
 }
 

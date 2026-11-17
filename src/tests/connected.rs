@@ -490,13 +490,15 @@ async fn adding_a_key_revokes_the_others_and_prunes_unused_revoked_keys() {
     let active: Vec<_> = keys.iter().filter(|k| k.is_active).collect();
     assert_eq!(active.len(), 1);
     assert!(![user.key_id, referenced_revoked].contains(&active[0].id));
-    let previous = keys.iter().find(|k| k.id == user.key_id).unwrap();
-    assert!(!previous.is_active && previous.revoked_at.is_some());
     assert!(
         ids.contains(&referenced_revoked),
         "still verifies a transfer"
     );
     assert!(!ids.contains(&unused_revoked), "pruned");
+    assert!(
+        !ids.contains(&user.key_id),
+        "the previous active key is revoked, then pruned since no transfer uses it"
+    );
 }
 
 #[tokio::test]

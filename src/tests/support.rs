@@ -11,7 +11,10 @@
 //! - `TEST_S3_URL`, `TEST_S3_ACCESS_KEY`, `TEST_S3_SECRET_KEY` and optionally
 //!   `TEST_S3_BUCKET`: a disposable S3-compatible bucket.
 //!
-//! When unset, those tests are skipped locally; under CI (`CI` set) they fail.
+//! Both are reset at the start of every test run (schema dropped, bucket
+//! emptied), so their names must contain "test".
+//!
+//! When unset, those tests fail.
 
 use std::sync::Once;
 
@@ -148,20 +151,56 @@ pub fn init_config() {
 ///
 
 static DB: tokio::sync::OnceCell<Option<DbPool>> = tokio::sync::OnceCell::const_new();
-static S3: tokio::sync::OnceCell<Option<aws_sdk_s3::Client>> = tokio::sync::OnceCell::const_new();
+/// Connection settings of the prepared test bucket. Only the settings are
+/// shared: every `#[tokio::test]` runs on its own runtime and a client's pooled
+/// connections die with the runtime that opened them, so each test builds its
+/// own client.
+static S3: tokio::sync::OnceCell<Option<S3Settings>> = tokio::sync::OnceCell::const_new();
+
+#[derive(Clone)]
+struct S3Settings {
+    url: String,
+    access: String,
+    secret: String,
+}
 
 /// Serialises tests that read or write state shared by every row: monthly
 /// counters, expired-transfer cleanup, and anything those would disturb.
 pub static GLOBAL_STATE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-/// Migrated test database with the dummy user and dummy transfer in place.
+/// Resetting wipes data, so it is only allowed on resources whose name says
+/// they are disposable.
+fn assert_disposable(kind: &str, name: &str) {
+    assert!(
+        name.to_lowercase().contains("test"),
+        "refusing to reset {kind} `{name}`: its name must contain \"test\""
+    );
+}
+
+fn database_name(url: &str) -> &str {
+    let path = url.rsplit('/').next().unwrap_or_default();
+    path.split('?').next().unwrap_or_default()
+}
+
+/// Test database, reset once per test binary: the schema is dropped, then
+/// migrations, the dummy user and the dummy transfer are recreated.
 pub async fn test_db() -> Option<DbPool> {
     init_config();
     DB.get_or_init(|| async {
-        if std::env::var("TEST_DATABASE_URL").is_err() {
+        let Ok(url) = std::env::var("TEST_DATABASE_URL") else {
             assert!(!on_ci(), "TEST_DATABASE_URL must be set on CI");
             return None;
-        }
+        };
+        assert_disposable("database", database_name(&url));
+        let mut conn = PgConnection::establish(&url).expect("connect to the test database");
+        diesel::sql_query("DROP SCHEMA public CASCADE")
+            .execute(&mut conn)
+            .expect("drop test schema");
+        diesel::sql_query("CREATE SCHEMA public")
+            .execute(&mut conn)
+            .expect("recreate test schema");
+        drop(conn);
+
         let pool = crate::server::init::server_init_db().expect("migrate test database");
         crate::server::init::generate_dummy_user(&pool)
             .await
@@ -175,35 +214,80 @@ pub async fn test_db() -> Option<DbPool> {
     .clone()
 }
 
-/// S3 client for the test bucket, creating the bucket on first use.
+/// S3 client for the test bucket. On first use per test binary the bucket is
+/// created if missing, then emptied (objects and pending multipart uploads).
 pub async fn test_s3() -> Option<aws_sdk_s3::Client> {
     init_config();
-    S3.get_or_init(|| async {
-        let (Ok(url), Ok(access), Ok(secret)) = (
-            std::env::var("TEST_S3_URL"),
-            std::env::var("TEST_S3_ACCESS_KEY"),
-            std::env::var("TEST_S3_SECRET_KEY"),
-        ) else {
-            assert!(
-                !on_ci(),
-                "TEST_S3_URL/TEST_S3_ACCESS_KEY/TEST_S3_SECRET_KEY must be set on CI"
-            );
-            return None;
-        };
-        let client = s3_client(&url, &access, &secret);
-        let bucket = S3_BUCKET_NAME.get().unwrap();
-        if client.head_bucket().bucket(bucket).send().await.is_err() {
+    let settings = S3
+        .get_or_init(|| async {
+            let (Ok(url), Ok(access), Ok(secret)) = (
+                std::env::var("TEST_S3_URL"),
+                std::env::var("TEST_S3_ACCESS_KEY"),
+                std::env::var("TEST_S3_SECRET_KEY"),
+            ) else {
+                assert!(
+                    !on_ci(),
+                    "TEST_S3_URL/TEST_S3_ACCESS_KEY/TEST_S3_SECRET_KEY must be set on CI"
+                );
+                return None;
+            };
+            let bucket = S3_BUCKET_NAME.get().unwrap();
+            assert_disposable("bucket", bucket);
+            let client = s3_client(&url, &access, &secret);
+            if client.head_bucket().bucket(bucket).send().await.is_err() {
+                client
+                    .create_bucket()
+                    .bucket(bucket)
+                    .send()
+                    .await
+                    .expect("create test bucket");
+            }
+            empty_bucket(&client, bucket).await;
+            Some(S3Settings {
+                url,
+                access,
+                secret,
+            })
+        })
+        .await
+        .clone()?;
+    Some(s3_client(&settings.url, &settings.access, &settings.secret))
+}
+
+async fn empty_bucket(client: &aws_sdk_s3::Client, bucket: &str) {
+    let uploads = client
+        .list_multipart_uploads()
+        .bucket(bucket)
+        .send()
+        .await
+        .expect("list pending uploads");
+    for upload in uploads.uploads() {
+        client
+            .abort_multipart_upload()
+            .bucket(bucket)
+            .key(upload.key().unwrap_or_default())
+            .upload_id(upload.upload_id().unwrap_or_default())
+            .send()
+            .await
+            .expect("abort pending upload");
+    }
+
+    let mut pages = client
+        .list_objects_v2()
+        .bucket(bucket)
+        .into_paginator()
+        .send();
+    while let Some(page) = pages.next().await {
+        for object in page.expect("list test objects").contents() {
             client
-                .create_bucket()
+                .delete_object()
                 .bucket(bucket)
+                .key(object.key().unwrap_or_default())
                 .send()
                 .await
-                .expect("create test bucket");
+                .expect("delete test object");
         }
-        Some(client)
-    })
-    .await
-    .clone()
+    }
 }
 
 fn s3_client(url: &str, access: &str, secret: &str) -> aws_sdk_s3::Client {
@@ -255,8 +339,7 @@ macro_rules! require_db {
         match $crate::tests::support::test_db().await {
             Some(pool) => pool,
             None => {
-                panic!("skipped: TEST_DATABASE_URL is not set");
-                return;
+                panic!("TEST_DATABASE_URL is not set");
             }
         }
     };
@@ -267,8 +350,7 @@ macro_rules! require_s3 {
         match $crate::tests::support::test_s3().await {
             Some(s3) => s3,
             None => {
-                panic!("skipped: TEST_S3_URL is not set");
-                return;
+                panic!("TEST_S3_URL (and keys) are not set");
             }
         }
     };
