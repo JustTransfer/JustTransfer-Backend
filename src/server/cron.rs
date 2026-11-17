@@ -149,3 +149,40 @@ pub fn start_daily_cleanup_task(app_state: AppState) -> Result<(), ServerError> 
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn at(y: i32, m: u32, d: u32, h: u32, min: u32, s: u32) -> chrono::DateTime<Utc> {
+        Utc.with_ymd_and_hms(y, m, d, h, min, s).unwrap()
+    }
+
+    #[test]
+    fn monthly_run_is_the_first_of_next_month_at_midnight() {
+        let cases = [
+            (at(2026, 1, 15, 12, 0, 0), at(2026, 2, 1, 0, 0, 0)),
+            (at(2026, 1, 31, 23, 59, 59), at(2026, 2, 1, 0, 0, 0)),
+            // Exactly on a run instant: the next run is a month later, not now.
+            (at(2026, 3, 1, 0, 0, 0), at(2026, 4, 1, 0, 0, 0)),
+            (at(2026, 12, 31, 23, 59, 59), at(2027, 1, 1, 0, 0, 0)),
+        ];
+        for (now, expected) in cases {
+            assert_eq!(next_monthly_run(now), expected, "now = {now}");
+        }
+    }
+
+    #[test]
+    fn daily_run_is_the_next_midnight() {
+        let cases = [
+            (at(2026, 1, 1, 12, 30, 0), at(2026, 1, 2, 0, 0, 0)),
+            (at(2026, 1, 1, 0, 0, 0), at(2026, 1, 2, 0, 0, 0)),
+            (at(2026, 2, 28, 23, 59, 59), at(2026, 3, 1, 0, 0, 0)),
+            (at(2028, 2, 28, 10, 0, 0), at(2028, 2, 29, 0, 0, 0)),
+            (at(2026, 12, 31, 18, 0, 0), at(2027, 1, 1, 0, 0, 0)),
+        ];
+        for (now, expected) in cases {
+            assert_eq!(next_daily_run(now), expected, "now = {now}");
+        }
+    }
+}

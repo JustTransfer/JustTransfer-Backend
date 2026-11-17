@@ -82,3 +82,62 @@ pub fn validate_optional_email(email: &str) -> Result<(), ValidationError> {
 
     validate_email(email)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    #[test]
+    fn email_validation() {
+        for email in ["test@example.com", "user+tag@example.co.uk"] {
+            assert!(validate_email(email).is_ok(), "{email}");
+        }
+        for email in ["not-an-email", "", "@example.com", "user@"] {
+            assert!(validate_email(email).is_err(), "{email}");
+        }
+    }
+
+    #[test]
+    fn optional_email_rejects_blank_and_invalid_values() {
+        assert!(validate_optional_email("receiver@example.com").is_ok());
+        for email in ["", "   ", "invalid"] {
+            assert!(validate_optional_email(email).is_err(), "{email:?}");
+        }
+    }
+
+    #[test]
+    fn file_size_must_be_positive_and_within_limit() {
+        assert!(validate_file_size_with_limit(1, 100).is_ok());
+        assert!(validate_file_size_with_limit(100, 100).is_ok());
+        for size in [i64::MIN, -1, 0, 101] {
+            assert!(validate_file_size_with_limit(size, 100).is_err(), "{size}");
+        }
+    }
+
+    #[test]
+    fn file_size_uses_the_premium_limit() {
+        crate::tests::support::init_config();
+        let max = *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap();
+        assert!(validate_file_size(max).is_ok());
+        assert!(validate_file_size(max + 1).is_err());
+    }
+
+    proptest! {
+        #[test]
+        fn int_param_accepts_exactly_0_to_max(value in any::<i32>()) {
+            let expected = (0..=MAX_VALUE_INT).contains(&value);
+            prop_assert_eq!(validate_int_param(value).is_ok(), expected);
+        }
+
+        #[test]
+        fn int_param_64_accepts_exactly_0_to_max(value in prop_oneof![
+            any::<i64>(),
+            (MAX_VALUE_INT_FILE_SIZE - 2)..=(MAX_VALUE_INT_FILE_SIZE + 2),
+            -2i64..=2,
+        ]) {
+            let expected = (0..=MAX_VALUE_INT_FILE_SIZE).contains(&value);
+            prop_assert_eq!(validate_int_param_64(value).is_ok(), expected);
+        }
+    }
+}

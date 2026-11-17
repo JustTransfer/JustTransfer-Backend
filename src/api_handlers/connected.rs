@@ -29,70 +29,6 @@ pub struct RegisterUserStart {
     client_registration_start: String,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use validator::Validate;
-
-    fn encoded() -> String {
-        "A".repeat(MIN_LENGTH_BASE64 as usize)
-    }
-
-    #[test]
-    fn should_validate_login_and_reset_email_inputs() {
-        let login = LoginStart {
-            email: "not-an-email".to_owned(),
-            client_registration_start: encoded(),
-        };
-        assert!(login.validate().is_err());
-
-        let reset = ResetPasswordRequest {
-            email: "user@example.com".to_owned(),
-        };
-        assert!(reset.validate().is_ok());
-    }
-
-    #[test]
-    fn should_reject_malformed_reset_payloads() {
-        let payload = ResetPasswordEnd {
-            client_registration_finish: "short".to_owned(),
-            cpriv_enc: encoded(),
-            nonce_priv_enc: encoded(),
-            pub_enc: encoded(),
-            cpriv_sign: encoded(),
-            nonce_priv_sign: encoded(),
-            pub_sign: encoded(),
-        };
-        assert!(payload.validate().is_err());
-    }
-
-    #[test]
-    fn should_reject_incomplete_key_payloads() {
-        let payload = AddKeyParam {
-            enc_public_key: encoded(),
-            enc_nonce_private_key: encoded(),
-            enc_cipher_private_key: "short".to_owned(),
-            sign_public_key: encoded(),
-            sign_nonce_private_key: encoded(),
-            sign_cipher_private_key: encoded(),
-        };
-        assert!(payload.validate().is_err());
-    }
-
-    #[test]
-    fn should_validate_saved_transfer_payload_shape() {
-        let payload = AddTransfer {
-            nonce_transfer_id: encoded(),
-            enc_transfer_id: encoded(),
-            nonce_password: encoded(),
-            enc_password: encoded(),
-            nonce_auth_key: Some(encoded()),
-            enc_auth_key: Some(encoded()),
-        };
-        assert!(payload.validate().is_ok());
-    }
-}
-
 #[derive(Serialize)]
 pub struct RegisterUserStartResult {
     result: String,
@@ -824,4 +760,158 @@ pub async fn delete_saved_transfer(
     )?;
 
     Ok(StatusCode::OK)
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::support::{assert_validation, encoded, too_long};
+
+    #[test]
+    fn register_and_login_payload_validation() {
+        assert_validation::<RegisterUserStart>(
+            || RegisterUserStart {
+                email: "user@example.com".to_owned(),
+                client_registration_start: encoded(),
+            },
+            &[
+                ("invalid email", |p| p.email = "not-an-email".into()),
+                ("short request", |p| p.client_registration_start = "short".into()),
+                ("long request", |p| p.client_registration_start = too_long()),
+            ],
+        );
+        assert_validation::<LoginStart>(
+            || LoginStart {
+                email: "user@example.com".to_owned(),
+                client_registration_start: encoded(),
+            },
+            &[("invalid email", |p| p.email = "nope".into())],
+        );
+        assert_validation::<LoginEnd>(
+            || LoginEnd {
+                email: "user@example.com".to_owned(),
+                client_login_finish_result: encoded(),
+            },
+            &[
+                ("invalid email", |p| p.email = "nope".into()),
+                ("short finalization", |p| p.client_login_finish_result = "short".into()),
+            ],
+        );
+    }
+
+    #[test]
+    fn register_end_requires_every_key_field() {
+        assert_validation::<RegisterUserEnd>(
+            || RegisterUserEnd {
+                email: "user@example.com".to_owned(),
+                client_registration_finish: encoded(),
+                cpriv_enc: encoded(),
+                nonce_priv_enc: encoded(),
+                pub_enc: encoded(),
+                cpriv_sign: encoded(),
+                nonce_priv_sign: encoded(),
+                pub_sign: encoded(),
+            },
+            &[
+                ("invalid email", |p| p.email = "nope".into()),
+                ("registration", |p| p.client_registration_finish = "short".into()),
+                ("cpriv_enc", |p| p.cpriv_enc = "short".into()),
+                ("nonce_priv_enc", |p| p.nonce_priv_enc = "short".into()),
+                ("pub_enc", |p| p.pub_enc = "short".into()),
+                ("cpriv_sign", |p| p.cpriv_sign = "short".into()),
+                ("nonce_priv_sign", |p| p.nonce_priv_sign = "short".into()),
+                ("pub_sign", |p| p.pub_sign = too_long()),
+            ],
+        );
+    }
+
+    #[test]
+    fn password_reset_payload_validation() {
+        assert_validation::<ResetPasswordRequest>(
+            || ResetPasswordRequest {
+                email: "user@example.com".to_owned(),
+            },
+            &[("invalid email", |p| p.email = "nope".into())],
+        );
+        assert_validation::<ResetPasswordEnd>(
+            || ResetPasswordEnd {
+                client_registration_finish: encoded(),
+                cpriv_enc: encoded(),
+                nonce_priv_enc: encoded(),
+                pub_enc: encoded(),
+                cpriv_sign: encoded(),
+                nonce_priv_sign: encoded(),
+                pub_sign: encoded(),
+            },
+            &[
+                ("registration", |p| p.client_registration_finish = "short".into()),
+                ("cpriv_enc", |p| p.cpriv_enc = "short".into()),
+                ("pub_sign", |p| p.pub_sign = "short".into()),
+            ],
+        );
+    }
+
+    #[test]
+    fn password_update_needs_at_least_one_key() {
+        assert_validation::<RegisterUserEndUpdate>(
+            || RegisterUserEndUpdate {
+                client_registration_finish: encoded(),
+                keys: vec![KeyPairsEncodedUpdate {
+                    id: Uuid::nil(),
+                    enc_public_key: encoded(),
+                    enc_nonce_private_key: encoded(),
+                    enc_cipher_private_key: encoded(),
+                    sign_public_key: encoded(),
+                    sign_nonce_private_key: encoded(),
+                    sign_cipher_private_key: encoded(),
+                }],
+            },
+            &[
+                ("no keys", |p| p.keys.clear()),
+                ("registration", |p| p.client_registration_finish = "short".into()),
+            ],
+        );
+    }
+
+    #[test]
+    fn add_key_requires_every_key_field() {
+        assert_validation::<AddKeyParam>(
+            || AddKeyParam {
+                enc_public_key: encoded(),
+                enc_nonce_private_key: encoded(),
+                enc_cipher_private_key: encoded(),
+                sign_public_key: encoded(),
+                sign_nonce_private_key: encoded(),
+                sign_cipher_private_key: encoded(),
+            },
+            &[
+                ("enc_public_key", |p| p.enc_public_key = "short".into()),
+                ("enc_nonce_private_key", |p| p.enc_nonce_private_key = "short".into()),
+                ("enc_cipher_private_key", |p| p.enc_cipher_private_key = "short".into()),
+                ("sign_public_key", |p| p.sign_public_key = "short".into()),
+                ("sign_nonce_private_key", |p| p.sign_nonce_private_key = "short".into()),
+                ("sign_cipher_private_key", |p| p.sign_cipher_private_key = too_long()),
+            ],
+        );
+    }
+
+    #[test]
+    fn saved_transfer_payload_validation() {
+        assert_validation::<AddTransfer>(
+            || AddTransfer {
+                nonce_transfer_id: encoded(),
+                enc_transfer_id: encoded(),
+                nonce_password: encoded(),
+                enc_password: encoded(),
+                nonce_auth_key: None,
+                enc_auth_key: None,
+            },
+            &[
+                ("nonce_transfer_id", |p| p.nonce_transfer_id = "short".into()),
+                ("enc_transfer_id", |p| p.enc_transfer_id = "short".into()),
+                ("nonce_password", |p| p.nonce_password = "short".into()),
+                ("enc_password", |p| p.enc_password = too_long()),
+                ("short optional auth key", |p| p.enc_auth_key = Some("short".into())),
+            ],
+        );
+    }
 }

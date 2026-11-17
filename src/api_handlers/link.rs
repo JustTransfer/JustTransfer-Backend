@@ -44,102 +44,6 @@ pub struct RootResponse {
     max_transfer_month_connected_premium: i64,
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tests::encoded;
-    use validator::Validate;
-
-    #[test]
-    fn should_reject_short_opaque_login_payloads() {
-        let payload = LinkLoginStart {
-            client_login_start: "short".to_owned(),
-        };
-        assert!(payload.validate().is_err());
-    }
-
-    #[test]
-    fn should_accept_valid_upload_metadata() {
-        let _ = MAX_FILE_SIZE_CONNECTED_PREMIUM.set(MAX_VALUE_INT_FILE_SIZE);
-        let payload = UploadLinkMessageFinish {
-            id: Uuid::nil(),
-            client_registration_finish: encoded(),
-            c_enc_key: encoded(),
-            nonce_enc_key: encoded(),
-            c_mac_key: encoded(),
-            nonce_mac_key: encoded(),
-            cfilename: encoded(),
-            nonce_filename: encoded(),
-            max_downloads: 1,
-            lifetime: 1,
-            creation_time: chrono::Utc::now(),
-            file_size: 1,
-        };
-        assert!(payload.validate().is_ok());
-    }
-
-    #[test]
-    fn should_reject_invalid_upload_metadata_boundaries() {
-        let _ = MAX_FILE_SIZE_CONNECTED_PREMIUM.set(MAX_VALUE_INT_FILE_SIZE);
-        let mut payload = UploadLinkMessageFinish {
-            id: Uuid::nil(),
-            client_registration_finish: encoded(),
-            c_enc_key: encoded(),
-            nonce_enc_key: encoded(),
-            c_mac_key: encoded(),
-            nonce_mac_key: encoded(),
-            cfilename: encoded(),
-            nonce_filename: encoded(),
-            max_downloads: 0,
-            lifetime: 0,
-            creation_time: chrono::Utc::now(),
-            file_size: 0,
-        };
-        assert!(payload.validate().is_err());
-
-        payload.max_downloads = MAX_VALUE_INT_FILE_SIZE + 1;
-        payload.lifetime = MAX_VALUE_INT_FILE_SIZE + 1;
-        payload.file_size = MAX_VALUE_INT_FILE_SIZE + 1;
-        assert!(payload.validate().is_err());
-    }
-
-    #[test]
-    fn should_require_complete_signature_metadata() {
-        let payload = UploadLinkMessageFinishMultipart {
-            upload_id: "upload".to_owned(),
-            etags: vec!["etag".to_owned()],
-            hash_file: encoded(),
-            mac: encoded(),
-            receiver_email: None,
-            is_signed: false,
-            sender_key_id: Some(Uuid::nil()),
-            signature_metadata: None,
-            signature: None,
-        };
-        assert!(payload.validate().is_ok());
-        assert!(matches!(
-            (&payload.sender_key_id, &payload.signature_metadata, &payload.signature),
-            (Some(_), None, None)
-        ));
-    }
-
-    #[test]
-    fn should_reject_invalid_update_values() {
-        let payload = UpdateLinkMessage {
-            auth_key: Uuid::nil(),
-            cfilename: encoded(),
-            nonce_filename: encoded(),
-            max_downloads: -1,
-            lifetime: 0,
-            mac: encoded(),
-            sender_key_id: None,
-            signature_metadata: None,
-            signature: None,
-        };
-        assert!(payload.validate().is_err());
-    }
-}
-
 #[instrument(err(Debug))]
 pub async fn config() -> Result<impl IntoResponse, ApiError> {
     Ok((
@@ -527,6 +431,30 @@ pub struct UploadLinkMessageFinishMultipartResult {
     auth_key: Uuid,
 }
 
+/// Decides which signing key, if any, an upload may be attached to.
+///
+/// Signing is reserved to connected users and requires `sender_key_id`,
+/// `signature_metadata` and `signature` together, or none of them. The fields
+/// are only trusted when the request is both connected and explicitly marked
+/// as signed; any other combination is invalid input.
+pub(crate) fn resolve_sender_key(
+    is_connected: bool,
+    is_signed: bool,
+    sender_key_id: Option<Uuid>,
+    signature_metadata: Option<&String>,
+    signature: Option<&String>,
+) -> Result<Option<Uuid>, ApiError> {
+    if is_signed && !is_connected {
+        return Err(ApiError::Forbidden);
+    }
+
+    match (sender_key_id, signature_metadata, signature) {
+        (Some(key_id), Some(_), Some(_)) if is_connected && is_signed => Ok(Some(key_id)),
+        (None, None, None) => Ok(None),
+        _ => Err(ApiError::InputValidation),
+    }
+}
+
 #[instrument(skip_all, fields(file_id, claims_session.id), err(Debug))]
 pub async fn upload_link_message_finish_multipart(
     Path(params): Path<FinishMultipartParams>,
@@ -565,25 +493,13 @@ pub async fn upload_link_message_finish_multipart(
         None
     };
     
-    // Authorize signing only for connected users
-    if payload.is_signed && !is_connected {
-        return Err(ApiError::Forbidden);
-    }
-
-    // Signing requires all three fields together, or none at all — and the
-    // fields are only trusted when the request is both connected and
-    // explicitly marked as signed. Any other combination is invalid input.
-    let sender_key_id = match (&payload.sender_key_id, &payload.signature_metadata, &payload.signature) {
-        (Some(_), Some(_), Some(_)) => {
-            if is_connected && payload.is_signed {
-                payload.sender_key_id
-            } else {
-                return Err(ApiError::InputValidation);
-            }
-        }
-        (None, None, None) => None,
-        _ => return Err(ApiError::InputValidation),
-    };
+    let sender_key_id = resolve_sender_key(
+        is_connected,
+        payload.is_signed,
+        payload.sender_key_id,
+        payload.signature_metadata.as_ref(),
+        payload.signature.as_ref(),
+    )?;
 
     // Verify the signing key belongs to the authenticated user
     if let Some(key_id) = sender_key_id {
@@ -847,4 +763,144 @@ pub async fn link_message_password_change_end(
     )?;
 
     Ok((StatusCode::OK, Json(())))
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::support::{assert_validation, encoded, too_long};
+
+    #[test]
+    fn upload_payload_validation() {
+        assert_validation::<UploadLinkMessageFinish>(
+            || UploadLinkMessageFinish {
+                id: Uuid::nil(),
+                client_registration_finish: encoded(),
+                c_enc_key: encoded(),
+                nonce_enc_key: encoded(),
+                c_mac_key: encoded(),
+                nonce_mac_key: encoded(),
+                cfilename: encoded(),
+                nonce_filename: encoded(),
+                max_downloads: 1,
+                lifetime: 1,
+                creation_time: chrono::Utc::now(),
+                file_size: 1,
+            },
+            &[
+                ("short registration", |p| p.client_registration_finish = "short".into()),
+                ("short key", |p| p.c_enc_key = "short".into()),
+                ("short nonce", |p| p.nonce_mac_key = "short".into()),
+                ("long filename", |p| p.cfilename = too_long()),
+                ("negative downloads", |p| p.max_downloads = -1),
+                ("negative lifetime", |p| p.lifetime = -1),
+                ("empty file", |p| p.file_size = 0),
+                ("file over every role limit", |p| {
+                    p.file_size = *MAX_FILE_SIZE_CONNECTED_PREMIUM.get().unwrap() + 1
+                }),
+            ],
+        );
+    }
+
+    #[test]
+    fn finish_payload_validation() {
+        assert_validation::<UploadLinkMessageFinishMultipart>(
+            || UploadLinkMessageFinishMultipart {
+                upload_id: "upload".to_owned(),
+                etags: vec!["etag".to_owned()],
+                hash_file: encoded(),
+                mac: encoded(),
+                receiver_email: Some("receiver@example.com".to_owned()),
+                is_signed: true,
+                sender_key_id: Some(Uuid::nil()),
+                signature_metadata: Some(encoded()),
+                signature: Some(encoded()),
+            },
+            &[
+                ("empty upload id", |p| p.upload_id.clear()),
+                ("no parts", |p| p.etags.clear()),
+                ("short mac", |p| p.mac = "short".into()),
+                ("short hash", |p| p.hash_file = "short".into()),
+                ("blank receiver", |p| p.receiver_email = Some(" ".into())),
+                ("invalid receiver", |p| p.receiver_email = Some("nope".into())),
+                ("short signature", |p| p.signature = Some("short".into())),
+                ("long metadata", |p| p.signature_metadata = Some(too_long())),
+            ],
+        );
+    }
+
+    #[test]
+    fn update_payload_validation() {
+        assert_validation::<UpdateLinkMessage>(
+            || UpdateLinkMessage {
+                auth_key: Uuid::nil(),
+                cfilename: encoded(),
+                nonce_filename: encoded(),
+                max_downloads: 1,
+                lifetime: 1,
+                mac: encoded(),
+                sender_key_id: None,
+                signature_metadata: None,
+                signature: None,
+            },
+            &[
+                ("negative downloads", |p| p.max_downloads = -1),
+                ("negative lifetime", |p| p.lifetime = -1),
+                ("short filename", |p| p.cfilename = "short".into()),
+                ("short mac", |p| p.mac = "short".into()),
+                ("short signature", |p| p.signature = Some("short".into())),
+            ],
+        );
+    }
+
+    #[test]
+    fn password_change_payload_validation() {
+        assert_validation::<LinkMessagePasswordChangeEnd>(
+            || LinkMessagePasswordChangeEnd {
+                auth_key: Uuid::nil(),
+                client_registration_finish: encoded(),
+                c_enc_key: encoded(),
+                nonce_enc_key: encoded(),
+                c_mac_key: encoded(),
+                nonce_mac_key: encoded(),
+            },
+            &[
+                ("short registration", |p| p.client_registration_finish = "short".into()),
+                ("long key", |p| p.c_mac_key = too_long()),
+            ],
+        );
+    }
+
+    #[test]
+    fn sender_key_requires_a_connected_signed_request_with_every_field() {
+        let key = Some(Uuid::from_u128(42));
+        let sig = encoded();
+        let all = (key, Some(&sig), Some(&sig));
+        let none = (None, None, None);
+
+        let resolve = |connected, signed, (k, m, s): (Option<Uuid>, Option<&String>, Option<&String>)| {
+            resolve_sender_key(connected, signed, k, m, s)
+        };
+
+        assert!(matches!(resolve(true, true, all), Ok(k) if k == key));
+        assert!(matches!(resolve(true, false, none), Ok(None)));
+        assert!(matches!(resolve(false, false, none), Ok(None)));
+        // Claiming a signature without fields stores the transfer unsigned.
+        assert!(matches!(resolve(true, true, none), Ok(None)));
+
+        assert!(matches!(resolve(false, true, all), Err(ApiError::Forbidden)));
+        assert!(matches!(resolve(false, true, none), Err(ApiError::Forbidden)));
+        assert!(matches!(resolve(true, false, all), Err(ApiError::InputValidation)));
+        assert!(matches!(resolve(false, false, all), Err(ApiError::InputValidation)));
+        for partial in [
+            (key, None, None),
+            (key, Some(&sig), None),
+            (None, Some(&sig), Some(&sig)),
+            (None, None, Some(&sig)),
+        ] {
+            assert!(
+                matches!(resolve(true, true, partial), Err(ApiError::InputValidation)),
+                "{partial:?}"
+            );
+        }
+    }
 }

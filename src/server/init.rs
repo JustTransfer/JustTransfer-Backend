@@ -98,7 +98,7 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
     Ok(state)
 }
 
-fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, ServerError> {
+pub(crate) fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, ServerError> {
 
     let manager = ConnectionManager::<PgConnection>::new(DATABASE_URL.get().unwrap());
     let pool = r2d2::Pool::builder()
@@ -232,7 +232,7 @@ pub fn get_opaque_settings(
     Ok(server_opaque)
 }
 
-async fn generate_dummy_user(
+pub(crate) async fn generate_dummy_user(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>
 ) -> Result<(), ServerError> {
 
@@ -276,7 +276,7 @@ async fn generate_dummy_user(
     Ok(())
 }
 
-async fn generate_dummy_anonymous_transfer(
+pub(crate) async fn generate_dummy_anonymous_transfer(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>
 ) -> Result<(), ServerError> {
 
