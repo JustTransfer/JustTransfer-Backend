@@ -255,7 +255,7 @@ macro_rules! require_db {
         match $crate::tests::support::test_db().await {
             Some(pool) => pool,
             None => {
-                eprintln!("skipped: TEST_DATABASE_URL is not set");
+                panic!("skipped: TEST_DATABASE_URL is not set");
                 return;
             }
         }
@@ -267,7 +267,7 @@ macro_rules! require_s3 {
         match $crate::tests::support::test_s3().await {
             Some(s3) => s3,
             None => {
-                eprintln!("skipped: TEST_S3_URL is not set");
+                panic!("skipped: TEST_S3_URL is not set");
                 return;
             }
         }

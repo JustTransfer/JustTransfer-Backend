@@ -584,6 +584,23 @@ async fn anonymous_transfer_upload_and_single_download() {
         Uuid::nil().to_string(),
         "anonymous never gets the auth key"
     );
+    assert_ne!(
+        load_link(&pool, upload.id).unwrap().auth_key,
+        Uuid::nil(),
+        "the stored key is random, so the nil placeholder cannot act as it"
+    );
+    assert_eq!(
+        sender
+            .send(
+                Method::DELETE,
+                &format!("/api/link/message/{}", upload.id),
+                Some(json!({"auth_key": Uuid::nil()})),
+            )
+            .await
+            .status,
+        StatusCode::UNAUTHORIZED,
+        "owner actions need an account"
+    );
 
     // The receiver needs the password before seeing anything.
     let mut receiver = sender.fresh();
@@ -697,4 +714,28 @@ async fn signed_transfer_from_a_connected_user() {
         .await;
     assert_eq!(delete.status, StatusCode::OK);
     assert!(load_link(&pool, upload.id).is_none());
+}
+
+#[tokio::test]
+async fn connected_user_gets_the_auth_key_without_signing() {
+    let pool = require_db!();
+    let s3 = require_s3!();
+    let _guard = GLOBAL_STATE.lock().await; // finishing bumps the monthly counter
+    let mut client = TestClient::new(test_app(app_state(pool.clone(), s3)));
+    signed_in(&mut client, &pool).await;
+
+    let upload = upload(&mut client, &[2u8; 32], 1, 1).await;
+    let finished = client
+        .post(
+            &format!(
+                "/api/link/message/{}/uploadfinish/{}",
+                upload.id, upload.file_id
+            ),
+            finish_body(&upload, None, None),
+        )
+        .await;
+    assert_eq!(finished.status, StatusCode::OK);
+    let auth_key: Uuid = finished.json["auth_key"].as_str().unwrap().parse().unwrap();
+    assert_ne!(auth_key, Uuid::nil());
+    assert_eq!(auth_key, load_link(&pool, upload.id).unwrap().auth_key);
 }

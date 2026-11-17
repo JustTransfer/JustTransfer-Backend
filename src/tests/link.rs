@@ -594,8 +594,12 @@ async fn password_change_requires_the_auth_key() {
 async fn delete_requires_the_auth_key() {
     let pool = require_db!();
     let link = insert_link(&pool, LinkSpec::default());
-    let result = delete_link_transfer(link.id, Uuid::new_v4(), &pool, &offline_s3()).await;
-    assert!(matches!(result, Err(ServerError::Forbidden)));
+    let s3 = offline_s3();
+    // The nil key is what anonymous senders receive in place of the real one.
+    for wrong in [Uuid::new_v4(), Uuid::nil()] {
+        let result = delete_link_transfer(link.id, wrong, &pool, &s3).await;
+        assert!(matches!(result, Err(ServerError::Forbidden)), "{wrong}");
+    }
     assert!(load_link(&pool, link.id).is_some());
 }
 
