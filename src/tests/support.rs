@@ -26,9 +26,9 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
-use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use opaque_ke::errors::ProtocolError;
 use opaque_ke::*;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use tower::ServiceExt;
 use uuid::Uuid;
 

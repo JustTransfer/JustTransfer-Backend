@@ -18,8 +18,8 @@ use diesel::r2d2::ConnectionManager;
 use diesel::sql_types::Timestamptz;
 use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use libsodium_sys::*;
-use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use opaque_ke::*;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use tracing::info;
 use uuid::Uuid;
 
