@@ -44,3 +44,10 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "r
 
 [dev-dependencies]
 proptest = "1.6.0"
+# OPAQUE runs Argon2 on every registration/login. Unoptimised it takes seconds
+# per call, which makes debug builds and the test suite crawl.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
