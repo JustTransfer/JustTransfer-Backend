@@ -18,7 +18,7 @@ use diesel::r2d2::ConnectionManager;
 use diesel::sql_types::Timestamptz;
 use diesel::{r2d2, PgConnection, QueryDsl, RunQueryDsl};
 use libsodium_sys::*;
-use opaque_ke::argon2::password_hash::rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use opaque_ke::*;
 use tracing::info;
 use uuid::Uuid;
@@ -199,7 +199,7 @@ pub async fn login_start_link(
         None
     };
 
-    let mut server_rng = OsRng;
+    let mut server_rng = UnwrapErr(SysRng);
     let server_opaque = get_opaque_settings(pool).map_err(|_| ServerError::Internal)?;
     let server_login_start_result = ServerLogin::start(
         &mut server_rng,

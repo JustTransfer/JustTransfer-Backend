@@ -5,7 +5,7 @@ use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
 use diesel::{r2d2, OptionalExtension, PgConnection, QueryDsl, RunQueryDsl};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use opaque_ke::argon2::password_hash::rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use opaque_ke::argon2::Argon2;
 use opaque_ke::{CipherSuite, ServerSetup};
 use std::collections::HashSet;
@@ -128,7 +128,7 @@ pub(crate) fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnecti
             .map_err(|_| ServerError::Internal)?
     } else {
         // Create new settings
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
         // Save settings to DB
         let new_setting = NewOpaqueSetting {

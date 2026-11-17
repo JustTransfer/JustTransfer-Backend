@@ -26,7 +26,7 @@ use chrono::Utc;
 use diesel::prelude::*;
 use diesel::r2d2::ConnectionManager;
 use diesel::PgConnection;
-use opaque_ke::argon2::password_hash::rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 use opaque_ke::errors::ProtocolError;
 use opaque_ke::*;
 use tower::ServiceExt;
@@ -366,7 +366,7 @@ pub fn opaque_register(
     password: &[u8],
     server: impl FnOnce(RegistrationRequest<Cs>) -> RegistrationResponse<Cs>,
 ) -> RegistrationUpload<Cs> {
-    let mut rng = OsRng;
+    let mut rng = UnwrapErr(SysRng);
     let start = ClientRegistration::<Cs>::start(&mut rng, password).unwrap();
     let response = server(start.message);
     start
@@ -382,7 +382,7 @@ pub fn opaque_register(
 }
 
 pub fn opaque_login_start(password: &[u8]) -> (ClientLogin<Cs>, CredentialRequest<Cs>) {
-    let start = ClientLogin::<Cs>::start(&mut OsRng, password).unwrap();
+    let start = ClientLogin::<Cs>::start(&mut UnwrapErr(SysRng), password).unwrap();
     (start.state, start.message)
 }
 
@@ -393,7 +393,7 @@ pub fn opaque_login_finish(
 ) -> Result<CredentialFinalization<Cs>, ProtocolError> {
     state
         .finish(
-            &mut OsRng,
+            &mut UnwrapErr(SysRng),
             password,
             response,
             ClientLoginFinishParameters::default(),

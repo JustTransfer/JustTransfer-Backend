@@ -193,7 +193,7 @@ async fn stripe_webhook_requires_a_valid_signature() {
 /// Full flows through the router: need a database (and S3 for uploads).
 ///
 use crate::api_handlers::misc::DbPool;
-use opaque_ke::argon2::password_hash::rand_core::OsRng;
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
 
 fn key_material() -> Value {
     json!({
@@ -207,7 +207,7 @@ fn key_material() -> Value {
 }
 
 async fn http_register(client: &mut TestClient, email: &str) {
-    let start = ClientRegistration::<Cs>::start(&mut OsRng, PASSWORD).unwrap();
+    let start = ClientRegistration::<Cs>::start(&mut UnwrapErr(SysRng), PASSWORD).unwrap();
     let response = client
         .post(
             "/api/register/start",
@@ -220,7 +220,7 @@ async fn http_register(client: &mut TestClient, email: &str) {
     let upload = start
         .state
         .finish(
-            &mut OsRng,
+            &mut UnwrapErr(SysRng),
             PASSWORD,
             server_response,
             ClientRegistrationFinishParameters::default(),
@@ -457,7 +457,7 @@ async fn upload(
     lifetime: i64,
     max_downloads: i64,
 ) -> Upload {
-    let start = ClientRegistration::<Cs>::start(&mut OsRng, PASSWORD).unwrap();
+    let start = ClientRegistration::<Cs>::start(&mut UnwrapErr(SysRng), PASSWORD).unwrap();
     let response = client
         .post(
             "/api/link/message/start",
@@ -472,7 +472,7 @@ async fn upload(
     let registration = start
         .state
         .finish(
-            &mut OsRng,
+            &mut UnwrapErr(SysRng),
             PASSWORD,
             server_response,
             ClientRegistrationFinishParameters::default(),
