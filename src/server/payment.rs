@@ -2,10 +2,10 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-use crate::server;
 use crate::api_handlers::misc::DbPool;
 use crate::consts::*;
 use crate::error::ServerError;
+use crate::server;
 
 pub async fn create_subscription_checkout(
     user_id: Uuid,
@@ -109,12 +109,7 @@ pub async fn cancel_subscription(
     let end_time_utc = chrono::DateTime::<chrono::Utc>::from_timestamp(current_period_end, 0)
         .ok_or(ServerError::Internal)?;
 
-    server::connected::update_subscription_end(
-        user_id,
-        end_time_utc,
-        pool,
-        mailer
-    )?;
+    server::connected::update_subscription_end(user_id, end_time_utc, pool, mailer)?;
 
     Ok(())
 }
@@ -122,6 +117,23 @@ pub async fn cancel_subscription(
 /// Verifies `Stripe-Signature: t=<unix_ts>,v1=<hex hmac>`.
 /// HMAC is computed over "{timestamp}.{raw_body}" with the webhook secret.
 pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool {
+    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
+        return false;
+    };
+    verify_webhook_signature_at(
+        raw_body,
+        signature_header,
+        STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes(),
+        now.as_secs() as i64,
+    )
+}
+
+pub fn verify_webhook_signature_at(
+    raw_body: &[u8],
+    signature_header: &str,
+    secret: &[u8],
+    now: i64,
+) -> bool {
     let mut timestamp: Option<&str> = None;
     let mut v1: Option<&str> = None;
 
@@ -141,10 +153,6 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
     let Ok(ts) = timestamp.parse::<i64>() else {
         return false;
     };
-    let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) else {
-        return false;
-    };
-    let now = now.as_secs() as i64;
     if (now - ts).abs() > WEBHOOK_TIMESTAMP_TOLERANCE_SECS {
         return false;
     }
@@ -158,16 +166,17 @@ pub fn verify_webhook_signature(raw_body: &[u8], signature_header: &str) -> bool
     }
 
     // Check the MAC
-    let secret = STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes();
     let mut computed = [0u8; libsodium_sys::crypto_auth_hmacsha256_BYTES as usize];
 
     let hmac_ok = unsafe {
-        let mut state = std::mem::MaybeUninit::<libsodium_sys::crypto_auth_hmacsha256_state>::uninit();
+        let mut state =
+            std::mem::MaybeUninit::<libsodium_sys::crypto_auth_hmacsha256_state>::uninit();
         if libsodium_sys::crypto_auth_hmacsha256_init(
             state.as_mut_ptr(),
             secret.as_ptr(),
             secret.len(),
-        ) != 0 {
+        ) != 0
+        {
             return false;
         }
         let mut state = state.assume_init();
@@ -214,7 +223,7 @@ pub struct StripeEventData {
 pub async fn handle_webhook(
     event: StripeEvent,
     pool: &DbPool,
-    mailer: &lettre::SmtpTransport
+    mailer: &lettre::SmtpTransport,
 ) -> Result<(), ServerError> {
     match event.event_type.as_str() {
         "checkout.session.completed" => {
@@ -234,14 +243,16 @@ pub async fn handle_webhook(
                 sub_id,
                 customer_id,
                 pool,
-                mailer
+                mailer,
             )?;
         }
         "customer.subscription.deleted" => {
             let Some(sub_id) = event.data.object["id"].as_str() else {
                 return Ok(());
             };
-            if let Some(user_id) = server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+            if let Some(user_id) =
+                server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
+            {
                 server::connected::deactivate_subscription(user_id, pool, mailer)?;
             }
         }
@@ -251,7 +262,9 @@ pub async fn handle_webhook(
             let status = obj["status"].as_str().unwrap_or("");
             if matches!(status, "canceled" | "unpaid" | "incomplete_expired") {
                 if let Some(sub_id) = obj["id"].as_str() {
-                    if let Some(user_id) = server::connected::find_user_by_stripe_subscription_id(sub_id, pool)? {
+                    if let Some(user_id) =
+                        server::connected::find_user_by_stripe_subscription_id(sub_id, pool)?
+                    {
                         server::connected::deactivate_subscription(user_id, pool, mailer)?;
                     }
                 }
@@ -261,4 +274,112 @@ pub async fn handle_webhook(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::support::{init_config, mailer, offline_db, stripe_signature};
+
+    const SECRET: &[u8] = b"whsec_unit_test";
+    const NOW: i64 = 1_700_000_000;
+    const BODY: &[u8] = br#"{"type":"checkout.session.completed"}"#;
+
+    fn sign(body: &[u8], timestamp: i64, secret: &[u8]) -> String {
+        let header = stripe_signature(body, timestamp, secret);
+        header.split_once(",v1=").unwrap().1.to_owned()
+    }
+
+    fn header(body: &[u8], timestamp: i64, secret: &[u8]) -> String {
+        stripe_signature(body, timestamp, secret)
+    }
+
+    fn verify(body: &[u8], header: &str) -> bool {
+        verify_webhook_signature_at(body, header, SECRET, NOW)
+    }
+
+    #[test]
+    fn accepts_a_valid_signature_within_tolerance() {
+        assert!(verify(BODY, &header(BODY, NOW, SECRET)));
+        let edge = NOW - WEBHOOK_TIMESTAMP_TOLERANCE_SECS;
+        assert!(verify(BODY, &header(BODY, edge, SECRET)));
+        // Stripe may send extra schemes; only v1 matters.
+        let with_v0 = format!("{},v0=deadbeef", header(BODY, NOW, SECRET));
+        assert!(verify(BODY, &with_v0));
+    }
+
+    #[test]
+    fn rejects_stale_or_future_timestamps() {
+        for ts in [
+            NOW - WEBHOOK_TIMESTAMP_TOLERANCE_SECS - 1,
+            NOW + WEBHOOK_TIMESTAMP_TOLERANCE_SECS + 1,
+        ] {
+            assert!(!verify(BODY, &header(BODY, ts, SECRET)), "ts = {ts}");
+        }
+    }
+
+    #[test]
+    fn rejects_tampering_and_wrong_secret() {
+        let valid = header(BODY, NOW, SECRET);
+        assert!(!verify(br#"{"type":"tampered"}"#, &valid));
+        assert!(!verify(BODY, &header(BODY, NOW, b"other secret")));
+        // Signature for a different timestamp than the one announced.
+        let swapped = format!("t={},v1={}", NOW, sign(BODY, NOW - 1, SECRET));
+        assert!(!verify(BODY, &swapped));
+    }
+
+    #[test]
+    fn rejects_malformed_headers() {
+        let sig = sign(BODY, NOW, SECRET);
+        for header in [
+            String::new(),
+            format!("t={NOW}"),
+            format!("v1={sig}"),
+            format!("t=not-a-number,v1={sig}"),
+            format!("t={NOW},v1=not-hex"),
+            format!("t={NOW},v1={}", &sig[..sig.len() - 2]),
+            format!("t={NOW},v1={sig}00"),
+        ] {
+            assert!(!verify(BODY, &header), "{header:?}");
+        }
+    }
+
+    #[test]
+    fn verify_uses_the_configured_secret_and_clock() {
+        init_config();
+        let secret = STRIPE_WEBHOOK_SECRET.get().unwrap().as_bytes();
+        let now = chrono::Utc::now().timestamp();
+        assert!(verify_webhook_signature(BODY, &header(BODY, now, secret)));
+        assert!(!verify_webhook_signature(BODY, &header(BODY, now, SECRET)));
+    }
+
+    #[tokio::test]
+    async fn checkout_only_supports_the_premium_plan() {
+        let result = create_subscription_checkout(Uuid::nil(), "a@example.com", "gold").await;
+        assert!(matches!(result, Err(ServerError::InputValidation)));
+    }
+
+    #[tokio::test]
+    async fn ignores_irrelevant_or_incomplete_events() {
+        init_config();
+        // None of these may touch the (unreachable) database.
+        let events = [
+            serde_json::json!({"type": "invoice.paid", "data": {"object": {}}}),
+            serde_json::json!({"type": "checkout.session.completed", "data": {"object": {}}}),
+            serde_json::json!({"type": "checkout.session.completed",
+                               "data": {"object": {"client_reference_id": "not-a-uuid"}}}),
+            serde_json::json!({"type": "customer.subscription.deleted", "data": {"object": {}}}),
+            serde_json::json!({"type": "customer.subscription.updated",
+                               "data": {"object": {"id": "sub_1", "status": "past_due"}}}),
+        ];
+        for event in events {
+            let parsed: StripeEvent = serde_json::from_value(event.clone()).unwrap();
+            assert!(
+                handle_webhook(parsed, &offline_db(), &mailer())
+                    .await
+                    .is_ok(),
+                "{event}"
+            );
+        }
+    }
 }

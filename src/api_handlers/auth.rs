@@ -1,15 +1,15 @@
 use std::collections::HashSet;
 
+use axum::extract::Path;
+use axum::middleware::Next;
 use axum::{http::StatusCode, response::Response};
 use serde::{Deserialize, Serialize};
-use axum::middleware::Next;
-use axum::extract::Path;
-use tower_sessions::{Expiry, MemoryStore, Session, SessionManagerLayer, cookie::time::Duration};
+use tower_sessions::{cookie::time::Duration, Expiry, MemoryStore, Session, SessionManagerLayer};
 
-use uuid::Uuid;
 use chrono::Utc;
 use std::fmt;
-use tracing::{warn};
+use tracing::warn;
+use uuid::Uuid;
 
 use crate::consts::*;
 use crate::error::*;
@@ -46,6 +46,13 @@ impl fmt::Display for Role {
         };
         write!(f, "{s}")
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RoleLimits {
+    pub max_lifetime: i64,
+    pub max_file_size: i64,
+    pub max_downloads: i64,
 }
 
 impl Role {
@@ -86,7 +93,6 @@ impl Role {
     }
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UserClaims {
     pub id: Uuid,
@@ -96,39 +102,75 @@ pub struct UserClaims {
 }
 
 impl UserClaims {
-    pub fn authorize_upload(&self, creation_time: chrono::DateTime<chrono::Utc>, lifetime: i64, file_size: i64, max_downloads: i64) -> Result<(), ApiError> {
-        // Creation time
-        let now = Utc::now();
-        if creation_time > now + chrono::Duration::minutes(MAX_TIME_MARGIN) || creation_time < now - chrono::Duration::minutes(MAX_TIME_MARGIN) {
+    pub fn authorize_upload_at(
+        &self,
+        now: chrono::DateTime<chrono::Utc>,
+        limits: RoleLimits,
+        creation_time: chrono::DateTime<chrono::Utc>,
+        lifetime: i64,
+        file_size: i64,
+        max_downloads: i64,
+    ) -> Result<(), ApiError> {
+        if creation_time > now + chrono::Duration::minutes(MAX_TIME_MARGIN)
+            || creation_time < now - chrono::Duration::minutes(MAX_TIME_MARGIN)
+            || lifetime < 1
+            || lifetime > limits.max_lifetime
+            || file_size < 1
+            || file_size > limits.max_file_size
+            || max_downloads < 1
+            || max_downloads > limits.max_downloads
+        {
             return Err(ApiError::Forbidden);
         }
-        
-        // Lifetime
-        if lifetime < 1 || lifetime > self.role.max_lifetime() {
-            return Err(ApiError::Forbidden);
-        }
-
-        // File size
-        if file_size > self.role.max_file_size() {
-            return Err(ApiError::Forbidden);
-        }
-
-        // Max downloads
-        if max_downloads < 1 || max_downloads > self.role.max_downloads() {
-            return Err(ApiError::Forbidden);
-        }
-
         Ok(())
     }
-    
+
+    pub fn authorize_upload(
+        &self,
+        creation_time: chrono::DateTime<chrono::Utc>,
+        lifetime: i64,
+        file_size: i64,
+        max_downloads: i64,
+    ) -> Result<(), ApiError> {
+        self.authorize_upload_at(
+            Utc::now(),
+            RoleLimits {
+                max_lifetime: self.role.max_lifetime(),
+                max_file_size: self.role.max_file_size(),
+                max_downloads: self.role.max_downloads(),
+            },
+            creation_time,
+            lifetime,
+            file_size,
+            max_downloads,
+        )
+    }
+
     pub fn authorize_update(&self, lifetime: i64, max_downloads: i64) -> Result<(), ApiError> {
+        self.authorize_update_with_limits(
+            RoleLimits {
+                max_lifetime: self.role.max_lifetime(),
+                max_file_size: self.role.max_file_size(),
+                max_downloads: self.role.max_downloads(),
+            },
+            lifetime,
+            max_downloads,
+        )
+    }
+
+    pub fn authorize_update_with_limits(
+        &self,
+        limits: RoleLimits,
+        lifetime: i64,
+        max_downloads: i64,
+    ) -> Result<(), ApiError> {
         // Lifetime
-        if lifetime < 1 || lifetime > self.role.max_lifetime() {
+        if lifetime < 1 || lifetime > limits.max_lifetime {
             return Err(ApiError::Forbidden);
         }
 
         // Max downloads
-        if max_downloads < 1 || max_downloads > self.role.max_downloads() {
+        if max_downloads < 1 || max_downloads > limits.max_downloads {
             return Err(ApiError::Forbidden);
         }
 
@@ -147,7 +189,9 @@ pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<Memor
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name(cookie_name)
         .with_secure(true)
-        .with_expiry(Expiry::OnInactivity(Duration::minutes(*SESSION_DURATION_MINUTES.get().unwrap())));
+        .with_expiry(Expiry::OnInactivity(Duration::minutes(
+            *SESSION_DURATION_MINUTES.get().unwrap(),
+        )));
 
     session_layer
 }
@@ -157,7 +201,6 @@ pub async fn require_auth(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-
     // Extend the request with the user's role and email for later use in handlers
     let email = session
         .get::<String>(AUTH_KEY_EMAIL)
@@ -183,14 +226,12 @@ pub async fn require_auth(
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
         .ok_or(StatusCode::UNAUTHORIZED)?;
 
-    req.extensions_mut().insert(
-        UserClaims {
-            id: user_id,
-            email: email,
-            role: Role::try_from(role.as_str()).unwrap_or(Role::User),
-            iat: created_at,
-        }
-    );
+    req.extensions_mut().insert(UserClaims {
+        id: user_id,
+        email: email,
+        role: Role::try_from(role.as_str()).unwrap_or(Role::User),
+        iat: created_at,
+    });
 
     Ok(next.run(req).await)
 }
@@ -205,7 +246,6 @@ pub async fn require_auth_link(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-
     let authorized_ids = session
         .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
         .await
@@ -227,13 +267,7 @@ pub async fn optional_auth(
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Response {
-
-    if let (
-        Ok(Some(email)),
-        Ok(Some(user_id)),
-        Ok(Some(role)),
-        Ok(Some(created_at)),
-    ) = (
+    if let (Ok(Some(email)), Ok(Some(user_id)), Ok(Some(role)), Ok(Some(created_at))) = (
         session.get::<String>(AUTH_KEY_EMAIL).await,
         session.get::<Uuid>(AUTH_KEY_USER_ID).await,
         session.get::<String>(AUTH_KEY_ROLE).await,
@@ -256,7 +290,6 @@ pub async fn require_fresh_login(
     req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-
     // Check if the user is connected
     let _user_id = session
         .get::<Uuid>(AUTH_KEY_USER_ID)
@@ -270,7 +303,12 @@ pub async fn require_fresh_login(
         let now = Utc::now().timestamp();
 
         if (now - ts).abs() > (FRESH_SESSION_DURATION_MINUTES.get().unwrap() * 60) {
-            warn!("Session is not fresh: created at {}, now is {}, difference is {} seconds", ts, now, (now - ts).abs());
+            warn!(
+                "Session is not fresh: created at {}, now is {}, difference is {} seconds",
+                ts,
+                now,
+                (now - ts).abs()
+            );
             return Err(StatusCode::UNAUTHORIZED);
         }
     } else {
@@ -278,4 +316,181 @@ pub async fn require_fresh_login(
     }
 
     Ok(next.run(req).await)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::support::*;
+    use chrono::{DateTime, Duration as ChronoDuration};
+
+    const ROLES: [(&str, Role); 4] = [
+        ("user", Role::User),
+        ("premium", Role::Premium),
+        ("admin", Role::Admin),
+        ("anonymous", Role::Anonymous),
+    ];
+
+    const LIMITS: RoleLimits = RoleLimits {
+        max_lifetime: 7,
+        max_file_size: 100,
+        max_downloads: 3,
+    };
+
+    fn now() -> DateTime<Utc> {
+        DateTime::from_timestamp(1_767_276_000, 0).unwrap()
+    }
+
+    fn claims(role: Role) -> UserClaims {
+        UserClaims {
+            id: Uuid::nil(),
+            email: "test@example.com".to_owned(),
+            role,
+            iat: 0,
+        }
+    }
+
+    fn upload(created: DateTime<Utc>, lifetime: i64, size: i64, downloads: i64) -> bool {
+        claims(Role::User)
+            .authorize_upload_at(now(), LIMITS, created, lifetime, size, downloads)
+            .is_ok()
+    }
+
+    #[test]
+    fn role_round_trips_through_its_string_form() {
+        for (name, role) in ROLES {
+            assert_eq!(Role::try_from(name), Ok(role.clone()));
+            assert_eq!(role.to_string(), name);
+            // The session stores the Display form and serde must agree with it.
+            assert_eq!(serde_json::to_value(&role).unwrap(), name);
+        }
+        for unknown in ["", "User", "superuser", "test"] {
+            assert_eq!(Role::try_from(unknown), Err(()), "{unknown:?}");
+        }
+    }
+
+    #[test]
+    fn role_limits_come_from_the_matching_configuration() {
+        init_config();
+        let expected = [
+            (
+                Role::Anonymous,
+                (
+                    ANON_MAX_LIFETIME,
+                    ANON_MAX_FILE_SIZE,
+                    ANON_MAX_DOWNLOADS,
+                    None,
+                ),
+            ),
+            (
+                Role::User,
+                (
+                    USER_MAX_LIFETIME,
+                    USER_MAX_FILE_SIZE,
+                    USER_MAX_DOWNLOADS,
+                    Some(USER_MONTHLY_TRANSFERS),
+                ),
+            ),
+            (
+                Role::Premium,
+                (
+                    PREMIUM_MAX_LIFETIME,
+                    PREMIUM_MAX_FILE_SIZE,
+                    PREMIUM_MAX_DOWNLOADS,
+                    Some(PREMIUM_MONTHLY_TRANSFERS),
+                ),
+            ),
+            (
+                Role::Admin,
+                (
+                    PREMIUM_MAX_LIFETIME,
+                    PREMIUM_MAX_FILE_SIZE,
+                    PREMIUM_MAX_DOWNLOADS,
+                    Some(PREMIUM_MONTHLY_TRANSFERS),
+                ),
+            ),
+        ];
+        for (role, limits) in expected {
+            let actual = (
+                role.max_lifetime(),
+                role.max_file_size(),
+                role.max_downloads(),
+                role.max_messages(),
+            );
+            assert_eq!(actual, limits, "{role}");
+        }
+    }
+
+    #[test]
+    fn upload_accepts_values_on_the_limits() {
+        let margin = ChronoDuration::minutes(MAX_TIME_MARGIN);
+        assert!(upload(now(), 1, 1, 1));
+        assert!(upload(
+            now(),
+            LIMITS.max_lifetime,
+            LIMITS.max_file_size,
+            LIMITS.max_downloads
+        ));
+        assert!(upload(now() - margin, 1, 1, 1));
+        assert!(upload(now() + margin, 1, 1, 1));
+    }
+
+    #[test]
+    fn upload_rejects_each_value_just_outside_the_limits() {
+        let past_margin = ChronoDuration::minutes(MAX_TIME_MARGIN) + ChronoDuration::seconds(1);
+        let cases = [
+            ("clock ahead", now() + past_margin, 1, 1, 1),
+            ("clock behind", now() - past_margin, 1, 1, 1),
+            ("lifetime 0", now(), 0, 1, 1),
+            ("lifetime over", now(), LIMITS.max_lifetime + 1, 1, 1),
+            ("size 0", now(), 1, 0, 1),
+            ("size over", now(), 1, LIMITS.max_file_size + 1, 1),
+            ("downloads 0", now(), 1, 1, 0),
+            ("downloads over", now(), 1, 1, LIMITS.max_downloads + 1),
+        ];
+        for (name, created, lifetime, size, downloads) in cases {
+            assert!(!upload(created, lifetime, size, downloads), "{name}");
+        }
+    }
+
+    #[test]
+    fn update_enforces_lifetime_and_download_limits() {
+        let user = claims(Role::User);
+        let ok = |lifetime, downloads| {
+            user.authorize_update_with_limits(LIMITS, lifetime, downloads)
+                .is_ok()
+        };
+        assert!(ok(1, 1));
+        assert!(ok(LIMITS.max_lifetime, LIMITS.max_downloads));
+        assert!(!ok(0, 1));
+        assert!(!ok(LIMITS.max_lifetime + 1, 1));
+        assert!(!ok(1, 0));
+        assert!(!ok(1, LIMITS.max_downloads + 1));
+    }
+
+    #[test]
+    fn upload_and_update_apply_the_callers_role_limits() {
+        init_config();
+        let created = Utc::now();
+        let anonymous = claims(Role::Anonymous);
+        let premium = claims(Role::Premium);
+
+        assert!(anonymous
+            .authorize_upload(created, ANON_MAX_LIFETIME, ANON_MAX_FILE_SIZE, 1)
+            .is_ok());
+        assert!(anonymous
+            .authorize_upload(created, 1, ANON_MAX_FILE_SIZE + 1, 1)
+            .is_err());
+        assert!(premium
+            .authorize_upload(created, 1, ANON_MAX_FILE_SIZE + 1, 1)
+            .is_ok());
+
+        assert!(claims(Role::User)
+            .authorize_update(USER_MAX_LIFETIME, 1)
+            .is_ok());
+        assert!(claims(Role::User)
+            .authorize_update(USER_MAX_LIFETIME + 1, 1)
+            .is_err());
+        assert!(premium.authorize_update(USER_MAX_LIFETIME + 1, 1).is_ok());
+    }
 }

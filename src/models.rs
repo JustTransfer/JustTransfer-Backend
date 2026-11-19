@@ -1,7 +1,7 @@
 use chrono::Utc;
 use diesel::prelude::*;
 use serde::{Deserialize, Serialize};
-use uuid::{Uuid};
+use uuid::Uuid;
 
 ///
 /// Opaque settings
@@ -188,7 +188,7 @@ pub struct SubscriptionUpdate {
 
 ///
 /// Reset tokens
-/// 
+///
 
 #[derive(Queryable, Selectable, Identifiable)]
 #[diesel(table_name = crate::schema::reset_tokens)]

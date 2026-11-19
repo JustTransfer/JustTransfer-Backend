@@ -65,8 +65,6 @@ impl From<ServerError> for ApiError {
     }
 }
 
-
-
 #[derive(Debug)]
 pub enum ApiError {
     InputValidation,
@@ -102,3 +100,67 @@ impl IntoResponse for ApiError {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn status(error: ApiError) -> StatusCode {
+        error.into_response().status()
+    }
+
+    #[test]
+    fn api_errors_map_to_http_statuses() {
+        let cases = [
+            (ApiError::InputValidation, StatusCode::BAD_REQUEST),
+            (ApiError::Base64, StatusCode::BAD_REQUEST),
+            (ApiError::Opaque, StatusCode::BAD_REQUEST),
+            (ApiError::SessionError, StatusCode::INTERNAL_SERVER_ERROR),
+            (ApiError::ServerError, StatusCode::INTERNAL_SERVER_ERROR),
+            (ApiError::ServerNotFound, StatusCode::NOT_FOUND),
+            (ApiError::Unauthorized, StatusCode::UNAUTHORIZED),
+            (ApiError::Forbidden, StatusCode::FORBIDDEN),
+            (ApiError::Conflict, StatusCode::CONFLICT),
+            (
+                ApiError::InsufficientStorage,
+                StatusCode::INSUFFICIENT_STORAGE,
+            ),
+            (ApiError::QuotaExceeded, StatusCode::TOO_MANY_REQUESTS),
+        ];
+        for (error, expected) in cases {
+            let name = format!("{error:?}");
+            assert_eq!(status(error), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn server_errors_map_to_http_statuses() {
+        let cases = [
+            (ServerError::EmailTaken, StatusCode::CONFLICT),
+            (ServerError::Internal, StatusCode::INTERNAL_SERVER_ERROR),
+            (ServerError::Unauthorized, StatusCode::UNAUTHORIZED),
+            (ServerError::Forbidden, StatusCode::FORBIDDEN),
+            (
+                ServerError::InsufficientStorage,
+                StatusCode::INSUFFICIENT_STORAGE,
+            ),
+            (ServerError::QuotaExceeded, StatusCode::TOO_MANY_REQUESTS),
+            (ServerError::NotFound, StatusCode::NOT_FOUND),
+            // Mail failures must not leak as a distinct status.
+            (
+                ServerError::EmailSendError,
+                StatusCode::INTERNAL_SERVER_ERROR,
+            ),
+            (ServerError::InputValidation, StatusCode::BAD_REQUEST),
+        ];
+        for (error, expected) in cases {
+            let name = error.to_string();
+            assert_eq!(status(error.into()), expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn database_errors_are_internal() {
+        let error: ServerError = DieselError::NotFound.into();
+        assert!(matches!(error, ServerError::Internal));
+    }
+}

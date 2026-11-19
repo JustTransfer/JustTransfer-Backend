@@ -1,22 +1,22 @@
-use std::collections::HashSet;
-use aws_sdk_s3::Client;
 use aws_sdk_s3::config::{Builder, Credentials, Region};
+use aws_sdk_s3::Client;
 use chrono::Utc;
-use diesel::{r2d2, OptionalExtension, PgConnection, QueryDsl, RunQueryDsl};
-use diesel::r2d2::ConnectionManager;
 use diesel::prelude::*;
+use diesel::r2d2::ConnectionManager;
+use diesel::{r2d2, OptionalExtension, PgConnection, QueryDsl, RunQueryDsl};
 use diesel_migrations::{embed_migrations, EmbeddedMigrations, MigrationHarness};
-use opaque_ke::argon2::password_hash::rand_core::OsRng;
 use opaque_ke::argon2::Argon2;
 use opaque_ke::{CipherSuite, ServerSetup};
-use tracing::{info, warn, error};
+use rand::{rand_core::UnwrapErr, rngs::SysRng};
+use std::collections::HashSet;
+use tracing::{error, info, warn};
 use uuid::Uuid;
 
-use crate::{api_handlers, server};
 use crate::consts::*;
 use crate::error::ServerError;
 use crate::models::*;
 use crate::schema::link_transfers::dsl::link_transfers;
+use crate::{api_handlers, server};
 
 #[allow(dead_code)]
 pub struct DefaultCipherSuite;
@@ -27,10 +27,8 @@ impl CipherSuite for DefaultCipherSuite {
 }
 
 pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> {
-
     // Check if the environment variables exist and set them in the corresponding OnceCell
     for (key, cell) in ENV_CELLS {
-
         let value = std::env::var(key).map_err(|_| {
             error!("Environment variable {} is not set", key);
             ServerError::Internal
@@ -41,8 +39,7 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
             return Err(ServerError::Internal);
         }
 
-        cell.set(value)
-            .map_err(|_| ServerError::Internal)?;
+        cell.set(value).map_err(|_| ServerError::Internal)?;
     }
 
     // i64 values
@@ -76,30 +73,33 @@ pub async fn init_server() -> Result<api_handlers::misc::AppState, ServerError> 
         mailer,
     };
 
-    generate_dummy_user(&db_pool).await
-        .map_err(|e| {
-            error!("Failed to generate dummy user: {}", e);
-            ServerError::Internal
-        })?;
+    generate_dummy_user(&db_pool).await.map_err(|e| {
+        error!("Failed to generate dummy user: {}", e);
+        ServerError::Internal
+    })?;
 
-    generate_dummy_anonymous_transfer(&db_pool).await
+    generate_dummy_anonymous_transfer(&db_pool)
+        .await
         .map_err(|e| {
             error!("Failed to generate dummy anonymous transfer: {}", e);
             ServerError::Internal
         })?;
 
     // Start the scheduled tasks
-    server::cron::start_monthly_task(state.clone())
-        .map_err(|e| { error!("Failed to start monthly task: {}", e); ServerError::Internal })?;
+    server::cron::start_monthly_task(state.clone()).map_err(|e| {
+        error!("Failed to start monthly task: {}", e);
+        ServerError::Internal
+    })?;
 
-    server::cron::start_daily_cleanup_task(state.clone())
-        .map_err(|e| { error!("Failed to start daily cleanup task: {}", e); ServerError::Internal })?;
+    server::cron::start_daily_cleanup_task(state.clone()).map_err(|e| {
+        error!("Failed to start daily cleanup task: {}", e);
+        ServerError::Internal
+    })?;
 
     Ok(state)
 }
 
-fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, ServerError> {
-
+pub(crate) fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, ServerError> {
     let manager = ConnectionManager::<PgConnection>::new(DATABASE_URL.get().unwrap());
     let pool = r2d2::Pool::builder()
         .build(manager)
@@ -110,11 +110,10 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Serve
 
     // Run migrations
     pub const MIGRATIONS: EmbeddedMigrations = embed_migrations!();
-    conn.run_pending_migrations(MIGRATIONS)
-        .map_err(|e| {
-            error!("Error running migrations: {}", e);
-            ServerError::Internal
-        })?;
+    conn.run_pending_migrations(MIGRATIONS).map_err(|e| {
+        error!("Error running migrations: {}", e);
+        ServerError::Internal
+    })?;
     info!("Database migrations ran successfully");
 
     // Try to load OPAQUE settings from DB
@@ -129,7 +128,7 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Serve
             .map_err(|_| ServerError::Internal)?
     } else {
         // Create new settings
-        let mut rng = OsRng;
+        let mut rng = UnwrapErr(SysRng);
         let server_setup = ServerSetup::<DefaultCipherSuite>::new(&mut rng);
         // Save settings to DB
         let new_setting = NewOpaqueSetting {
@@ -149,11 +148,16 @@ fn server_init_db() -> Result<r2d2::Pool<ConnectionManager<PgConnection>>, Serve
 }
 
 async fn server_init_s3() -> Result<aws_sdk_s3::Client, ServerError> {
-
     // Init S3
     let client_config = Builder::new()
         .region(Region::new("eu-central-1"))
-        .credentials_provider(Credentials::new(RUSTFS_USER.get().unwrap(), RUSTFS_PASSWORD.get().unwrap(), None, None, "example"))
+        .credentials_provider(Credentials::new(
+            RUSTFS_USER.get().unwrap(),
+            RUSTFS_PASSWORD.get().unwrap(),
+            None,
+            None,
+            "example",
+        ))
         .endpoint_url(RUSTFS_URL.get().unwrap())
         .force_path_style(true)
         .behavior_version_latest()
@@ -173,11 +177,10 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, ServerError> {
 
     // Collect existing bucket names into a HashSet for efficient lookup
     let mut existing_buckets = HashSet::new();
-    while let Some(output) = buckets.try_next().await
-        .map_err(|e| {
-            error!("Error listing buckets: {}", e);
-            ServerError::Internal
-        })? {
+    while let Some(output) = buckets.try_next().await.map_err(|e| {
+        error!("Error listing buckets: {}", e);
+        ServerError::Internal
+    })? {
         existing_buckets.extend(
             output
                 .buckets()
@@ -190,9 +193,7 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, ServerError> {
     info!(buckets = ?existing_buckets, "Existing buckets");
 
     // Define the required buckets
-    let required_buckets = [
-        S3_BUCKET_NAME.get().unwrap(),
-    ];
+    let required_buckets = [S3_BUCKET_NAME.get().unwrap()];
 
     // Create any missing buckets
     for bucket_name in required_buckets {
@@ -217,7 +218,6 @@ async fn server_init_s3() -> Result<aws_sdk_s3::Client, ServerError> {
 pub fn get_opaque_settings(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<ServerSetup<DefaultCipherSuite>, ServerError> {
-
     use crate::schema::opaque_settings;
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
@@ -232,10 +232,9 @@ pub fn get_opaque_settings(
     Ok(server_opaque)
 }
 
-async fn generate_dummy_user(
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>
+pub(crate) async fn generate_dummy_user(
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
-
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -263,23 +262,22 @@ async fn generate_dummy_user(
             .map_err(|_| ServerError::Internal)?;
     }
 
-
     let dummy_user_id = users::table
         .filter(users::email.eq(DUMMY_EMAIL.get().unwrap().to_string()))
         .select(users::id)
         .first::<Uuid>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    DUMMY_ID.set(dummy_user_id)
+    DUMMY_ID
+        .set(dummy_user_id)
         .map_err(|_| ServerError::Internal)?;
 
     Ok(())
 }
 
-async fn generate_dummy_anonymous_transfer(
-    pool: &r2d2::Pool<ConnectionManager<PgConnection>>
+pub(crate) async fn generate_dummy_anonymous_transfer(
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
-
     use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -321,12 +319,11 @@ async fn generate_dummy_anonymous_transfer(
     Ok(())
 }
 
-pub async fn delete_invalid_file_size (
+pub async fn delete_invalid_file_size(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     s3: &aws_sdk_s3::Client,
     file_id_param: &Uuid,
 ) -> Result<(), ServerError> {
-
     // Get the file size from S3
     let head_object_output = s3
         .head_object()
@@ -336,7 +333,8 @@ pub async fn delete_invalid_file_size (
         .await
         .map_err(|_| ServerError::Internal)?;
 
-    let uploaded_file_size = head_object_output.content_length()
+    let uploaded_file_size = head_object_output
+        .content_length()
         .ok_or(ServerError::Internal)?;
 
     // Get the file size from DB
