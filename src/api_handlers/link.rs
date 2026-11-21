@@ -491,14 +491,11 @@ pub async fn upload_link_message_finish_multipart(
         return Err(ApiError::Forbidden);
     }
 
-    // Check if the user is connected and get the connected user id if available
+    // Check if the user is connected
     let is_connected = user_claims.is_some()
         && (user_claims.clone().unwrap().role == auth::Role::User
             || user_claims.clone().unwrap().role == auth::Role::Premium
             || user_claims.clone().unwrap().role == auth::Role::Admin);
-    let connected_user_id = user_claims
-        .as_ref()
-        .and_then(|claims| is_connected.then_some(claims.0.id));
 
     // Authorize only the other role than Anonymous to send email
     let receiver_email = if let Some(email) = payload.receiver_email.clone() {
@@ -568,10 +565,6 @@ pub async fn upload_link_message_finish_multipart(
             .transpose()?,
         &state.db,
     )?;
-
-    if let Some(user_id) = connected_user_id {
-        server::connected::increment_number_transfers(user_id, &state.db)?;
-    }
 
     // Only return the auth_key if the user is logged in
     let auth_key = if is_connected { auth_key } else { Uuid::nil() };

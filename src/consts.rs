@@ -38,9 +38,11 @@ pub const DUMMY_LINK_MESSAGE_ID: Uuid = Uuid::from_u128(0x1234567812345678123456
 /// Const for Session
 pub const AUTH_KEY_LINK: &str = "link_message_id";
 pub const AUTH_KEY_USER_ID: &str = "id";
-pub const AUTH_KEY_EMAIL: &str = "email";
-pub const AUTH_KEY_ROLE: &str = "role";
 pub const AUTH_KEY_CREATED_AT: &str = "created_at";
+pub const AUTH_KEY_SESSION_VERSION: &str = "session_version";
+
+// Absolute lifetime of an account session, whatever its activity
+pub const MAX_SESSION_LIFETIME_DAYS: i64 = 30;
 
 /// Const for Validation
 pub const MIN_LENGTH_BASE64: u64 = 16;

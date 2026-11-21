@@ -101,7 +101,10 @@ pub fn build_router(state: api_handlers::misc::AppState) -> Router {
             "/api/user/saved-transfer/{id}",
             delete(api_handlers::connected::delete_saved_transfer),
         )
-        .layer(middleware::from_fn(api_handlers::auth::require_auth))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            api_handlers::auth::require_auth,
+        ))
         .route(
             "/api/login/end",
             post(api_handlers::connected::login_user_end),
@@ -119,7 +122,10 @@ pub fn build_router(state: api_handlers::misc::AppState) -> Router {
             post(api_handlers::connected::register_user_end_update),
         )
         .layer(middleware::from_fn(api_handlers::auth::require_fresh_login))
-        .layer(middleware::from_fn(api_handlers::auth::require_auth))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            api_handlers::auth::require_auth,
+        ))
         .layer(session_layer.clone());
 
     let link_app = Router::new()
@@ -144,7 +150,10 @@ pub fn build_router(state: api_handlers::misc::AppState) -> Router {
             "/api/link/message",
             post(api_handlers::link::upload_link_message),
         )
-        .layer(middleware::from_fn(api_handlers::auth::optional_auth))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            api_handlers::auth::optional_auth,
+        ))
         .route(
             "/api/link/message/{id}/login/start",
             post(api_handlers::link::link_message_login_start),
@@ -173,7 +182,10 @@ pub fn build_router(state: api_handlers::misc::AppState) -> Router {
             post(api_handlers::link::link_message_password_change_end),
         )
         .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
-        .layer(middleware::from_fn(api_handlers::auth::require_auth))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            api_handlers::auth::require_auth,
+        ))
         .layer(session_layer);
 
     Router::new()

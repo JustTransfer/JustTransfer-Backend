@@ -88,6 +88,7 @@ diesel::table! {
         stripe_subscription_id -> Nullable<Text>,
         stripe_customer_id -> Nullable<Text>,
         current_period_end -> Nullable<Timestamptz>,
+        session_version -> Int8,
     }
 }
 

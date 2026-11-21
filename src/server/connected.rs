@@ -133,10 +133,56 @@ pub fn registration_finish(
                 if info.constraint_name().unwrap_or("").contains("email") =>
             {
                 // Savepoint was rolled back, outer transaction is still valid here
-                diesel::insert_into(crate::schema::key_pairs::table)
-                    .values(&dummy_key)
+                // Lock the existing account so a concurrent verification can't interleave
+                let existing = users::table
+                    .filter(users::email.eq(email_param))
+                    .for_update()
+                    .first::<User>(conn)
+                    .map_err(|_| ServerError::Internal)?;
+
+                if existing.email_verified {
+                    diesel::insert_into(crate::schema::key_pairs::table)
+                        .values(&dummy_key)
+                        .execute(conn)
+                        .map_err(|_| ServerError::Internal)?;
+                } else {
+                    // The unverified account may have been created by someone else (account
+                    // pre-hijacking): only ever send a link that verifies the credentials of
+                    // the current registrant, so replace the password file and keys, and
+                    // rotate the token to invalidate any link sent for the previous ones.
+                    diesel::update(users.find(existing.id))
+                        .set((
+                            users::password_file.eq(new_user.password_file),
+                            users::server_login.eq::<Option<Vec<u8>>>(None),
+                            users::registration_token.eq(Uuid::new_v4()),
+                            users::session_version.eq(users::session_version + 1),
+                        ))
+                        .execute(conn)
+                        .map_err(|_| ServerError::Internal)?;
+
+                    diesel::delete(
+                        crate::schema::reset_tokens::table
+                            .filter(crate::schema::reset_tokens::account_id.eq(existing.id)),
+                    )
                     .execute(conn)
                     .map_err(|_| ServerError::Internal)?;
+
+                    // An unverified account can't log in, so its keys are never referenced
+                    diesel::delete(
+                        crate::schema::key_pairs::table
+                            .filter(crate::schema::key_pairs::owner_id.eq(existing.id)),
+                    )
+                    .execute(conn)
+                    .map_err(|_| ServerError::Internal)?;
+
+                    diesel::insert_into(crate::schema::key_pairs::table)
+                        .values(&NewKeyPairs {
+                            owner_id: &existing.id,
+                            ..key_enc
+                        })
+                        .execute(conn)
+                        .map_err(|_| ServerError::Internal)?;
+                }
                 Ok(RegistrationOutcome::EmailTaken)
             }
             Err(_) => Err(ServerError::Internal),
@@ -196,7 +242,7 @@ pub fn registration_finish_update(
     keys: Vec<KeyPairsdUpdate>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
     mailer: &lettre::SmtpTransport,
-) -> Result<Vec<KeyPairs>, ServerError> {
+) -> Result<(Vec<KeyPairs>, i64), ServerError> {
     use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -206,7 +252,7 @@ pub fn registration_finish_update(
     let password_file_bytes = password_file_param.serialize();
 
     let result = conn
-        .transaction::<(Vec<KeyPairs>, String), ServerError, _>(|conn| {
+        .transaction::<(Vec<KeyPairs>, String, i64), ServerError, _>(|conn| {
             let user_id = users::table
                 .filter(users::email.eq(email_param))
                 .select(users::id)
@@ -214,8 +260,12 @@ pub fn registration_finish_update(
                 .optional()?
                 .ok_or(ServerError::Internal)?;
 
+            // Bump the session version to revoke every other session of the account
             let user = diesel::update(users.find(user_id))
-                .set((users::password_file.eq(password_file_bytes.to_vec()),))
+                .set((
+                    users::password_file.eq(password_file_bytes.to_vec()),
+                    users::session_version.eq(users::session_version + 1),
+                ))
                 .returning(User::as_returning())
                 .get_result(conn)
                 .map_err(|_| ServerError::Internal)?;
@@ -250,7 +300,7 @@ pub fn registration_finish_update(
                 .load::<KeyPairs>(conn)
                 .map_err(|_| ServerError::Internal)?;
 
-            Ok((keys, user.email))
+            Ok((keys, user.email, user.session_version))
         })
         .map_err(|_| ServerError::Internal)?;
 
@@ -258,7 +308,7 @@ pub fn registration_finish_update(
     server::mail::send_password_changed_notification_email(result.1.as_str(), mailer)
         .map_err(|_| ServerError::Internal)?;
 
-    Ok(result.0)
+    Ok((result.0, result.2))
 }
 
 ///
@@ -419,7 +469,12 @@ pub fn registration_finish_password_reset(
                 ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result)
                     .serialize();
             let user = diesel::update(users.find(user.id))
-                .set((crate::schema::users::password_file.eq(password_file_bytes.to_vec()),))
+                .set((
+                    crate::schema::users::password_file.eq(password_file_bytes.to_vec()),
+                    // Revoke every existing session of the account
+                    crate::schema::users::session_version
+                        .eq(crate::schema::users::session_version + 1),
+                ))
                 .returning(User::as_returning())
                 .get_result(conn)
                 .map_err(|_| ServerError::Internal)?;
@@ -595,25 +650,37 @@ pub fn get_user(
         role: user.role,
         number_transfers: user.number_transfers,
         current_period_end: user.current_period_end,
+        session_version: user.session_version,
     })
 }
 
-pub fn increment_number_transfers(
+/// Current state of an account, used to re-validate a session on every request
+pub struct SessionUser {
+    pub email: String,
+    pub role: String,
+    pub session_version: i64,
+}
+
+pub fn get_session_user(
     user_id_param: Uuid,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), ServerError> {
+) -> Result<Option<SessionUser>, ServerError> {
+    use crate::schema::users;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
-    let updated_rows = diesel::update(users.filter(crate::schema::users::id.eq(user_id_param)))
-        .set(crate::schema::users::number_transfers.eq(crate::schema::users::number_transfers + 1))
-        .execute(&mut conn)
+    let user = users::table
+        .filter(users::id.eq(user_id_param))
+        .filter(users::email_verified.eq(true))
+        .select((users::email, users::role, users::session_version))
+        .first::<(String, String, i64)>(&mut conn)
+        .optional()
         .map_err(|_| ServerError::Internal)?;
 
-    if updated_rows != 1 {
-        return Err(ServerError::Internal);
-    }
-
-    Ok(())
+    Ok(user.map(|(email, role, session_version)| SessionUser {
+        email,
+        role,
+        session_version,
+    }))
 }
 
 pub async fn delete_user(
@@ -736,7 +803,7 @@ pub fn add_key(
     user_id_param: Uuid,
     key: NewKeyPairsDecoded,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<Vec<KeyPairs>, ServerError> {
+) -> Result<(Vec<KeyPairs>, i64), ServerError> {
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let new_key = NewKeyPairs {
@@ -755,7 +822,7 @@ pub fn add_key(
         revoked_at: None,
     };
 
-    let transaction_result = conn.transaction::<Vec<KeyPairs>, ServerError, _>(|conn| {
+    let transaction_result = conn.transaction::<(Vec<KeyPairs>, i64), ServerError, _>(|conn| {
         // Insert the new key
         diesel::insert_into(crate::schema::key_pairs::table)
             .values(&new_key)
@@ -782,7 +849,16 @@ pub fn add_key(
             .load::<KeyPairs>(conn)
             .map_err(|_| ServerError::Internal)?;
 
-        Ok(keys)
+        // Revoke every other session of the account on key rotation
+        let session_version = diesel::update(users.find(user_id_param))
+            .set(
+                crate::schema::users::session_version.eq(crate::schema::users::session_version + 1),
+            )
+            .returning(crate::schema::users::session_version)
+            .get_result::<i64>(conn)
+            .map_err(|_| ServerError::Internal)?;
+
+        Ok((keys, session_version))
     })?;
 
     Ok(transaction_result)

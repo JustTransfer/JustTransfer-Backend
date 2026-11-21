@@ -158,6 +158,7 @@ pub struct RegisterUserEndUpdate {
 pub async fn register_user_end_update(
     Extension(claims_session): Extension<UserClaims>,
     State(state): State<AppState>,
+    session: Session,
     Json(payload): Json<RegisterUserEndUpdate>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Validate payload
@@ -198,13 +199,23 @@ pub async fn register_user_end_update(
         })
         .collect();
 
-    let keys = server::connected::registration_finish_update(
+    let (keys, session_version) = server::connected::registration_finish_update(
         client_registration_finish,
         &*claims_session.email,
         decoded_keys.map_err(|_| ApiError::ServerError)?,
         &state.db,
         &state.mailer,
     )?;
+
+    // Every other session was revoked, keep the current one valid
+    session
+        .cycle_id()
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session
+        .insert(AUTH_KEY_SESSION_VERSION, session_version)
+        .await
+        .map_err(|_| ApiError::ServerError)?;
 
     let keys_encoded: Vec<KeyPairsEncoded> = keys
         .into_iter()
@@ -424,21 +435,24 @@ pub async fn login_user_end(
     let role = api_handlers::auth::Role::try_from(user.role.as_str())
         .map_err(|_| ApiError::ServerError)?;
 
-    // Create session
+    // Rotate the session id so a session id known before the login (session fixation)
+    // never becomes authenticated
+    session
+        .cycle_id()
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+
+    // Create session; the role and email are read from the database on every request
     session
         .insert(AUTH_KEY_USER_ID, user.id)
         .await
         .map_err(|_| ApiError::ServerError)?;
     session
-        .insert(AUTH_KEY_EMAIL, &user.email)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
-    session
-        .insert(AUTH_KEY_ROLE, role.to_string())
-        .await
-        .map_err(|_| ApiError::ServerError)?;
-    session
         .insert(AUTH_KEY_CREATED_AT, Utc::now().timestamp())
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session
+        .insert(AUTH_KEY_SESSION_VERSION, user.session_version)
         .await
         .map_err(|_| ApiError::ServerError)?;
 
@@ -554,6 +568,7 @@ pub struct AddKeyResult {
 pub async fn add_key(
     Extension(claims_session): Extension<UserClaims>,
     State(state): State<AppState>,
+    session: Session,
     Json(payload): Json<AddKeyParam>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Validate payload
@@ -581,7 +596,18 @@ pub async fn add_key(
             .map_err(|_| ApiError::Base64)?,
     };
 
-    let keys = server::connected::add_key(claims_session.id, decoded_key, &state.db)?;
+    let (keys, session_version) =
+        server::connected::add_key(claims_session.id, decoded_key, &state.db)?;
+
+    // Every other session was revoked, keep the current one valid
+    session
+        .cycle_id()
+        .await
+        .map_err(|_| ApiError::ServerError)?;
+    session
+        .insert(AUTH_KEY_SESSION_VERSION, session_version)
+        .await
+        .map_err(|_| ApiError::ServerError)?;
 
     let encoded_keys: Vec<KeyPairsEncoded> = keys
         .into_iter()

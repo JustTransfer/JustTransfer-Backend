@@ -140,11 +140,17 @@ async fn delete_invalid_link_transfer_db(
 ) -> Result<(), ServerError> {
     use crate::schema::link_transfers;
 
+    // The dummy transfer must never be deleted
+    if id_param == DUMMY_LINK_MESSAGE_ID {
+        return Ok(());
+    }
+
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     // Check if the message is expired or has reached max downloads
     let message_opt = link_transfers
         .filter(link_transfers::id.eq(id_param))
+        .filter(link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
         .filter(
             link_transfers::number_downloads
                 .ge(link_transfers::max_downloads)
@@ -179,8 +185,10 @@ pub async fn login_start_link(
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
+    // The dummy transfer is handled as a nonexistent one
     let link_message_opt = link_transfers::table
         .filter(link_transfers::id.eq(id_param))
+        .filter(link_transfers::id.ne(DUMMY_LINK_MESSAGE_ID))
         .first::<LinkTransfer>(&mut conn)
         .optional()?;
 
@@ -235,6 +243,11 @@ pub async fn login_end_link(
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
 ) -> Result<(), ServerError> {
     use crate::schema::link_transfers;
+
+    // Nobody may log in to the dummy transfer
+    if id_param == DUMMY_LINK_MESSAGE_ID {
+        return Err(ServerError::Internal);
+    }
 
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -443,6 +456,11 @@ pub async fn link_send_message(
 ) -> Result<(Vec<String>, String), ServerError> {
     use crate::schema::link_transfers;
 
+    // The dummy transfer id is reserved
+    if id_transfer == DUMMY_LINK_MESSAGE_ID {
+        return Err(ServerError::Forbidden);
+    }
+
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
     let password_file_param =
@@ -501,6 +519,15 @@ pub async fn link_send_message(
             let max_user = role.max_messages().ok_or(ServerError::Internal)?;
             if created >= max_user {
                 return Err(ServerError::QuotaExceeded);
+            }
+
+            // Increment the user's number of transfers
+            let updated = diesel::update(users::table.filter(users::id.eq(user_id)))
+                .set(users::number_transfers.eq(users::number_transfers + 1))
+                .execute(conn)
+                .map_err(|_| ServerError::Internal)?;
+            if updated != 1 {
+                return Err(ServerError::Internal);
             }
         }
 

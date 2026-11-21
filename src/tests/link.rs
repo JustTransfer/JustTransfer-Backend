@@ -147,6 +147,46 @@ async fn link_login_start_answers_for_unknown_transfers() {
 }
 
 #[tokio::test]
+async fn dummy_transfer_can_neither_be_deleted_nor_claimed() {
+    let pool = require_db!();
+    let _guard = GLOBAL_STATE.lock().await;
+
+    // The dummy row always looks expired, but a login on its id must not delete it...
+    assert!(
+        link_login(&pool, &offline_s3(), DUMMY_LINK_MESSAGE_ID, PASSWORD)
+            .await
+            .is_err()
+    );
+    assert!(load_link(&pool, DUMMY_LINK_MESSAGE_ID).is_some());
+
+    // ...and its id can't be used for a new transfer.
+    let upload = opaque_register(PASSWORD, |request| {
+        link_send_message_start(DUMMY_LINK_MESSAGE_ID, request, &pool).unwrap()
+    });
+    let result = link_send_message(
+        upload,
+        DUMMY_LINK_MESSAGE_ID,
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        Uuid::new_v4(),
+        1,
+        1,
+        Utc::now(),
+        10,
+        Role::Anonymous,
+        None,
+        &pool,
+        &offline_s3(),
+    )
+    .await;
+    assert!(matches!(result, Err(ServerError::Forbidden)));
+}
+
+#[tokio::test]
 async fn link_login_deletes_expired_and_exhausted_transfers() {
     let pool = require_db!();
     let s3 = require_s3!();
@@ -317,8 +357,50 @@ async fn creating_a_transfer_starts_a_multipart_upload_with_one_url_per_chunk() 
         assert_eq!((stored.file_id, stored.upload_id), (file_id, upload_id));
         assert!(stored.mac.is_none(), "not finished yet");
     }
-    // Creating a transfer does not count against the quota; finishing does.
-    assert_eq!(load_user(&pool, user.id).unwrap().number_transfers, 0);
+    // Creating a transfer counts against the quota, whether it is finished or not.
+    assert_eq!(load_user(&pool, user.id).unwrap().number_transfers, 3);
+}
+
+#[tokio::test]
+async fn unfinished_transfers_count_against_the_monthly_quota() {
+    let pool = require_db!();
+    let s3 = require_s3!();
+    let user = insert_user(&pool, "user");
+
+    // Start every allowed transfer without finishing any of them.
+    for _ in 0..USER_MONTHLY_TRANSFERS {
+        create_transfer(&pool, &s3, 1, Role::User, Some(user.id)).await;
+    }
+    assert_eq!(
+        load_user(&pool, user.id).unwrap().number_transfers,
+        USER_MONTHLY_TRANSFERS
+    );
+
+    let id = Uuid::new_v4();
+    let upload = opaque_register(PASSWORD, |request| {
+        link_send_message_start(id, request, &pool).unwrap()
+    });
+    let result = link_send_message(
+        upload,
+        id,
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        Uuid::new_v4(),
+        1,
+        1,
+        Utc::now(),
+        1,
+        Role::User,
+        Some(user.id),
+        &pool,
+        &s3,
+    )
+    .await;
+    assert!(matches!(result, Err(ServerError::QuotaExceeded)));
 }
 
 #[tokio::test]

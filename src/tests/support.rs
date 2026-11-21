@@ -614,6 +614,18 @@ impl TestClient {
         Self::new(self.app.clone())
     }
 
+    /// Another browser holding the same session cookie (e.g. a stolen session).
+    pub fn sharing_session(&self) -> Self {
+        Self {
+            app: self.app.clone(),
+            cookie: self.cookie.clone(),
+        }
+    }
+
+    pub fn cookie(&self) -> Option<&str> {
+        self.cookie.as_deref()
+    }
+
     pub async fn send(
         &mut self,
         method: Method,
