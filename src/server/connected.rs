@@ -132,24 +132,20 @@ pub fn registration_finish(
             Err(DieselError::DatabaseError(DatabaseErrorKind::UniqueViolation, info))
                 if info.constraint_name().unwrap_or("").contains("email") =>
             {
-                // Savepoint was rolled back, outer transaction is still valid here
-                // Lock the existing account so a concurrent verification can't interleave
                 let existing = users::table
                     .filter(users::email.eq(email_param))
                     .for_update()
                     .first::<User>(conn)
                     .map_err(|_| ServerError::Internal)?;
 
+                // If the account is verified, we don't want to replace its keys,
+                // but if it's unverified, we replace its keys and bump the session version
                 if existing.email_verified {
                     diesel::insert_into(crate::schema::key_pairs::table)
                         .values(&dummy_key)
                         .execute(conn)
                         .map_err(|_| ServerError::Internal)?;
                 } else {
-                    // The unverified account may have been created by someone else (account
-                    // pre-hijacking): only ever send a link that verifies the credentials of
-                    // the current registrant, so replace the password file and keys, and
-                    // rotate the token to invalidate any link sent for the previous ones.
                     diesel::update(users.find(existing.id))
                         .set((
                             users::password_file.eq(new_user.password_file),
@@ -160,14 +156,7 @@ pub fn registration_finish(
                         .execute(conn)
                         .map_err(|_| ServerError::Internal)?;
 
-                    diesel::delete(
-                        crate::schema::reset_tokens::table
-                            .filter(crate::schema::reset_tokens::account_id.eq(existing.id)),
-                    )
-                    .execute(conn)
-                    .map_err(|_| ServerError::Internal)?;
-
-                    // An unverified account can't log in, so its keys are never referenced
+                    // Delete the existing keys of the unverified account and insert the new ones
                     diesel::delete(
                         crate::schema::key_pairs::table
                             .filter(crate::schema::key_pairs::owner_id.eq(existing.id)),
