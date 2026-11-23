@@ -42,6 +42,7 @@ diesel::table! {
         sender_key_id -> Nullable<Uuid>,
         signature_metadata -> Nullable<Bytea>,
         signature -> Nullable<Bytea>,
+        session_version -> Int8,
     }
 }
 

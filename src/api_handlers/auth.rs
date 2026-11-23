@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
 use axum::extract::{Path, State};
 use axum::middleware::Next;
@@ -275,23 +275,71 @@ pub async fn require_auth(
     Ok(next.run(req).await)
 }
 
+// Link transfers the session is logged in to, with the session version of each transfer at login time
+type LinkSessions = HashMap<Uuid, i64>;
+
+async fn get_link_sessions(session: &Session) -> Result<LinkSessions, ApiError> {
+    Ok(session
+        .get::<LinkSessions>(AUTH_KEY_LINK)
+        .await
+        .map_err(|_| ApiError::ServerError)?
+        .unwrap_or_default())
+}
+
+/// Authorize the session for the link transfer `id`, logged in at `session_version`.
+pub async fn authorize_link_session(
+    session: &Session,
+    id: Uuid,
+    session_version: i64,
+) -> Result<(), ApiError> {
+    let mut sessions = get_link_sessions(session).await?;
+    sessions.insert(id, session_version);
+    session
+        .insert(AUTH_KEY_LINK, sessions)
+        .await
+        .map_err(|_| ApiError::ServerError)
+}
+
+/// Remove the authorization of the session for the link transfer `id`.
+async fn revoke_link_session(session: &Session, id: Uuid) -> Result<(), ApiError> {
+    let mut sessions = get_link_sessions(session).await?;
+    if sessions.remove(&id).is_some() {
+        session
+            .insert(AUTH_KEY_LINK, sessions)
+            .await
+            .map_err(|_| ApiError::ServerError)?;
+    }
+    Ok(())
+}
+
 #[derive(Deserialize)]
 pub struct LinkAuthParam {
     id: Uuid,
 }
 pub async fn require_auth_link(
+    State(state): State<AppState>,
     Path(params): Path<LinkAuthParam>,
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let authorized_ids = session
-        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
+    let sessions = get_link_sessions(&session)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .unwrap_or_default();
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if !authorized_ids.contains(&params.id) {
+    let Some(&version) = sessions.get(&params.id) else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+
+    // The session is only valid while the transfer exists and its password has
+    // not changed since the login
+    let current = crate::server::link::get_link_session_version(params.id, &state.db)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if current != Some(version) {
+        revoke_link_session(&session, params.id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Err(StatusCode::UNAUTHORIZED);
     }
 

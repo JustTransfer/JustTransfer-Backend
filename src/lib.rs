@@ -141,7 +141,10 @@ pub fn build_router(state: api_handlers::misc::AppState) -> Router {
             "/api/link/message/{id}/uploadfinish/{file_id}",
             post(api_handlers::link::upload_link_message_finish_multipart),
         )
-        .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            api_handlers::auth::require_auth_link,
+        ))
         .route(
             "/api/link/message/start",
             post(api_handlers::link::link_message_send_start),
@@ -181,7 +184,10 @@ pub fn build_router(state: api_handlers::misc::AppState) -> Router {
             "/api/link/message/{id}/password/end",
             post(api_handlers::link::link_message_password_change_end),
         )
-        .layer(middleware::from_fn(api_handlers::auth::require_auth_link))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            api_handlers::auth::require_auth_link,
+        ))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             api_handlers::auth::require_auth,

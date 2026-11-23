@@ -241,7 +241,7 @@ pub async fn login_end_link(
     id_param: Uuid,
     client_login_finish_result: CredentialFinalization<DefaultCipherSuite>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), ServerError> {
+) -> Result<i64, ServerError> {
     use crate::schema::link_transfers;
 
     // Nobody may log in to the dummy transfer
@@ -253,30 +253,52 @@ pub async fn login_end_link(
 
     // Load the ServerLogin state from the DB
     // Transaction to get the server login state and delete it from the DB
-    let transaction_result =
-        conn.transaction::<ServerLogin<DefaultCipherSuite>, ServerError, _>(|conn| {
-            let server_login_state_bytes = link_transfers::table
+    let (transaction_result, session_version) = conn
+        .transaction::<(ServerLogin<DefaultCipherSuite>, i64), ServerError, _>(|conn| {
+            let (server_login_state_bytes, session_version) = link_transfers::table
                 .filter(link_transfers::id.eq(id_param))
-                .select(link_transfers::server_login)
-                .first::<Option<Vec<u8>>>(conn)
+                .select((
+                    link_transfers::server_login,
+                    link_transfers::session_version,
+                ))
+                .first::<(Option<Vec<u8>>, i64)>(conn)
                 .optional()?
-                .ok_or(ServerError::Internal)?
                 .ok_or(ServerError::Internal)?;
+            let server_login_state_bytes = server_login_state_bytes.ok_or(ServerError::Internal)?;
 
             diesel::update(link_transfers::table.filter(link_transfers::id.eq(id_param)))
                 .set(link_transfers::server_login.eq::<Option<Vec<u8>>>(None))
                 .execute(conn)
                 .map_err(|_| ServerError::Internal)?;
 
-            Ok(ServerLogin::deserialize(&server_login_state_bytes)
-                .map_err(|_| ServerError::Internal)?)
+            Ok((
+                ServerLogin::deserialize(&server_login_state_bytes)
+                    .map_err(|_| ServerError::Internal)?,
+                session_version,
+            ))
         })?;
 
     transaction_result
         .finish(client_login_finish_result, ServerLoginParameters::default())
         .map_err(|_| ServerError::Internal)?;
 
-    Ok(())
+    Ok(session_version)
+}
+
+/// Current session version of a link transfer, `None` if the transfer does not exist.
+/// Sessions logged in with an older version must no longer be accepted.
+pub fn get_link_session_version(
+    id: Uuid,
+    pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
+) -> Result<Option<i64>, ServerError> {
+    use crate::schema::link_transfers;
+    let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
+
+    Ok(link_transfers::table
+        .filter(link_transfers::id.eq(id))
+        .select(link_transfers::session_version)
+        .first::<i64>(&mut conn)
+        .optional()?)
 }
 
 pub async fn link_get_message_metadata(
@@ -810,7 +832,7 @@ pub fn link_change_password_end(
     c_mac_key: Vec<u8>,
     nonce_mac_key: Vec<u8>,
     pool: &r2d2::Pool<ConnectionManager<PgConnection>>,
-) -> Result<(), ServerError> {
+) -> Result<i64, ServerError> {
     use crate::schema::link_transfers;
     let mut conn = pool.get().map_err(|_| ServerError::Internal)?;
 
@@ -836,17 +858,21 @@ pub fn link_change_password_end(
     let password_file_param =
         ServerRegistration::<DefaultCipherSuite>::finish(client_registration_finish_result);
 
-    // Update the transfer
-    diesel::update(link_transfers.filter(link_transfers::id.eq(id)))
+    // Update the transfer and bump the session version so every session
+    // logged in with the old password is logged out
+    let session_version = diesel::update(link_transfers.filter(link_transfers::id.eq(id)))
         .set((
             link_transfers::password_file.eq(password_file_param.serialize().to_vec()),
             link_transfers::c_enc_key.eq(c_enc_key),
             link_transfers::nonce_enc_key.eq(nonce_enc_key),
             link_transfers::c_mac_key.eq(c_mac_key),
             link_transfers::nonce_mac_key.eq(nonce_mac_key),
+            link_transfers::server_login.eq::<Option<Vec<u8>>>(None),
+            link_transfers::session_version.eq(link_transfers::session_version + 1),
         ))
-        .execute(&mut conn)
+        .returning(link_transfers::session_version)
+        .get_result::<i64>(&mut conn)
         .map_err(|_| ServerError::Internal)?;
 
-    Ok(())
+    Ok(session_version)
 }

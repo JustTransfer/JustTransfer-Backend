@@ -821,3 +821,42 @@ async fn connected_user_gets_the_auth_key_without_signing() {
     assert_ne!(auth_key, Uuid::nil());
     assert_eq!(auth_key, load_link(&pool, upload.id).unwrap().auth_key);
 }
+
+#[tokio::test]
+async fn link_password_change_logs_out_existing_link_sessions() {
+    use crate::schema::link_transfers;
+    let pool = require_db!();
+    let mut receiver = TestClient::new(test_app(app_state(pool.clone(), offline_s3())));
+    let link = insert_link(&pool, LinkSpec::default());
+    diesel::update(link_transfers::table.find(link.id))
+        .set(link_transfers::password_file.eq(password_file(&pool, link.id.as_bytes(), PASSWORD)))
+        .execute(&mut pool.get().unwrap())
+        .unwrap();
+
+    let metadata_uri = format!("/api/link/message/{}/metadata", link.id);
+    assert!(link_login(&mut receiver, link.id).await);
+    assert_eq!(receiver.get(&metadata_uri).await.status, StatusCode::OK);
+
+    let upload = opaque_register(PASSWORD, |request| {
+        crate::server::link::link_send_message_start(link.id, request, &pool).unwrap()
+    });
+    crate::server::link::link_change_password_end(
+        link.id,
+        link.auth_key,
+        upload,
+        vec![20; 16],
+        vec![21; 16],
+        vec![22; 16],
+        vec![23; 16],
+        &pool,
+    )
+    .unwrap();
+
+    assert_eq!(
+        receiver.get(&metadata_uri).await.status,
+        StatusCode::UNAUTHORIZED,
+        "session from before the password change"
+    );
+    assert!(link_login(&mut receiver, link.id).await);
+    assert_eq!(receiver.get(&metadata_uri).await.status, StatusCode::OK);
+}

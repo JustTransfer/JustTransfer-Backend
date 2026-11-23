@@ -236,6 +236,7 @@ pub struct LinkTransfer {
     pub sender_key_id: Option<Uuid>,
     pub signature_metadata: Option<Vec<u8>>,
     pub signature: Option<Vec<u8>>,
+    pub session_version: i64,
 }
 
 #[derive(Insertable)]

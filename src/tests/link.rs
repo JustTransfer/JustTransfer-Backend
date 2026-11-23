@@ -30,7 +30,7 @@ async fn link_login(
     s3: &aws_sdk_s3::Client,
     id: Uuid,
     password: &[u8],
-) -> Result<(), ServerError> {
+) -> Result<i64, ServerError> {
     let (state, request) = opaque_login_start(password);
     let response = login_start_link(id, request, pool, s3).await?;
     let finalization =
@@ -653,15 +653,24 @@ async fn password_change_requires_the_auth_key() {
         change(Uuid::new_v4()),
         Err(ServerError::Forbidden)
     ));
-    assert!(link_login(&pool, &offline_s3(), link.id, PASSWORD)
-        .await
-        .is_ok());
+    assert_eq!(
+        link_login(&pool, &offline_s3(), link.id, PASSWORD)
+            .await
+            .ok(),
+        Some(0)
+    );
+    assert_eq!(get_link_session_version(link.id, &pool).unwrap(), Some(0));
 
-    change(link.auth_key).unwrap();
+    // The change bumps the session version so existing sessions are dropped
+    assert_eq!(change(link.auth_key).unwrap(), 1);
+    assert_eq!(get_link_session_version(link.id, &pool).unwrap(), Some(1));
 
-    assert!(link_login(&pool, &offline_s3(), link.id, OTHER_PASSWORD)
-        .await
-        .is_ok());
+    assert_eq!(
+        link_login(&pool, &offline_s3(), link.id, OTHER_PASSWORD)
+            .await
+            .ok(),
+        Some(1)
+    );
     assert!(link_login(&pool, &offline_s3(), link.id, PASSWORD)
         .await
         .is_err());
@@ -730,4 +739,35 @@ async fn cleanup_deletes_expired_and_exhausted_transfers_only() {
     // The decoy row used against id enumeration is never cleaned up,
     // although it has max_downloads = 0.
     assert!(load_link(&pool, DUMMY_LINK_MESSAGE_ID).is_some());
+}
+
+#[tokio::test]
+async fn password_change_invalidates_a_login_started_with_the_old_password() {
+    let pool = require_db!();
+    let link = protected_link(&pool, LinkSpec::default());
+    let s3 = offline_s3();
+
+    let (state, request) = opaque_login_start(PASSWORD);
+    let response = login_start_link(link.id, request, &pool, &s3)
+        .await
+        .unwrap();
+
+    let upload = opaque_register(OTHER_PASSWORD, |request| {
+        link_send_message_start(link.id, request, &pool).unwrap()
+    });
+    link_change_password_end(
+        link.id,
+        link.auth_key,
+        upload,
+        vec![20; 16],
+        vec![21; 16],
+        vec![22; 16],
+        vec![23; 16],
+        &pool,
+    )
+    .unwrap();
+
+    // Finishing the pending login would otherwise yield a session at the new version
+    let finalization = opaque_login_finish(state, PASSWORD, response).unwrap();
+    assert!(login_end_link(link.id, finalization, &pool).await.is_err());
 }
