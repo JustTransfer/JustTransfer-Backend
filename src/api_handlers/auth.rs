@@ -190,6 +190,7 @@ pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<Memor
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name(cookie_name)
         .with_secure(true)
+        .with_always_save(true)
         .with_expiry(Expiry::OnInactivity(Duration::minutes(
             *SESSION_DURATION_MINUTES.get().unwrap(),
         )));
