@@ -30,7 +30,7 @@ async fn link_login(
     s3: &aws_sdk_s3::Client,
     id: Uuid,
     password: &[u8],
-) -> Result<(), ServerError> {
+) -> Result<i64, ServerError> {
     let (state, request) = opaque_login_start(password);
     let response = login_start_link(id, request, pool, s3).await?;
     let finalization =
@@ -144,6 +144,46 @@ async fn link_login_start_answers_for_unknown_transfers() {
         .await
         .is_ok());
     assert!(load_link(&pool, unknown).is_none());
+}
+
+#[tokio::test]
+async fn dummy_transfer_can_neither_be_deleted_nor_claimed() {
+    let pool = require_db!();
+    let _guard = GLOBAL_STATE.lock().await;
+
+    // The dummy row always looks expired, but a login on its id must not delete it...
+    assert!(
+        link_login(&pool, &offline_s3(), DUMMY_LINK_MESSAGE_ID, PASSWORD)
+            .await
+            .is_err()
+    );
+    assert!(load_link(&pool, DUMMY_LINK_MESSAGE_ID).is_some());
+
+    // ...and its id can't be used for a new transfer.
+    let upload = opaque_register(PASSWORD, |request| {
+        link_send_message_start(DUMMY_LINK_MESSAGE_ID, request, &pool).unwrap()
+    });
+    let result = link_send_message(
+        upload,
+        DUMMY_LINK_MESSAGE_ID,
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        Uuid::new_v4(),
+        1,
+        1,
+        Utc::now(),
+        10,
+        Role::Anonymous,
+        None,
+        &pool,
+        &offline_s3(),
+    )
+    .await;
+    assert!(matches!(result, Err(ServerError::Forbidden)));
 }
 
 #[tokio::test]
@@ -317,8 +357,50 @@ async fn creating_a_transfer_starts_a_multipart_upload_with_one_url_per_chunk() 
         assert_eq!((stored.file_id, stored.upload_id), (file_id, upload_id));
         assert!(stored.mac.is_none(), "not finished yet");
     }
-    // Creating a transfer does not count against the quota; finishing does.
-    assert_eq!(load_user(&pool, user.id).unwrap().number_transfers, 0);
+    // Creating a transfer counts against the quota, whether it is finished or not.
+    assert_eq!(load_user(&pool, user.id).unwrap().number_transfers, 3);
+}
+
+#[tokio::test]
+async fn unfinished_transfers_count_against_the_monthly_quota() {
+    let pool = require_db!();
+    let s3 = require_s3!();
+    let user = insert_user(&pool, "user");
+
+    // Start every allowed transfer without finishing any of them.
+    for _ in 0..USER_MONTHLY_TRANSFERS {
+        create_transfer(&pool, &s3, 1, Role::User, Some(user.id)).await;
+    }
+    assert_eq!(
+        load_user(&pool, user.id).unwrap().number_transfers,
+        USER_MONTHLY_TRANSFERS
+    );
+
+    let id = Uuid::new_v4();
+    let upload = opaque_register(PASSWORD, |request| {
+        link_send_message_start(id, request, &pool).unwrap()
+    });
+    let result = link_send_message(
+        upload,
+        id,
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        vec![1; 16],
+        Uuid::new_v4(),
+        1,
+        1,
+        Utc::now(),
+        1,
+        Role::User,
+        Some(user.id),
+        &pool,
+        &s3,
+    )
+    .await;
+    assert!(matches!(result, Err(ServerError::QuotaExceeded)));
 }
 
 #[tokio::test]
@@ -571,15 +653,24 @@ async fn password_change_requires_the_auth_key() {
         change(Uuid::new_v4()),
         Err(ServerError::Forbidden)
     ));
-    assert!(link_login(&pool, &offline_s3(), link.id, PASSWORD)
-        .await
-        .is_ok());
+    assert_eq!(
+        link_login(&pool, &offline_s3(), link.id, PASSWORD)
+            .await
+            .ok(),
+        Some(0)
+    );
+    assert_eq!(get_link_session_version(link.id, &pool).unwrap(), Some(0));
 
-    change(link.auth_key).unwrap();
+    // The change bumps the session version so existing sessions are dropped
+    assert_eq!(change(link.auth_key).unwrap(), 1);
+    assert_eq!(get_link_session_version(link.id, &pool).unwrap(), Some(1));
 
-    assert!(link_login(&pool, &offline_s3(), link.id, OTHER_PASSWORD)
-        .await
-        .is_ok());
+    assert_eq!(
+        link_login(&pool, &offline_s3(), link.id, OTHER_PASSWORD)
+            .await
+            .ok(),
+        Some(1)
+    );
     assert!(link_login(&pool, &offline_s3(), link.id, PASSWORD)
         .await
         .is_err());
@@ -648,4 +739,35 @@ async fn cleanup_deletes_expired_and_exhausted_transfers_only() {
     // The decoy row used against id enumeration is never cleaned up,
     // although it has max_downloads = 0.
     assert!(load_link(&pool, DUMMY_LINK_MESSAGE_ID).is_some());
+}
+
+#[tokio::test]
+async fn password_change_invalidates_a_login_started_with_the_old_password() {
+    let pool = require_db!();
+    let link = protected_link(&pool, LinkSpec::default());
+    let s3 = offline_s3();
+
+    let (state, request) = opaque_login_start(PASSWORD);
+    let response = login_start_link(link.id, request, &pool, &s3)
+        .await
+        .unwrap();
+
+    let upload = opaque_register(OTHER_PASSWORD, |request| {
+        link_send_message_start(link.id, request, &pool).unwrap()
+    });
+    link_change_password_end(
+        link.id,
+        link.auth_key,
+        upload,
+        vec![20; 16],
+        vec![21; 16],
+        vec![22; 16],
+        vec![23; 16],
+        &pool,
+    )
+    .unwrap();
+
+    // Finishing the pending login would otherwise yield a session at the new version
+    let finalization = opaque_login_finish(state, PASSWORD, response).unwrap();
+    assert!(login_end_link(link.id, finalization, &pool).await.is_err());
 }

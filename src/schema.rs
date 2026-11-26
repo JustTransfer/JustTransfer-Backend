@@ -42,6 +42,7 @@ diesel::table! {
         sender_key_id -> Nullable<Uuid>,
         signature_metadata -> Nullable<Bytea>,
         signature -> Nullable<Bytea>,
+        session_version -> Int8,
     }
 }
 
@@ -88,6 +89,7 @@ diesel::table! {
         stripe_subscription_id -> Nullable<Text>,
         stripe_customer_id -> Nullable<Text>,
         current_period_end -> Nullable<Timestamptz>,
+        session_version -> Int8,
     }
 }
 

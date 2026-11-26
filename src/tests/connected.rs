@@ -140,6 +140,71 @@ async fn registering_a_taken_email_succeeds_without_changing_the_account() {
 }
 
 #[tokio::test]
+async fn re_registering_an_unverified_email_replaces_its_credentials_and_token() {
+    let pool = require_db!();
+    let email = unique_email("prehijack");
+
+    // Someone else registers the email first, with their own password and keys.
+    register(&pool, &email, OTHER_PASSWORD);
+    let attacker = user_by_email(&pool, &email);
+    let attacker_key = load_keys(&pool, attacker.id)[0].id;
+
+    // The owner of the email then registers.
+    register(&pool, &email, PASSWORD);
+    let user = user_by_email(&pool, &email);
+    assert_eq!(user.id, attacker.id);
+    assert_ne!(
+        user.registration_token, attacker.registration_token,
+        "token rotated"
+    );
+    assert!(verify_email(attacker.registration_token, &pool).is_err());
+    let keys = load_keys(&pool, user.id);
+    assert_eq!(keys.len(), 1);
+    assert_ne!(keys[0].id, attacker_key);
+
+    // The link sent to the owner verifies the owner's credentials only.
+    verify_email(user.registration_token, &pool).unwrap();
+    assert!(login(&pool, &email, PASSWORD).is_ok());
+    assert!(login(&pool, &email, OTHER_PASSWORD).is_err());
+}
+
+#[tokio::test]
+async fn credential_changes_bump_the_session_version() {
+    let pool = require_db!();
+    let user = register_verified(&pool, PASSWORD);
+    let version = |pool: &DbPool| user_by_email(pool, &user.email).session_version;
+    let start = version(&pool);
+
+    let key_id = load_keys(&pool, user.id)[0].id;
+    rotate_password(&pool, &user.email, key_id, OTHER_PASSWORD).unwrap();
+    assert_eq!(version(&pool), start + 1, "password change");
+
+    let (cpriv_enc, nonce_enc, pub_enc, cpriv_sign, nonce_sign, pub_sign) = key_bytes();
+    let (_, returned) = add_key(
+        user.id,
+        NewKeyPairsDecoded {
+            enc_public_key: pub_enc,
+            enc_nonce_private_key: nonce_enc,
+            enc_cipher_private_key: cpriv_enc,
+            sign_public_key: pub_sign,
+            sign_nonce_private_key: nonce_sign,
+            sign_cipher_private_key: cpriv_sign,
+        },
+        &pool,
+    )
+    .unwrap();
+    assert_eq!(
+        (version(&pool), returned),
+        (start + 2, start + 2),
+        "key rotation"
+    );
+
+    let session_user = get_session_user(user.id, &pool).unwrap().unwrap();
+    assert_eq!(session_user.session_version, start + 2);
+    assert!(get_session_user(Uuid::new_v4(), &pool).unwrap().is_none());
+}
+
+#[tokio::test]
 async fn verification_token_is_single_use() {
     let pool = require_db!();
     let email = unique_email("verify");
@@ -239,7 +304,7 @@ fn rotate_password(
         sign_nonce_private_key: vec![8u8; SYM_LEN_NONCE],
         sign_cipher_private_key: vec![8u8; 64],
     };
-    registration_finish_update(upload, email, vec![key], pool, &mailer())
+    registration_finish_update(upload, email, vec![key], pool, &mailer()).map(|(keys, _)| keys)
 }
 
 #[tokio::test]
@@ -327,6 +392,11 @@ async fn password_reset_replaces_password_revokes_keys_and_drops_saved_transfers
 
     finish_reset(&pool, &user.email, token, OTHER_PASSWORD).unwrap();
 
+    assert_eq!(
+        user_by_email(&pool, &user.email).session_version,
+        user.session_version + 1,
+        "existing sessions revoked"
+    );
     assert!(login(&pool, &user.email, OTHER_PASSWORD).is_ok());
     assert!(login(&pool, &user.email, PASSWORD).is_err());
     let keys = load_keys(&pool, user.id);
@@ -379,15 +449,12 @@ async fn get_user_reports_account_info() {
 }
 
 #[tokio::test]
-async fn transfer_counter_increments_and_monthly_reset_clears_it() {
+async fn monthly_reset_clears_the_transfer_counter() {
     let pool = require_db!();
     let _guard = GLOBAL_STATE.lock().await;
     let user = insert_user(&pool, "user");
 
-    increment_number_transfers(user.id, &pool).unwrap();
-    increment_number_transfers(user.id, &pool).unwrap();
-    assert_eq!(load_user(&pool, user.id).unwrap().number_transfers, 2);
-    assert!(increment_number_transfers(Uuid::new_v4(), &pool).is_err());
+    set_number_transfers(&pool, user.id, 2);
 
     reset_transfer_counter_all_users(&pool).await.unwrap();
     assert_eq!(load_user(&pool, user.id).unwrap().number_transfers, 0);
@@ -484,7 +551,8 @@ async fn adding_a_key_revokes_the_others_and_prunes_unused_revoked_keys() {
         },
         &pool,
     )
-    .unwrap();
+    .unwrap()
+    .0;
 
     let ids: Vec<Uuid> = keys.iter().map(|k| k.id).collect();
     let active: Vec<_> = keys.iter().filter(|k| k.is_active).collect();

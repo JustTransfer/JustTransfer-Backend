@@ -149,6 +149,8 @@ pub struct User {
     pub stripe_subscription_id: Option<String>,
     pub stripe_customer_id: Option<String>,
     pub current_period_end: Option<chrono::DateTime<Utc>>,
+
+    pub session_version: i64,
 }
 
 pub struct InfoUser {
@@ -157,6 +159,7 @@ pub struct InfoUser {
     pub role: String,
     pub number_transfers: i64,
     pub current_period_end: Option<chrono::DateTime<Utc>>,
+    pub session_version: i64,
 }
 
 #[derive(Insertable)]
@@ -233,6 +236,7 @@ pub struct LinkTransfer {
     pub sender_key_id: Option<Uuid>,
     pub signature_metadata: Option<Vec<u8>>,
     pub signature: Option<Vec<u8>>,
+    pub session_version: i64,
 }
 
 #[derive(Insertable)]

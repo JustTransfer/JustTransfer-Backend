@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -137,21 +135,10 @@ pub async fn link_message_login_end(
     let req = CredentialFinalization::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    server::link::login_end_link(id, req, &state.db).await?;
+    let session_version = server::link::login_end_link(id, req, &state.db).await?;
 
     // Create session
-    let mut authorized_ids = session
-        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
-        .await
-        .map_err(|_| ApiError::ServerError)?
-        .unwrap_or_default();
-
-    authorized_ids.insert(id);
-
-    session
-        .insert(AUTH_KEY_LINK, authorized_ids)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+    auth::authorize_link_session(&session, id, session_version).await?;
 
     Ok((StatusCode::OK, Json(())))
 }
@@ -393,19 +380,8 @@ pub async fn upload_link_message(
     )
     .await?;
 
-    // Create session
-    let mut authorized_ids = session
-        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
-        .await
-        .map_err(|_| ApiError::ServerError)?
-        .unwrap_or_default();
-
-    authorized_ids.insert(payload.id);
-
-    session
-        .insert(AUTH_KEY_LINK, authorized_ids)
-        .await
-        .map_err(|_| ApiError::ServerError)?;
+    // Create session (a new transfer starts at session version 0)
+    auth::authorize_link_session(&session, payload.id, 0).await?;
 
     Ok((
         StatusCode::OK,
@@ -491,14 +467,11 @@ pub async fn upload_link_message_finish_multipart(
         return Err(ApiError::Forbidden);
     }
 
-    // Check if the user is connected and get the connected user id if available
+    // Check if the user is connected
     let is_connected = user_claims.is_some()
         && (user_claims.clone().unwrap().role == auth::Role::User
             || user_claims.clone().unwrap().role == auth::Role::Premium
             || user_claims.clone().unwrap().role == auth::Role::Admin);
-    let connected_user_id = user_claims
-        .as_ref()
-        .and_then(|claims| is_connected.then_some(claims.0.id));
 
     // Authorize only the other role than Anonymous to send email
     let receiver_email = if let Some(email) = payload.receiver_email.clone() {
@@ -568,10 +541,6 @@ pub async fn upload_link_message_finish_multipart(
             .transpose()?,
         &state.db,
     )?;
-
-    if let Some(user_id) = connected_user_id {
-        server::connected::increment_number_transfers(user_id, &state.db)?;
-    }
 
     // Only return the auth_key if the user is logged in
     let auth_key = if is_connected { auth_key } else { Uuid::nil() };
@@ -759,6 +728,7 @@ pub async fn link_message_password_change_end(
     Path(id): Path<Uuid>,
     Extension(link_claims): Extension<LinkClaims>,
     State(state): State<AppState>,
+    session: Session,
     Json(payload): Json<LinkMessagePasswordChangeEnd>,
 ) -> Result<impl IntoResponse, ApiError> {
     // Check that the path correspond to the id in session
@@ -775,7 +745,7 @@ pub async fn link_message_password_change_end(
     let req = RegistrationUpload::<DefaultCipherSuite>::deserialize(&bytes)
         .map_err(|_| ApiError::Opaque)?;
 
-    let server_registration_end_result = server::link::link_change_password_end(
+    let session_version = server::link::link_change_password_end(
         id,
         payload.auth_key,
         req,
@@ -793,6 +763,10 @@ pub async fn link_message_password_change_end(
             .map_err(|_| ApiError::Base64)?,
         &state.db,
     )?;
+
+    // Every other session logged in to this transfer is now logged out,
+    // keep the one that changed the password
+    auth::authorize_link_session(&session, id, session_version).await?;
 
     Ok((StatusCode::OK, Json(())))
 }

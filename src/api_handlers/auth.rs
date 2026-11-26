@@ -1,6 +1,6 @@
-use std::collections::HashSet;
+use std::collections::HashMap;
 
-use axum::extract::Path;
+use axum::extract::{Path, State};
 use axum::middleware::Next;
 use axum::{http::StatusCode, response::Response};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,7 @@ use std::fmt;
 use tracing::warn;
 use uuid::Uuid;
 
+use crate::api_handlers::misc::AppState;
 use crate::consts::*;
 use crate::error::*;
 
@@ -189,6 +190,7 @@ pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<Memor
     let session_layer = SessionManagerLayer::new(session_store)
         .with_name(cookie_name)
         .with_secure(true)
+        .with_always_save(true)
         .with_expiry(Expiry::OnInactivity(Duration::minutes(
             *SESSION_DURATION_MINUTES.get().unwrap(),
         )));
@@ -196,44 +198,119 @@ pub fn get_session_layer(cookie_name: &'static str) -> SessionManagerLayer<Memor
     session_layer
 }
 
+// Rebuilds the claims of an account session from the database.
+// Role and email are read from database, so a downgrade takes effect immediately
+// Returns `Ok(None)` when the session is not, or no longer, a valid account session.
+async fn load_session_claims(
+    session: &Session,
+    state: &AppState,
+) -> Result<Option<UserClaims>, StatusCode> {
+    // Load the user ID, creation timestamp, and session version from the session
+    let (user_id, created_at, version) = match (
+        session
+            .get::<Uuid>(AUTH_KEY_USER_ID)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        session
+            .get::<i64>(AUTH_KEY_CREATED_AT)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+        session
+            .get::<i64>(AUTH_KEY_SESSION_VERSION)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?,
+    ) {
+        (Some(user_id), Some(created_at), Some(version)) => (user_id, created_at, version),
+        _ => return Ok(None),
+    };
+
+    let user = crate::server::connected::get_session_user(user_id, &state.db)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    // Check that the session is still valid: the version must match and the session must not be too old
+    let valid = match &user {
+        Some(user) => {
+            user.session_version == version
+                && Utc::now().timestamp() - created_at <= MAX_SESSION_LIFETIME_DAYS * 24 * 60 * 60
+        }
+        None => false,
+    };
+
+    if !valid {
+        // Drop the stale account data, keeping any link transfer authorization
+        for key in [
+            AUTH_KEY_USER_ID,
+            AUTH_KEY_CREATED_AT,
+            AUTH_KEY_SESSION_VERSION,
+        ] {
+            session
+                .remove_value(key)
+                .await
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        return Ok(None);
+    }
+
+    let user = user.unwrap();
+    Ok(Some(UserClaims {
+        id: user_id,
+        email: user.email,
+        role: Role::try_from(user.role.as_str()).unwrap_or(Role::User),
+        iat: created_at,
+    }))
+}
+
 pub async fn require_auth(
+    State(state): State<AppState>,
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
+    let claims = load_session_claims(&session, &state)
+        .await?
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+
     // Extend the request with the user's role and email for later use in handlers
-    let email = session
-        .get::<String>(AUTH_KEY_EMAIL)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let user_id = session
-        .get::<Uuid>(AUTH_KEY_USER_ID)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let role = session
-        .get::<String>(AUTH_KEY_ROLE)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    let created_at = session
-        .get::<i64>(AUTH_KEY_CREATED_AT)
-        .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
-    req.extensions_mut().insert(UserClaims {
-        id: user_id,
-        email: email,
-        role: Role::try_from(role.as_str()).unwrap_or(Role::User),
-        iat: created_at,
-    });
+    req.extensions_mut().insert(claims);
 
     Ok(next.run(req).await)
+}
+
+// Link transfers the session is logged in to, with the session version of each transfer at login time
+type LinkSessions = HashMap<Uuid, i64>;
+
+async fn get_link_sessions(session: &Session) -> Result<LinkSessions, ApiError> {
+    Ok(session
+        .get::<LinkSessions>(AUTH_KEY_LINK)
+        .await
+        .map_err(|_| ApiError::ServerError)?
+        .unwrap_or_default())
+}
+
+/// Authorize the session for the link transfer `id`, logged in at `session_version`.
+pub async fn authorize_link_session(
+    session: &Session,
+    id: Uuid,
+    session_version: i64,
+) -> Result<(), ApiError> {
+    let mut sessions = get_link_sessions(session).await?;
+    sessions.insert(id, session_version);
+    session
+        .insert(AUTH_KEY_LINK, sessions)
+        .await
+        .map_err(|_| ApiError::ServerError)
+}
+
+/// Remove the authorization of the session for the link transfer `id`.
+async fn revoke_link_session(session: &Session, id: Uuid) -> Result<(), ApiError> {
+    let mut sessions = get_link_sessions(session).await?;
+    if sessions.remove(&id).is_some() {
+        session
+            .insert(AUTH_KEY_LINK, sessions)
+            .await
+            .map_err(|_| ApiError::ServerError)?;
+    }
+    Ok(())
 }
 
 #[derive(Deserialize)]
@@ -241,18 +318,29 @@ pub struct LinkAuthParam {
     id: Uuid,
 }
 pub async fn require_auth_link(
+    State(state): State<AppState>,
     Path(params): Path<LinkAuthParam>,
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
 ) -> Result<Response, StatusCode> {
-    let authorized_ids = session
-        .get::<HashSet<Uuid>>(AUTH_KEY_LINK)
+    let sessions = get_link_sessions(&session)
         .await
-        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
-        .unwrap_or_default();
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
 
-    if !authorized_ids.contains(&params.id) {
+    let Some(&version) = sessions.get(&params.id) else {
+        return Err(StatusCode::UNAUTHORIZED);
+    };
+
+    // The session is only valid while the transfer exists and its password has
+    // not changed since the login
+    let current = crate::server::link::get_link_session_version(params.id, &state.db)
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+
+    if current != Some(version) {
+        revoke_link_session(&session, params.id)
+            .await
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         return Err(StatusCode::UNAUTHORIZED);
     }
 
@@ -263,25 +351,16 @@ pub async fn require_auth_link(
 }
 
 pub async fn optional_auth(
+    State(state): State<AppState>,
     session: Session,
     mut req: axum::http::Request<axum::body::Body>,
     next: Next,
-) -> Response {
-    if let (Ok(Some(email)), Ok(Some(user_id)), Ok(Some(role)), Ok(Some(created_at))) = (
-        session.get::<String>(AUTH_KEY_EMAIL).await,
-        session.get::<Uuid>(AUTH_KEY_USER_ID).await,
-        session.get::<String>(AUTH_KEY_ROLE).await,
-        session.get::<i64>(AUTH_KEY_CREATED_AT).await,
-    ) {
-        req.extensions_mut().insert(UserClaims {
-            id: user_id,
-            email,
-            role: Role::try_from(role.as_str()).unwrap_or(Role::User),
-            iat: created_at,
-        });
+) -> Result<Response, StatusCode> {
+    if let Some(claims) = load_session_claims(&session, &state).await? {
+        req.extensions_mut().insert(claims);
     }
 
-    next.run(req).await
+    Ok(next.run(req).await)
 }
 
 // Check if the iat of the session is recent

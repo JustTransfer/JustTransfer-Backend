@@ -1,6 +1,6 @@
 [package]
 name = "justtransfer-backend"
-version = "0.2.5-beta"
+version = "0.2.6-beta"
 edition = "2021"
 
 [dependencies]
@@ -32,7 +32,7 @@ urlencoding = "2.1.3"
 once_cell = "1.21.4"
 diesel = { version = "2.4.0", features = ["postgres", "r2d2", "chrono", "uuid"] }
 diesel_migrations = "2.4.0"
-aws-sdk-s3 = { version = "1.159.0", default-features = false, features = ["default-https-client", "rt-tokio", "http-1x", "behavior-version-latest"] }
+aws-sdk-s3 = { version = "1.161.0", default-features = false, features = ["default-https-client", "rt-tokio", "http-1x", "behavior-version-latest"] }
 
 # Email sending
 lettre = "0.11.24"

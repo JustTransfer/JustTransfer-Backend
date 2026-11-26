@@ -422,6 +422,83 @@ async fn account_lifecycle() {
 }
 
 #[tokio::test]
+async fn sessions_are_checked_against_the_account_on_every_request() {
+    use crate::schema::users;
+    let pool = require_db!();
+    let mut client = TestClient::new(test_app(app_state(pool.clone(), offline_s3())));
+    let (email, _) = signed_in(&mut client, &pool).await;
+    let set = |role: &str| {
+        diesel::update(users::table.filter(users::email.eq(&email)))
+            .set(users::role.eq(role))
+            .execute(&mut pool.get().unwrap())
+            .unwrap();
+    };
+
+    // Logging in rotates the session id, so an id known beforehand is never
+    // authenticated (session fixation).
+    let mut previous = client.sharing_session();
+    assert_eq!(http_login(&mut client, &email).await.status, StatusCode::OK);
+    assert_ne!(client.cookie(), previous.cookie());
+    assert_eq!(
+        previous.get("/api/user").await.status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // The role is read from the database, not from the session: a premium-only
+    // lifetime is allowed while premium, refused right after a downgrade.
+    // The payload is rejected after the authorization check otherwise.
+    let premium_upload = json!({
+        "id": Uuid::new_v4(),
+        "client_registration_finish": encoded(),
+        "c_enc_key": encoded(), "nonce_enc_key": encoded(),
+        "c_mac_key": encoded(), "nonce_mac_key": encoded(),
+        "cfilename": encoded(), "nonce_filename": encoded(),
+        "max_downloads": 1,
+        "lifetime": PREMIUM_MAX_LIFETIME,
+        "creation_time": chrono::Utc::now(),
+        "file_size": 1,
+    });
+    set("premium");
+    let as_premium = client
+        .post("/api/link/message", premium_upload.clone())
+        .await;
+    assert_ne!(as_premium.status, StatusCode::FORBIDDEN);
+    set("user");
+    let as_user = client.post("/api/link/message", premium_upload).await;
+    assert_eq!(as_user.status, StatusCode::FORBIDDEN);
+
+    // Bumping the session version (password change or reset, key rotation)
+    // revokes every session of the account.
+    let mut stolen = client.sharing_session();
+    assert_eq!(stolen.get("/api/user").await.status, StatusCode::OK);
+    diesel::update(users::table.filter(users::email.eq(&email)))
+        .set(users::session_version.eq(users::session_version + 1))
+        .execute(&mut pool.get().unwrap())
+        .unwrap();
+    assert_eq!(
+        stolen.get("/api/user").await.status,
+        StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        client.get("/api/user").await.status,
+        StatusCode::UNAUTHORIZED
+    );
+
+    // Deleting the account revokes its other sessions.
+    let mut other = client.fresh();
+    assert_eq!(http_login(&mut other, &email).await.status, StatusCode::OK);
+    assert_eq!(http_login(&mut client, &email).await.status, StatusCode::OK);
+    let delete = client
+        .send(Method::DELETE, &format!("/api/user/{email}"), None)
+        .await;
+    assert_eq!(delete.status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        other.get("/api/user").await.status,
+        StatusCode::UNAUTHORIZED
+    );
+}
+
+#[tokio::test]
 async fn checkout_is_refused_while_a_subscription_is_active() {
     let pool = require_db!();
     let mut client = TestClient::new(test_app(app_state(pool.clone(), offline_s3())));
@@ -743,4 +820,43 @@ async fn connected_user_gets_the_auth_key_without_signing() {
     let auth_key: Uuid = finished.json["auth_key"].as_str().unwrap().parse().unwrap();
     assert_ne!(auth_key, Uuid::nil());
     assert_eq!(auth_key, load_link(&pool, upload.id).unwrap().auth_key);
+}
+
+#[tokio::test]
+async fn link_password_change_logs_out_existing_link_sessions() {
+    use crate::schema::link_transfers;
+    let pool = require_db!();
+    let mut receiver = TestClient::new(test_app(app_state(pool.clone(), offline_s3())));
+    let link = insert_link(&pool, LinkSpec::default());
+    diesel::update(link_transfers::table.find(link.id))
+        .set(link_transfers::password_file.eq(password_file(&pool, link.id.as_bytes(), PASSWORD)))
+        .execute(&mut pool.get().unwrap())
+        .unwrap();
+
+    let metadata_uri = format!("/api/link/message/{}/metadata", link.id);
+    assert!(link_login(&mut receiver, link.id).await);
+    assert_eq!(receiver.get(&metadata_uri).await.status, StatusCode::OK);
+
+    let upload = opaque_register(PASSWORD, |request| {
+        crate::server::link::link_send_message_start(link.id, request, &pool).unwrap()
+    });
+    crate::server::link::link_change_password_end(
+        link.id,
+        link.auth_key,
+        upload,
+        vec![20; 16],
+        vec![21; 16],
+        vec![22; 16],
+        vec![23; 16],
+        &pool,
+    )
+    .unwrap();
+
+    assert_eq!(
+        receiver.get(&metadata_uri).await.status,
+        StatusCode::UNAUTHORIZED,
+        "session from before the password change"
+    );
+    assert!(link_login(&mut receiver, link.id).await);
+    assert_eq!(receiver.get(&metadata_uri).await.status, StatusCode::OK);
 }
