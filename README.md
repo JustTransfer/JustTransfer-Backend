@@ -232,7 +232,7 @@ diesel migration run
 diesel print-schema > src/schema.rs
 
 # Stripe
-stripe listen --skip-verify --forward-to https://localhost/api/webhook/stripe
+stripe listen --skip-verify --all-snapshot --forward-to https://localhost/api/webhook/stripe
 ```
 
 The repository currently contains a deliberately failing placeholder test in [src/tests.rs](src/tests.rs), so `cargo test` is not a passing suite at the moment. Replace or expand those tests before relying on the suite for verification.
